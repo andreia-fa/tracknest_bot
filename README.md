@@ -18,6 +18,21 @@ It helps you manage and track household items through a conversational chat inte
 
 ---
 
+## 💡 Project Motivation
+
+This project was born from a desire to **learn by building**.
+
+TrackNest combines:
+- Real-world automation
+- Clean coding principles
+- Telegram’s simplicity
+
+...to create something genuinely useful and extendable.
+
+Although it's currently a **proof of concept**, it’s designed with a **scalable architecture** from the start — making it easy to maintain, expand, and learn from as it grows.
+
+---
+
 ## 🧰 Built With
 
 - 🐍 [Python 3.10+](https://www.python.org/)
