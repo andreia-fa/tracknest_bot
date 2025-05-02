@@ -1,0 +1,31 @@
+# Python environment & cache
+__pycache__/
+*.pyc
+
+# Virtual environments
+venv/
+env/
+
+# VS Code settings
+.vscode/
+
+# Build and lib folders
+bin/
+lib/
+lib64/
+
+# Python version managers
+.pyenv
+pyenv.config
+
+# Secrets and config files
+.env
+*.session
+tracknest/config/config.properties
+
+# Log files
+*.log
+tracknest/logs/
+
+# Local environment folder (if used)
+tracknest_bot_env/
