@@ -24,14 +24,22 @@ git clone https://github.com/yourusername/tracknest_bot.git
 cd tracknest_bot
 ```
 
-## **Python env**
+## 🐍 Python env
 
 ```
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```
 
-## **Configuration File**
+## 📦 Requirements Installation
+
+```
+pip install -r requirements.txt
+
+```
+
+
+## ⚙️ Configuration File
 
 ```
 DB_HOST=localhost
@@ -40,7 +48,7 @@ DB_PASSWORD=your_mysql_password
 DB_NAME=tracknest_db
 ```
 
-## **Repository structure**
+## 🛢️ Repository structure
 
 ```
 
@@ -77,7 +85,7 @@ tracknest/
 └── requirements
 ```
 
-## **Database Creation**
+## 🛢️ Database Creation
 
 **Database Initialization (DDL)**
 
@@ -129,7 +137,7 @@ VALUES ('Oat Milk', 2, 'Drinks', 1);
 
 
 
-## Known setup issues/troubleshooting
+## 🧠  Known setup issues/troubleshooting
 
 ```
 - If you get a `ModuleNotFoundError`, make sure your virtual environment is activated.
