@@ -1,8 +1,15 @@
+"""MySQL connection factory and schema initialisation for TrackNest."""
+
 import mysql.connector
 from config import DB_HOST, DB_USER, DB_PASSWORD, DB_NAME
 
 
 def get_connection():
+    """Return a new MySQL connection using credentials from config.
+
+    A fresh connection is created on every call — there is no connection pool.
+    Callers are responsible for closing the connection when done.
+    """
     return mysql.connector.connect(
         host=DB_HOST,
         user=DB_USER,
@@ -12,6 +19,7 @@ def get_connection():
 
 
 def init_db():
+    """Create the required tables if they do not already exist (idempotent)."""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""

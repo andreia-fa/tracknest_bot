@@ -1,8 +1,23 @@
+"""Expense logging and reporting for item purchases."""
+
 from datetime import date
 from db.database import get_connection
 
 
 def log_expense(item_name, quantity_purchased, unit_price):
+    """Record a purchase for an existing inventory item.
+
+    Computes total_cost as quantity_purchased * unit_price and stores the
+    record with today's date.
+
+    Args:
+        item_name: Name of the item being purchased (must already exist).
+        quantity_purchased: Number of units bought.
+        unit_price: Price per unit.
+
+    Returns:
+        True if the expense was logged, False if the item does not exist.
+    """
     conn = get_connection()
     cursor = conn.cursor(dictionary=True)
     cursor.execute("SELECT id FROM inventory_items WHERE name = %s", (item_name,))
@@ -23,6 +38,14 @@ def log_expense(item_name, quantity_purchased, unit_price):
 
 
 def get_expenses(item_name=None):
+    """Return expense records, optionally filtered to a single item.
+
+    Args:
+        item_name: If given, only expenses for that item are returned.
+
+    Returns:
+        List of dicts ordered by purchase_date descending. Empty list if none found.
+    """
     conn = get_connection()
     cursor = conn.cursor(dictionary=True)
     if item_name:
@@ -45,6 +68,14 @@ def get_expenses(item_name=None):
 
 
 def get_total_spent(item_name=None):
+    """Return the total amount spent, optionally scoped to one item.
+
+    Args:
+        item_name: If given, sum only expenses for that item.
+
+    Returns:
+        Total cost as a float. Returns 0.0 if no matching records exist.
+    """
     conn = get_connection()
     cursor = conn.cursor()
     if item_name:

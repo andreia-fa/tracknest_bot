@@ -1,10 +1,9 @@
 # TrackNest – Project Setup
 
-TrackNest is a personal home inventory tracker with support for:
-- Manual item entry via CLI
-- Low-stock alerts
-- Telegram notifications
-- Expense tracking (module in progress)
+TrackNest is a Telegram bot for household inventory and expense tracking, with support for:
+- Inventory management (add, update, remove, list items)
+- Expense logging tied to inventory items
+- Low-stock alerts (planned)
 - Image-based product detection using Azure (planned)
 
 
@@ -20,28 +19,29 @@ TrackNest is a personal home inventory tracker with support for:
 1. **Clone the repository**
 
 ```bash
-git clone https://github.com/yourusername/tracknest_bot.git
+git clone https://github.com/andreia-fa/tracknest_bot.git
 cd tracknest_bot
 ```
 
 ## 🐍 Python env
 
-```
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+```bash
+python -m venv tracknest_bot_env
+source tracknest_bot_env/bin/activate  # Windows: tracknest_bot_env\Scripts\activate
 ```
 
 ## 📦 Requirements Installation
 
-```
+```bash
 pip install -r requirements.txt
-
 ```
-
 
 ## ⚙️ Configuration File
 
+Copy `.env.example` to `.env` and fill in your values:
+
 ```
+BOT_TOKEN=your_telegram_bot_token
 DB_HOST=localhost
 DB_USER=your_mysql_user
 DB_PASSWORD=your_mysql_password
@@ -51,38 +51,26 @@ DB_NAME=tracknest_db
 ## 🛢️ Repository structure
 
 ```
-
 tracknest/
 ├── bot/
-│   ├── handlers/
-│   ├── services/
-│   ├── utils/
-│   └── main.py
+│   └── main.py              # bot entry point and all command handlers
 │
 ├── config/
-│   └── settings.py          # loads environment variables
+│   └── __init__.py          # loads environment variables from .env / os.environ
 │
 ├── db/
-│   ├── crud.py              # inventory item logic (add, update, delete, get)
-│   ├── expenses.py          # expense tracking logic
-│   └── database.py          # DB connection + schema creation
+│   ├── crud.py              # inventory item CRUD operations
+│   ├── expenses.py          # expense logging and reporting
+│   └── database.py          # MySQL connection factory + schema init
 │
 ├── docs/
-│   ├── setup.md             # full setup guide
-│   └── expenses.md          # expense module design
+│   ├── setup.md             # this file — full setup guide
+│   └── expenses.md          # expense module commands and data model
 │
-├── tests/
-│   ├── test_crud.py
-│   ├── test_expenses.py
-│   └── __init__.py
-│
-├── logs/                    # for scheduler/bot logs (if needed)
-│
-├── .env.example             # sample env file (you'll have .env locally)
-├── .gitignore
-├── LICENSE
-├── README.md
-└── requirements
+└── tests/
+    ├── test_crud.py
+    ├── test_expenses.py
+    └── __init__.py
 ```
 
 ## 🛢️ Database Creation

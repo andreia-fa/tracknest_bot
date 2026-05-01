@@ -50,6 +50,49 @@ python bot/main.py
 - `config/__init__.py` uses `os.environ[]` for required vars — it will raise on startup if any are missing. This is intentional.
 - After every task: tests + lint must pass. The Stop hook handles this automatically and will block completion if they fail.
 
+## Documentation Standards
+
+### Docstrings
+Use **Google style** for all public functions and modules. Every public function must have a docstring.
+
+```python
+def function(arg: type) -> type:
+    """One-line summary (imperative mood, no period).
+
+    Only add a body when the behaviour is non-obvious from the signature.
+
+    Args:
+        arg: Description. Omit type — it's already in the signature.
+
+    Returns:
+        Description of the return value.
+
+    Raises:
+        ExceptionType: When and why it's raised.
+    """
+```
+
+Rules:
+- One-line summary only when Args/Returns are obvious from the name and signature.
+- Never restate the argument name in its description ("name: the name of...").
+- Omit `Raises` unless the function explicitly raises for a documented reason.
+- Module-level docstrings: one sentence describing what the module provides.
+
+### When to update `tracknest/docs/`
+| File | Update when |
+|------|-------------|
+| `docs/setup.md` | Setup steps, env vars, or DB schema change |
+| `docs/expenses.md` | Expense module commands, logic, or data model change |
+
+### When to update `README.md`
+- A new bot command is added or removed
+- Setup steps change
+- Project structure changes
+
+### When to update `CLAUDE.md`
+- A new module or layer is added to the project
+- Development workflow changes (new tools, new rules)
+
 ## Commit Message Format
 ```
 <type>(<scope>): <short description>

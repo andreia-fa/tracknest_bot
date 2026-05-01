@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs after Claude stops. Validates code, then commits and pushes if clean.
-set -uo pipefail
+set -euo pipefail
 
 PROJECT_ROOT="/home/afa/my_projects/tracknest_bot"
 VENV="$PROJECT_ROOT/tracknest_bot_env/bin/activate"
@@ -43,7 +43,7 @@ fi
 # --- Commit and push ---
 git add -A
 
-CHANGED=$(git diff --cached --name-only | head -6 | paste -sd ", ")
+CHANGED=$(git diff --cached --name-only | head -6 | tr '\n' ',' | sed 's/,/, /g; s/, $//')
 
 git commit -m "$(cat <<EOF
 chore: $CHANGED
@@ -55,8 +55,9 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 EOF
 )"
 
+PUSH_MSG="committed (no remote configured)"
 if git remote get-url origin &>/dev/null; then
-  git push
+  git push && PUSH_MSG="committed and pushed" || PUSH_MSG="committed (push failed — check credentials)"
 fi
 
-python3 -c "print('{\"systemMessage\": \"Validation passed — committed and pushed.\"}')"
+python3 -c "import sys; print('{\"systemMessage\": \"Validation passed — ' + sys.argv[1] + '.\"}')" "$PUSH_MSG"

@@ -9,18 +9,19 @@ It helps you manage home inventory and track household expenses through a conver
 ## Features
 
 ### Inventory Management
-- ✅ `/start` – Welcome and setup
-- ⏳ `/add_item <name> <qty>` – Add or update an inventory item
-- ⏳ `/list_items` – Show current inventory
-- ⏳ `/remove_item <name>` – Remove an item
-- ⏳ `/update_item <name> <qty>` – Update quantity
+- ✅ `/start` – Welcome and command list
+- ✅ `/add_item <name> <qty>` – Add a new item or restock an existing one
+- ✅ `/list_items` – Show current inventory
+- ✅ `/remove_item <name>` – Remove an item
+- ✅ `/update_item <name> <qty>` – Set item quantity to an absolute value
 - 🧠 Planned: Low-stock alerts
 - 🧠 Planned: Category tagging and expiration tracking
 - 🧠 Planned: Image-based product detection (Azure)
 
 ### Expense Tracking
-- ⏳ Log purchases tied to inventory items (quantity, unit price, total cost)
-- ⏳ View spending history per item
+- ✅ `/log_expense <name> <qty> <unit_price>` – Log a purchase tied to an inventory item
+- ✅ `/my_expenses [item_name]` – View spending history
+- ✅ `/total_spent [item_name]` – Total amount spent
 - 🧠 Planned: Monthly/category spending summaries
 
 ---
@@ -46,8 +47,8 @@ cd tracknest_bot
 ### 2. Create a virtual environment
 
 ```bash
-python -m venv venv
-source venv/bin/activate   # Windows: venv\Scripts\activate
+python -m venv tracknest_bot_env
+source tracknest_bot_env/bin/activate   # Windows: tracknest_bot_env\Scripts\activate
 ```
 
 ### 3. Install dependencies
@@ -115,7 +116,7 @@ tracknest/
 ├── bot/
 │   └── main.py              # bot entry point and command handlers
 ├── config/
-│   └── settings.py          # loads environment variables
+│   └── __init__.py          # loads environment variables
 ├── db/
 │   ├── crud.py              # inventory CRUD operations
 │   ├── expenses.py          # expense tracking logic

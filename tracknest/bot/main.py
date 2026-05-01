@@ -1,3 +1,5 @@
+"""Telegram bot entry point and command handler registration for TrackNest."""
+
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from config import BOT_TOKEN
@@ -6,6 +8,7 @@ from db import crud, expenses
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send the welcome message listing all available commands."""
     await update.message.reply_text(
         "Welcome to TrackNest!\n\n"
         "Inventory:\n"
@@ -21,6 +24,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def add_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /add_item <name> <qty> — add a new item or restock an existing one."""
     args = context.args
     if len(args) < 2:
         await update.message.reply_text("Usage: /add_item <name> <qty>")
@@ -34,6 +38,7 @@ async def add_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def list_items(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /list_items — display all inventory items with quantities."""
     items = crud.get_all_items()
     if not items:
         await update.message.reply_text("Inventory is empty.")
@@ -46,6 +51,7 @@ async def list_items(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def update_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /update_item <name> <qty> — set an item's quantity to an absolute value."""
     args = context.args
     if len(args) < 2:
         await update.message.reply_text("Usage: /update_item <name> <qty>")
@@ -61,6 +67,7 @@ async def update_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def remove_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /remove_item <name> — delete an item and its expense history."""
     if not context.args:
         await update.message.reply_text("Usage: /remove_item <name>")
         return
@@ -72,6 +79,7 @@ async def remove_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def log_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /log_expense <name> <qty> <unit_price> — record a purchase for an item."""
     args = context.args
     if len(args) < 3:
         await update.message.reply_text("Usage: /log_expense <name> <qty> <unit_price>")
@@ -93,6 +101,7 @@ async def log_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def my_expenses(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /my_expenses [item_name] — show expense history, optionally filtered by item."""
     item_name = context.args[0] if context.args else None
     rows = expenses.get_expenses(item_name)
     if not rows:
@@ -107,6 +116,7 @@ async def my_expenses(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def total_spent(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /total_spent [item_name] — show cumulative spend, optionally scoped to one item."""
     item_name = context.args[0] if context.args else None
     total = expenses.get_total_spent(item_name)
     if item_name:
@@ -116,6 +126,7 @@ async def total_spent(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def main():
+    """Initialise the database schema and start the bot with long polling."""
     init_db()
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
