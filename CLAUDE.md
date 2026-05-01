@@ -93,6 +93,51 @@ Rules:
 - A new module or layer is added to the project
 - Development workflow changes (new tools, new rules)
 
+## PM Agent (`tracknest/pm_agent/`)
+
+Responsible for project quality metrics. Current modules:
+
+### `pm_agent/token_tracker.py` — Token usage tracking
+Wraps `anthropic.Anthropic` to record per-call and per-session token stats.
+
+```python
+from anthropic import Anthropic
+from pm_agent.token_tracker import TokenTracker
+
+tracker = TokenTracker(
+    client=Anthropic(),
+    model="claude-opus-4-7",
+    inject_stats=True,   # prepend stats to system prompt for model self-optimisation
+    print_summary=True,  # print usage table after each call
+)
+response = tracker.create(
+    messages=[{"role": "user", "content": "Hello"}],
+    system="You are a helpful assistant.",
+    thinking={"type": "adaptive"},
+)
+```
+
+After each call it prints:
+```
+── Token usage (call #1) ──────────────────
+  Input:              823  tokens
+  Output:             412  tokens
+  Cache hit:          600  tokens
+──────────────────────────────────────────
+  Session input:      823  / 1,000,000
+  Context used:      0.08%
+  Remaining:      999,177  tokens
+──────────────────────────────────────────
+```
+
+Key constants: `CONTEXT_WINDOW = 1_000_000` (claude-opus-4-7).  
+`tracker.reset_session()` clears cumulative stats.  
+`session.context_injection()` returns a compact stats string for system prompt injection.
+
+### When to update `pm_agent/`
+- A new metric type is added (latency, cost, error rate)
+- The model or context window changes
+
 ## Commit Message Format
 ```
 <type>(<scope>): <short description>
