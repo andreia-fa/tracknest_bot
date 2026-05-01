@@ -3,6 +3,9 @@
 Wraps client.messages.create() to capture usage metadata per call and
 per session, compute remaining context window capacity, and optionally
 inject a usage summary back into the model as context.
+
+Milestone reports are printed automatically at 25%, 50%, and 75% context
+usage, showing the top token-heavy calls. A warning is added at 50%.
 """
 
 from __future__ import annotations
@@ -11,6 +14,7 @@ import anthropic
 from dataclasses import dataclass, field
 
 CONTEXT_WINDOW = 1_000_000  # claude-opus-4-7 context window in tokens
+MILESTONES = (25, 50, 75)   # context usage % thresholds for reports
 
 
 @dataclass
@@ -21,6 +25,7 @@ class CallUsage:
     output_tokens: int
     cache_read_input_tokens: int = 0
     cache_creation_input_tokens: int = 0
+    label: str = ""  # short description extracted from the prompt
 
     @property
     def total_tokens(self) -> int:
@@ -58,6 +63,52 @@ class SessionStats:
     def context_used_pct(self) -> float:
         return (self.total_input / CONTEXT_WINDOW) * 100
 
+    def top_spenders(self, n: int = 3) -> list[tuple[int, CallUsage]]:
+        """Return the top n calls by total token cost, each paired with its call number.
+
+        Args:
+            n: Number of top calls to return.
+
+        Returns:
+            List of (call_number, CallUsage) tuples, sorted highest-cost first.
+        """
+        indexed = sorted(enumerate(self.calls, 1), key=lambda x: x[1].total_tokens, reverse=True)
+        return indexed[:n]
+
+    def milestone_report(self, threshold: int) -> str:
+        """Format a milestone report for the given context-usage threshold.
+
+        Args:
+            threshold: The percentage threshold that was just crossed (25, 50, or 75).
+
+        Returns:
+            A formatted multi-line report string.
+        """
+        lines = []
+
+        if threshold == 50:
+            lines += [
+                "⚠️  WARNING: 50% of context window consumed!",
+                "   Consider resetting the session soon to avoid hitting the limit.",
+                "",
+            ]
+
+        lines += [
+            f"── Milestone reached: {threshold}% context used ──────────────────",
+            "  Most expensive calls so far:",
+        ]
+
+        for rank, (call_num, call) in enumerate(self.top_spenders(3), 1):
+            label_part = f' "{call.label}"' if call.label else ""
+            lines.append(
+                f"  #{rank}  call #{call_num}{label_part} — "
+                f"{call.total_tokens:,} tokens total  "
+                f"(in={call.input_tokens:,}  out={call.output_tokens:,})"
+            )
+
+        lines.append("─" * 54)
+        return "\n".join(lines)
+
     def summary(self) -> str:
         """Return a human-readable usage summary for the current session."""
         lines = [
@@ -90,8 +141,39 @@ class SessionStats:
         )
 
 
+def _extract_label(messages: list[dict]) -> str:
+    """Extract a short label from the last user message in a conversation.
+
+    Args:
+        messages: Conversation turns in Anthropic message format.
+
+    Returns:
+        A string of up to 60 characters representing the prompt content.
+    """
+    for msg in reversed(messages):
+        if msg.get("role") != "user":
+            continue
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            text = content.strip().replace("\n", " ")
+        elif isinstance(content, list):
+            text = " ".join(
+                block.get("text", "")
+                for block in content
+                if isinstance(block, dict) and block.get("type") == "text"
+            ).strip().replace("\n", " ")
+        else:
+            text = str(content)
+        return text[:60] + ("…" if len(text) > 60 else "")
+    return ""
+
+
 class TokenTracker:
     """Wraps the Anthropic client to record token usage after each API call.
+
+    Prints a usage summary after every call and a milestone report (with top
+    token-heavy prompts) each time context usage crosses 25%, 50%, or 75%.
+    A warning is also printed when 50% is reached.
 
     Args:
         client: An initialised ``anthropic.Anthropic`` client.
@@ -114,9 +196,13 @@ class TokenTracker:
         self.inject_stats = inject_stats
         self.print_summary = print_summary
         self.session = SessionStats()
+        self._milestones_hit: set[int] = set()
 
     def create(self, messages: list[dict], system: str = "", **kwargs) -> anthropic.types.Message:
         """Call messages.create(), record usage, and return the response.
+
+        Automatically prints a usage summary and fires milestone reports at
+        25%, 50%, and 75% context usage.
 
         Args:
             messages: Conversation turns in Anthropic message format.
@@ -151,14 +237,21 @@ class TokenTracker:
             output_tokens=usage.output_tokens,
             cache_read_input_tokens=getattr(usage, "cache_read_input_tokens", 0) or 0,
             cache_creation_input_tokens=getattr(usage, "cache_creation_input_tokens", 0) or 0,
+            label=_extract_label(messages),
         )
         self.session.calls.append(call)
 
         if self.print_summary:
             print(self.session.summary())
 
+        for milestone in MILESTONES:
+            if milestone not in self._milestones_hit and self.session.context_used_pct >= milestone:
+                self._milestones_hit.add(milestone)
+                print(self.session.milestone_report(milestone))
+
         return response
 
     def reset_session(self) -> None:
-        """Clear cumulative session stats (start a new tracking window)."""
+        """Clear cumulative session stats and milestone history (start a new tracking window)."""
         self.session = SessionStats()
+        self._milestones_hit = set()
