@@ -1,10 +1,18 @@
 """Telegram bot entry point and command handler registration for TrackNest."""
 
+import logging
+
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from config import BOT_TOKEN
 from db.database import init_db
 from db import crud, expenses
+
+logging.basicConfig(
+    format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -125,6 +133,13 @@ async def total_spent(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Total spent overall: €{total:.2f}")
 
 
+async def handle_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log unhandled errors and notify the user."""
+    logger.error("Update %s caused error: %s", update, context.error, exc_info=context.error)
+    if isinstance(update, Update) and update.message:
+        await update.message.reply_text("Something went wrong. Please try again.")
+
+
 def main():
     """Initialise the database schema and start the bot with long polling."""
     init_db()
@@ -137,7 +152,15 @@ def main():
     app.add_handler(CommandHandler("log_expense", log_expense))
     app.add_handler(CommandHandler("my_expenses", my_expenses))
     app.add_handler(CommandHandler("total_spent", total_spent))
-    app.run_polling()
+    app.add_error_handler(handle_error)
+    logger.info("TrackNest bot starting.")
+    app.run_polling(
+        timeout=30,
+        read_timeout=10,
+        write_timeout=10,
+        connect_timeout=10,
+        pool_timeout=10,
+    )
 
 
 if __name__ == "__main__":

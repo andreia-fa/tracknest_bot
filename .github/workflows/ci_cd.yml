@@ -53,6 +53,19 @@ jobs:
           done
           echo "All secrets present."
 
+      - name: Test Telegram connection
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: |
+          response=$(curl -sf "https://api.telegram.org/bot${BOT_TOKEN}/getMe")
+          if echo "$response" | python3 -c "import sys,json; d=json.load(sys.stdin); assert d['ok']"; then
+            echo "Telegram connection OK"
+            echo "$response" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f\"Bot: @{d['result']['username']}\")"
+          else
+            echo "Telegram connection FAILED: $response"
+            exit 1
+          fi
+
       # TODO: add your deploy steps here.
       # Common options:
       #   - SSH into a VPS and restart the bot process
