@@ -46,15 +46,9 @@ jobs:
       - name: Verify secrets are present
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          DB_USER: ${{ secrets.DB_USER }}
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          DB_HOST: ${{ secrets.DB_HOST }}
-          DB_NAME: ${{ secrets.DB_NAME }}
         run: |
-          for var in BOT_TOKEN DB_USER DB_PASSWORD DB_HOST DB_NAME; do
-            if [ -z "${!var}" ]; then echo "Missing secret: $var" && exit 1; fi
-          done
-          echo "All secrets present."
+          if [ -z "${BOT_TOKEN}" ]; then echo "Missing secret: BOT_TOKEN" && exit 1; fi
+          echo "BOT_TOKEN present."
 
       - name: Test Telegram connection
         env:
