@@ -28,8 +28,8 @@ def test_add_item_with_category(mock_conn):
     crud.add_item("Milk", 3, category="Dairy", alert_threshold=1)
     args = cursor.execute.call_args[0][1]
     assert args[0] == "Milk"
-    assert args[2] == "Dairy"
-    assert args[3] == 1
+    assert args[3] == "Dairy"
+    assert args[4] == 1
 
 
 @patch("db.crud.get_connection")

@@ -19,14 +19,6 @@ def test_log_expense_item_exists(mock_conn):
     conn.commit.assert_called_once()
 
 
-@patch("db.expenses.get_connection")
-def test_log_expense_calculates_total(mock_conn):
-    conn, cursor = make_mock_conn(fetchone={"id": 1})
-    mock_conn.return_value = conn
-    expenses.log_expense("Milk", 3, 2.00)
-    insert_args = cursor.execute.call_args_list[1][0][1]
-    assert insert_args[3] == 6.00  # total_cost = 3 * 2.00
-
 
 @patch("db.expenses.get_connection")
 def test_log_expense_item_not_found(mock_conn):

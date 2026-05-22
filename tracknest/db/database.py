@@ -48,6 +48,7 @@ def init_db():
             id INT AUTO_INCREMENT PRIMARY KEY,
             name VARCHAR(255) NOT NULL UNIQUE,
             quantity INT NOT NULL,
+            unit VARCHAR(50),
             category VARCHAR(100),
             alert_threshold INT,
             image_path TEXT,
@@ -60,7 +61,7 @@ def init_db():
             item_id INT,
             quantity_purchased INT,
             unit_price DECIMAL(10,2),
-            total_cost DECIMAL(10,2),
+            store VARCHAR(255),
             purchase_date DATE,
             FOREIGN KEY (item_id) REFERENCES inventory_items(id) ON DELETE CASCADE
         )

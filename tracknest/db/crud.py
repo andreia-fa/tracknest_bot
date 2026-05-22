@@ -3,7 +3,7 @@
 from db.database import get_connection
 
 
-def add_item(name, quantity, category=None, alert_threshold=None):
+def add_item(name, quantity, unit=None, category=None, alert_threshold=None):
     """Add a new item or restock an existing one.
 
     Uses an UPSERT: if an item with the same name already exists, the given
@@ -12,16 +12,17 @@ def add_item(name, quantity, category=None, alert_threshold=None):
     Args:
         name: Item name (case-sensitive, must be unique in the table).
         quantity: Units to add.
+        unit: Unit of measure (e.g. "kg", "L", "pcs").
         category: Optional grouping label (e.g. "Dairy").
         alert_threshold: Optional minimum stock level for low-stock alerts.
     """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO inventory_items (name, quantity, category, alert_threshold)
-        VALUES (%s, %s, %s, %s)
+        INSERT INTO inventory_items (name, quantity, unit, category, alert_threshold)
+        VALUES (%s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE quantity = quantity + VALUES(quantity)
-    """, (name, quantity, category, alert_threshold))
+    """, (name, quantity, unit, category, alert_threshold))
     conn.commit()
     cursor.close()
     conn.close()

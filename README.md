@@ -71,13 +71,20 @@ DB_NAME=tracknest_db
 
 ### 5. Set up the database
 
+```bash
+mysql -u root -p < setup_db.sql
+```
+
+Or manually:
+
 ```sql
 CREATE DATABASE IF NOT EXISTS tracknest_db;
 
 CREATE TABLE IF NOT EXISTS inventory_items (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
+    name VARCHAR(255) NOT NULL UNIQUE,
     quantity INT NOT NULL,
+    unit VARCHAR(50),
     category VARCHAR(100),
     alert_threshold INT,
     image_path TEXT,
@@ -89,7 +96,7 @@ CREATE TABLE IF NOT EXISTS item_expenses (
     item_id INT,
     quantity_purchased INT,
     unit_price DECIMAL(10,2),
-    total_cost DECIMAL(10,2),
+    store VARCHAR(255),
     purchase_date DATE,
     FOREIGN KEY (item_id) REFERENCES inventory_items(id) ON DELETE CASCADE
 );

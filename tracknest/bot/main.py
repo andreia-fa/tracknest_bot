@@ -20,7 +20,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Welcome to TrackNest!\n\n"
         "Inventory:\n"
-        "  /add_item <name> <qty> — Add or restock an item\n"
+        "  /add_item <name> <qty> [unit] — Add or restock an item\n"
         "  /list_items — Show all inventory\n"
         "  /update_item <name> <qty> — Set item quantity\n"
         "  /remove_item <name> — Remove an item\n\n"
@@ -32,17 +32,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def add_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /add_item <name> <qty> — add a new item or restock an existing one."""
+    """Handle /add_item <name> <qty> [unit] — add a new item or restock an existing one."""
     args = context.args
     if len(args) < 2:
-        await update.message.reply_text("Usage: /add_item <name> <qty>")
+        await update.message.reply_text("Usage: /add_item <name> <qty> [unit]")
         return
     name, qty = args[0], args[1]
+    unit = args[2] if len(args) >= 3 else None
     if not qty.isdigit():
         await update.message.reply_text("Quantity must be a whole number.")
         return
-    crud.add_item(name, int(qty))
-    await update.message.reply_text(f"Added {qty}x {name} to inventory.")
+    crud.add_item(name, int(qty), unit=unit)
+    label = f"{qty} {unit} {name}" if unit else f"{qty}x {name}"
+    await update.message.reply_text(f"Added {label} to inventory.")
 
 
 async def list_items(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -52,7 +54,8 @@ async def list_items(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Inventory is empty.")
         return
     lines = [
-        f"• {i['name']} — qty: {i['quantity']}" + (f" ({i['category']})" if i["category"] else "")
+        f"• {i['name']} — {i['quantity']}{' ' + i['unit'] if i.get('unit') else 'x'}"
+        + (f" ({i['category']})" if i["category"] else "")
         for i in items
     ]
     await update.message.reply_text("Inventory:\n" + "\n".join(lines))
