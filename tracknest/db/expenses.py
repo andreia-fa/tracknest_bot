@@ -1,6 +1,7 @@
 """Expense logging and reporting for item purchases."""
 
-from datetime import date
+from datetime import datetime, timezone
+
 from db.database import get_connection
 
 
@@ -27,7 +28,7 @@ def log_expense(item_name, quantity_purchased, unit_price, store=None):
     cursor.execute("""
         INSERT INTO item_expenses (item_id, quantity_purchased, unit_price, store, purchase_date)
         VALUES (%s, %s, %s, %s, %s)
-    """, (item["id"], quantity_purchased, unit_price, store, date.today()))
+    """, (item["id"], quantity_purchased, unit_price, store, datetime.now(tz=timezone.utc).date()))
     conn.commit()
     cursor.close()
     conn.close()

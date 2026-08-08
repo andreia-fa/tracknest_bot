@@ -5,6 +5,7 @@ Optional variables with defaults: DB_HOST (localhost), DB_NAME (tracknest_db).
 """
 
 import os
+
 from dotenv import load_dotenv
 
 load_dotenv()

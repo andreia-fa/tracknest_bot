@@ -2,7 +2,10 @@
 # Runs after Claude stops. Validates code, then commits and pushes if clean.
 set -euo pipefail
 
-PROJECT_ROOT="/home/afa/my_projects/tracknest_bot"
+# $CLAUDE_PROJECT_DIR is set by Claude Code when this runs as a hook.
+# Fall back to resolving relative to this script so it also works when run
+# manually or on a machine/user where that variable isn't set.
+PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 VENV="$PROJECT_ROOT/tracknest_bot_env/bin/activate"
 
 cd "$PROJECT_ROOT"

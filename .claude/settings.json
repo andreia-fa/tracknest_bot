@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/afa/my_projects/tracknest_bot/.claude/validate_and_commit.sh",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/validate_and_commit.sh",
             "timeout": 60,
             "statusMessage": "Validating (tests + lint)..."
           }

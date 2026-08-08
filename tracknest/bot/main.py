@@ -2,11 +2,11 @@
 
 import logging
 
+from config import BOT_TOKEN
+from db import crud, expenses
+from db.database import init_db
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
-from config import BOT_TOKEN
-from db.database import init_db
-from db import crud, expenses
 
 logging.basicConfig(
     format="%(asctime)s %(name)s %(levelname)s %(message)s",

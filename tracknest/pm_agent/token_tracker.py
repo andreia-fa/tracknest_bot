@@ -10,8 +10,9 @@ usage, showing the top token-heavy calls. A warning is added at 50%.
 
 from __future__ import annotations
 
-import anthropic
 from dataclasses import dataclass, field
+
+import anthropic
 
 CONTEXT_WINDOW = 1_000_000  # claude-opus-4-7 context window in tokens
 MILESTONES = (25, 50, 75)   # context usage % thresholds for reports
