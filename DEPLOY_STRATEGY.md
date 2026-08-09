@@ -2,6 +2,49 @@
 
 Decided 2026-08-09. This is a living doc — update it as decisions firm up or change.
 
+## ⚠️ HIGH PRIORITY — start here next session (any machine)
+
+**Blocker: we lost SSH access to the Oracle VM (`92.5.103.47`, user `ubuntu`,
+region `eu-frankfurt-1`).** No original key/credentials for it could be found on
+the `charmeleon` machine — check the other laptop too, in case it still has
+whatever key was used originally.
+
+What was tried on 2026-08-09 (charmeleon machine) and didn't work:
+- Instance Console Connection (serial console) to interrupt GRUB and drop into a
+  recovery shell to re-add a key. Connected fine (after two gotchas: Console
+  Connections need an **RSA** key specifically, not ed25519; and you must add
+  `-o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa` to *both*
+  the outer ssh and the inner `ProxyCommand` ssh, or negotiation fails).
+  But the VM boots too fast / GRUB's timeout is too short to catch — by the time
+  the console session was live, cloud-init had already finished. Two reboot
+  attempts both missed the window.
+
+**Recommended next step**: don't keep chasing the GRUB timing race. Instead:
+1. Confirm with the user whether anything valuable is actually on that VM (was
+   MySQL ever manually installed there with real data?). Likely answer: no,
+   nothing is deployed yet per the rest of this doc.
+2. If it's bare: **terminate the instance and recreate it** via the Oracle
+   Console, pasting a fresh SSH public key at creation time (Oracle's
+   instance-creation flow accepts one or more public keys directly — this
+   sidesteps the whole recovery problem). Add a public key for *each* machine
+   that needs access (paste multiple, one per line) — see the per-device-key
+   note further down.
+3. If it turns out something valuable *is* there: don't terminate — instead use
+   Oracle's boot-volume rescue procedure (stop instance → detach boot volume →
+   attach to a temporary rescue instance → mount and edit
+   `/home/ubuntu/.ssh/authorized_keys` directly on the disk → detach → reattach
+   to original instance → start). More involved, not yet attempted.
+4. Once back in, note the (possibly new) public IP here and in `TODO.md`, then
+   resume the open items below.
+
+Key material generated this session (local to the `charmeleon` machine, in
+`~/.ssh/`, not committed to git):
+- `id_rsa_oracle_console` / `.pub` — RSA key pair created for the console-connection
+  attempt above. Reusable as the new VM's authorized key if we recreate the
+  instance (paste the `.pub` contents at creation time). Each machine should
+  still end up with its **own** key added to `authorized_keys` — see the
+  cross-machine access decision above in this doc's history.
+
 ## Guiding principle
 
 TrackNest is currently a POC: optimize for **$0 running cost**, but choose a shape
