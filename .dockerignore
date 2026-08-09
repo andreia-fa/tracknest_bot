@@ -1,0 +1,11 @@
+.git
+.env
+tracknest_bot_env/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+.ruff_cache/
+tracknest/tests/
+tracknest/docs/
+*.md
+.claude/

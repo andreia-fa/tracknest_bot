@@ -92,7 +92,9 @@ GHCR** rather than running the bot as a bare `python bot/main.py` process.
 - [ ] Add GitHub Actions secrets: `SSH_HOST`, `SSH_USER`, `SSH_PRIVATE_KEY`
       (`BOT_TOKEN`/`DB_*` secrets already exist per `TODO.md`) — private key content
       is `~/ssh-key-2026-05-22.key` on `Lapras`
-- [ ] Write the `Dockerfile`
+- [x] Write the `Dockerfile` — done 2026-08-09, build + run verified locally on
+      `Lapras` (imports resolve, DB-connect retry logic runs correctly against a
+      dummy host)
 - [ ] Write the actual CD steps in `.github/workflows/ci_cd.yml` (currently a
       placeholder)
 
