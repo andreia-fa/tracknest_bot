@@ -1,13 +1,9 @@
 # TODO
 
-## Deploy (open — needs a decision)
-- [ ] Pick a deploy target for the CD job in `.github/workflows/ci_cd.yml`:
-  - SSH into an existing VPS and restart the bot process, or
-  - Build & push a Docker image to GHCR, or
-  - A PaaS (Railway / Render / Fly.io)
-- [ ] Provision whatever that target needs (server, container registry, PaaS service)
-- [ ] Add the resulting secrets (host/key, registry token, or PaaS token) to the GitHub repo's Actions secrets
-- [ ] Replace the `Deploy (not configured yet)` placeholder step with the real deploy commands
+## Deploy (decided — see DEPLOY_STRATEGY.md)
+Target: existing Oracle Cloud free-tier VM, via Docker + GHCR. See `DEPLOY_STRATEGY.md`
+for the full rationale and the checklist of unknowns that need verifying before this
+is implementable (VM access, what's installed on it, MySQL native-vs-container, etc).
 
 ## Local environment
 - [ ] Fill in real values in `.env` (`BOT_TOKEN`, `DB_USER`, `DB_PASSWORD`) — currently placeholders copied from `.env.example`
