@@ -9,9 +9,11 @@ already has a working key (`~/ssh-key-2026-05-22.key`, config alias
 `oracle-tracknest`). VM confirmed bare (no Docker/MySQL installed), 2 OCPU /
 ~956Mi RAM. See "RESOLVED" section at the top of `DEPLOY_STRATEGY.md`.
 
-**Next up:** decide MySQL native-vs-container (leaning native given tight RAM),
-write the `Dockerfile`, fill in the real CD steps in `.github/workflows/ci_cd.yml`,
-add `SSH_HOST`/`SSH_USER`/`SSH_PRIVATE_KEY` GH Actions secrets.
+**Next up:** MySQL will be a native install on the VM (decided 2026-08-09 — RAM's
+too tight for a MySQL container on top of the bot container). Write the
+`Dockerfile` (bot only), fill in the real CD steps in
+`.github/workflows/ci_cd.yml`, add `SSH_HOST`/`SSH_USER`/`SSH_PRIVATE_KEY` GH
+Actions secrets.
 
 - [ ] Fix `charmeleon`'s SSH access to the VM (copy the key from `Lapras`, or add a
       `charmeleon`-specific key to the VM's `authorized_keys` from `Lapras`)

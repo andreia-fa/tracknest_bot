@@ -37,8 +37,8 @@ the original cross-machine-access decision).
   is at risk here, consistent with "nothing deployed yet."
 
 This resolves several of the open items further down (VM access, what's
-installed, shape). Remaining open items: MySQL native-vs-container decision,
-firewall rules, GH Actions secrets, Dockerfile, CD steps.
+installed, shape). Remaining open items: firewall rules, GH Actions secrets,
+Dockerfile, CD steps.
 
 ## Guiding principle
 
@@ -71,8 +71,9 @@ GHCR** rather than running the bot as a bare `python bot/main.py` process.
      GitHub Actions secrets.
   4. `docker pull` the new image, stop/remove the old container, `docker run` the
      new one with `BOT_TOKEN`/`DB_*` passed as env vars.
-- **MySQL**: runs on the same VM. Not yet decided whether native install or its own
-  container with a named volume — see open items below.
+- **MySQL**: runs on the same VM, **native install** (decided 2026-08-09) — the
+  VM's 956Mi RAM is too tight to spare for a MySQL container's overhead on top
+  of the bot container. Only the bot ships as a Docker image.
 
 ## Open items before this is implementable
 
@@ -82,9 +83,8 @@ GHCR** rather than running the bot as a bare `python bot/main.py` process.
 - [x] Confirm the VM's shape/resources: 2 OCPU / ~956Mi RAM (AMD `E2.1.Micro`-class,
       **not** the roomier Ampere shape) — tight for bot + MySQL together, keep an eye
       on memory once both are running
-- [ ] MySQL: native install vs. its own Docker container — decide now that we know
-      the VM is bare and RAM is tight (a container adds overhead on an already-tight
-      956Mi box — leans towards native install, not yet decided)
+- [x] MySQL: **native install**, not a container — decided 2026-08-09. RAM is too
+      tight (956Mi) to spare for container overhead on top of the bot container.
 - [ ] Firewall / security-list rules: SSH inbound already works (confirmed by the
       successful connection above); still need to confirm no other rule changes are
       needed once the bot/Docker are added (bot itself needs no inbound port — it
