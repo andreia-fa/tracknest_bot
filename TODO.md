@@ -1,5 +1,13 @@
 # TODO
 
+## ⚠️ HIGH PRIORITY — start next session here
+Walk back through the whole deploy setup together, slower, before building anything
+further: what `.env` is and why it holds secrets, what `.dockerignore` does and why
+it exists, and the full flow of what Docker actually is and where it sits (VM →
+Docker engine → image → container → GHCR → CD pipeline). Explained once on
+2026-08-09 but it didn't land — go step by step next time, confirm understanding
+before moving on to the CD/GHCR work below.
+
 ## Deploy (decided — see DEPLOY_STRATEGY.md)
 Target: existing Oracle Cloud free-tier VM, via Docker + GHCR. See `DEPLOY_STRATEGY.md`
 for the full rationale and the checklist of unknowns.
