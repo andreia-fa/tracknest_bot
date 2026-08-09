@@ -2,13 +2,19 @@
 
 ## Deploy (decided — see DEPLOY_STRATEGY.md)
 Target: existing Oracle Cloud free-tier VM, via Docker + GHCR. See `DEPLOY_STRATEGY.md`
-for the full rationale and the checklist of unknowns that need verifying before this
-is implementable (VM access, what's installed on it, MySQL native-vs-container, etc).
+for the full rationale and the checklist of unknowns.
 
-**⚠️ Start next session here:** we lost SSH access to the Oracle VM and recovery via
-the serial console didn't work (boot's too fast to catch GRUB). See the "HIGH
-PRIORITY" section at the top of `DEPLOY_STRATEGY.md` for what was tried and the
-recommended fix (likely: terminate + recreate the instance with a fresh key).
+**SSH access resolved (2026-08-09):** `charmeleon` had lost access, but `Lapras`
+already has a working key (`~/ssh-key-2026-05-22.key`, config alias
+`oracle-tracknest`). VM confirmed bare (no Docker/MySQL installed), 2 OCPU /
+~956Mi RAM. See "RESOLVED" section at the top of `DEPLOY_STRATEGY.md`.
+
+**Next up:** decide MySQL native-vs-container (leaning native given tight RAM),
+write the `Dockerfile`, fill in the real CD steps in `.github/workflows/ci_cd.yml`,
+add `SSH_HOST`/`SSH_USER`/`SSH_PRIVATE_KEY` GH Actions secrets.
+
+- [ ] Fix `charmeleon`'s SSH access to the VM (copy the key from `Lapras`, or add a
+      `charmeleon`-specific key to the VM's `authorized_keys` from `Lapras`)
 
 ## Local environment
 - [ ] Fill in real values in `.env` (`BOT_TOKEN`, `DB_USER`, `DB_PASSWORD`) — currently placeholders copied from `.env.example`

@@ -2,48 +2,43 @@
 
 Decided 2026-08-09. This is a living doc — update it as decisions firm up or change.
 
-## ⚠️ HIGH PRIORITY — start here next session (any machine)
+## ✅ RESOLVED (2026-08-09, `Lapras` machine) — SSH access was never actually lost
 
-**Blocker: we lost SSH access to the Oracle VM (`92.5.103.47`, user `ubuntu`,
-region `eu-frankfurt-1`).** No original key/credentials for it could be found on
-the `charmeleon` machine — check the other laptop too, in case it still has
-whatever key was used originally.
+The "lost SSH access" blocker below was specific to the `charmeleon` machine.
+`Lapras` (this machine) already has a working key and config for the VM:
 
-What was tried on 2026-08-09 (charmeleon machine) and didn't work:
-- Instance Console Connection (serial console) to interrupt GRUB and drop into a
-  recovery shell to re-add a key. Connected fine (after two gotchas: Console
-  Connections need an **RSA** key specifically, not ed25519; and you must add
-  `-o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa` to *both*
-  the outer ssh and the inner `ProxyCommand` ssh, or negotiation fails).
-  But the VM boots too fast / GRUB's timeout is too short to catch — by the time
-  the console session was live, cloud-init had already finished. Two reboot
-  attempts both missed the window.
+- Key: `~/ssh-key-2026-05-22.key` (RSA, generated 2026-05-22, predates the
+  `charmeleon` incident)
+- `~/.ssh/config` entry:
+  ```
+  Host oracle-tracknest
+    HostName 92.5.103.47
+    User ubuntu
+    Port 22
+    IdentityFile ~/ssh-key-2026-05-22.key
+    IdentitiesOnly yes
+  ```
+- Verified working: `ssh oracle-tracknest` connects fine.
 
-**Recommended next step**: don't keep chasing the GRUB timing race. Instead:
-1. Confirm with the user whether anything valuable is actually on that VM (was
-   MySQL ever manually installed there with real data?). Likely answer: no,
-   nothing is deployed yet per the rest of this doc.
-2. If it's bare: **terminate the instance and recreate it** via the Oracle
-   Console, pasting a fresh SSH public key at creation time (Oracle's
-   instance-creation flow accepts one or more public keys directly — this
-   sidesteps the whole recovery problem). Add a public key for *each* machine
-   that needs access (paste multiple, one per line) — see the per-device-key
-   note further down.
-3. If it turns out something valuable *is* there: don't terminate — instead use
-   Oracle's boot-volume rescue procedure (stop instance → detach boot volume →
-   attach to a temporary rescue instance → mount and edit
-   `/home/ubuntu/.ssh/authorized_keys` directly on the disk → detach → reattach
-   to original instance → start). More involved, not yet attempted.
-4. Once back in, note the (possibly new) public IP here and in `TODO.md`, then
-   resume the open items below.
+**No need to terminate/recreate the instance.** To get `charmeleon` (or any other
+machine) working again, just copy `~/ssh-key-2026-05-22.key` /
+`ssh-key-2026-05-22.key.pub` over from `Lapras` (or add `Lapras`'s pubkey to
+`~/.ssh/authorized_keys` on the VM if each machine should have its own key per
+the original cross-machine-access decision).
 
-Key material generated this session (local to the `charmeleon` machine, in
-`~/.ssh/`, not committed to git):
-- `id_rsa_oracle_console` / `.pub` — RSA key pair created for the console-connection
-  attempt above. Reusable as the new VM's authorized key if we recreate the
-  instance (paste the `.pub` contents at creation time). Each machine should
-  still end up with its **own** key added to `authorized_keys` — see the
-  cross-machine access decision above in this doc's history.
+### Confirmed VM state (checked 2026-08-09 via `Lapras`)
+- Public IP: `92.5.103.47` (unchanged)
+- OS: Ubuntu 22.04.5 LTS
+- Shape: 2 OCPU / ~956Mi RAM — this is the tighter AMD `E2.1.Micro`-class shape,
+  **not** the roomier Ampere ARM one. Confirms the "tight for bot + MySQL
+  together" concern flagged below.
+- Disk: 45G total, 41G available
+- **Docker: not installed. MySQL: not installed.** VM is bare — nothing valuable
+  is at risk here, consistent with "nothing deployed yet."
+
+This resolves several of the open items further down (VM access, what's
+installed, shape). Remaining open items: MySQL native-vs-container decision,
+firewall rules, GH Actions secrets, Dockerfile, CD steps.
 
 ## Guiding principle
 
@@ -81,25 +76,35 @@ GHCR** rather than running the bot as a bare `python bot/main.py` process.
 
 ## Open items before this is implementable
 
-We don't yet know the actual state of the Oracle VM — none of this is confirmed:
-
-- [ ] VM access: public IP, SSH user, whether a key pair already exists for it
-- [ ] What's installed: check `cat /etc/os-release`, `docker --version`,
-      `mysql --version` (or `mysqld --version`) on the VM
-- [ ] MySQL: native install vs. its own Docker container — decide once we know
-      what's already there
-- [ ] Confirm the VM's shape/resources are enough for bot + MySQL together. Oracle's
-      Always Free tier is either the AMD `VM.Standard.E2.1.Micro` (1 OCPU / 1GB RAM —
-      tight for bot + MySQL) or an Ampere ARM shape (up to 4 OCPU / 24GB RAM, if that's
-      what was provisioned) — worth checking which one this actually is
-- [ ] Firewall / security-list rules: SSH inbound needs to be open; the bot itself
-      needs no inbound port since it long-polls Telegram (unless we later switch to
-      webhooks)
+- [x] VM access: public IP `92.5.103.47`, user `ubuntu`, key `~/ssh-key-2026-05-22.key`
+      works from `Lapras` — confirmed 2026-08-09
+- [x] What's installed: neither `docker` nor `mysql`/`mysqld` present — VM is bare
+- [x] Confirm the VM's shape/resources: 2 OCPU / ~956Mi RAM (AMD `E2.1.Micro`-class,
+      **not** the roomier Ampere shape) — tight for bot + MySQL together, keep an eye
+      on memory once both are running
+- [ ] MySQL: native install vs. its own Docker container — decide now that we know
+      the VM is bare and RAM is tight (a container adds overhead on an already-tight
+      956Mi box — leans towards native install, not yet decided)
+- [ ] Firewall / security-list rules: SSH inbound already works (confirmed by the
+      successful connection above); still need to confirm no other rule changes are
+      needed once the bot/Docker are added (bot itself needs no inbound port — it
+      long-polls Telegram)
 - [ ] Add GitHub Actions secrets: `SSH_HOST`, `SSH_USER`, `SSH_PRIVATE_KEY`
-      (`BOT_TOKEN`/`DB_*` secrets already exist per `TODO.md`)
+      (`BOT_TOKEN`/`DB_*` secrets already exist per `TODO.md`) — private key content
+      is `~/ssh-key-2026-05-22.key` on `Lapras`
 - [ ] Write the `Dockerfile`
 - [ ] Write the actual CD steps in `.github/workflows/ci_cd.yml` (currently a
       placeholder)
+
+## Local machine notes
+
+- **`Lapras`**: has working Oracle VM SSH access (`~/ssh-key-2026-05-22.key` +
+  `~/.ssh/config` entry `oracle-tracknest`). Use this machine for VM work until
+  `charmeleon` is fixed.
+- **`charmeleon`**: lost SSH access to the VM (see resolved section above for
+  what was tried). Fix by copying the key from `Lapras`, or adding a
+  `charmeleon`-specific key to the VM's `authorized_keys` while logged in from
+  `Lapras`. Not yet done.
 
 ## Migration path (post-POC, future)
 
