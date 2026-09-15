@@ -1,5 +1,20 @@
 # TODO
 
+## ⚠️ HIGH PRIORITY — start next session here (2026-09-15)
+Run the bot locally, for real, against Telegram — the SQLite migration has
+only been proven with a direct smoke-test script, not through
+`python-telegram-bot`'s actual handlers. You already have a bot token (it's
+already in GitHub Actions secrets) — it just needs to also be exported in
+your local shell, since GH Actions secrets and local shell env vars are two
+separate places (production having it doesn't put it on your laptop).
+
+1. `export BOT_TOKEN=...` in `~/.bashrc` (same token already in GH Actions)
+2. `python -m bot.main` from `tracknest/` and try real commands (`/add_item`,
+   `/log_expense`, `/list_items`, etc.) against a real chat
+3. Confirm `data/tracknest.db` gets created and data persists across a restart
+
+Once this is confirmed working, move on to the CD pipeline work below.
+
 ## ✅ Done (2026-09-15) — deploy-concepts walkthrough + secrets/DB decisions
 The `.env`/secrets, `.dockerignore`, and full Docker flow (VM → Docker engine →
 image → container → GHCR → CD pipeline) walkthrough flagged on 2026-08-09
@@ -27,10 +42,4 @@ to GHCR, SSH to VM, `docker run` with the `/app/data` volume mount), add
       `charmeleon`-specific key to the VM's `authorized_keys` from `Lapras`)
 
 ## Local environment
-- [ ] Export a real value for `BOT_TOKEN` as a shell environment variable —
-      e.g. in `~/.bashrc` — so it's always present with no file to manage. No
-      `.env` anywhere in the project anymore (2026-09-15 decision, see
-      `DEPLOY_STRATEGY.md`). `DB_PATH` is optional and defaults to
-      `data/tracknest.db` — no setup needed, the SQLite file and schema are
-      created automatically on first run.
 - [ ] Replicate the same venv setup on the other laptop (`python3 -m venv tracknest_bot_env && source tracknest_bot_env/bin/activate && pip install -r requirements.txt`) per `tracknest/docs/setup.md`
