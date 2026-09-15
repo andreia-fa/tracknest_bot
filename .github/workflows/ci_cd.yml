@@ -27,8 +27,6 @@ jobs:
         working-directory: tracknest
         env:
           BOT_TOKEN: dummy_token_for_tests
-          DB_USER: dummy_user
-          DB_PASSWORD: dummy_password
         run: pytest tests/
 
       - name: Note
@@ -74,8 +72,7 @@ jobs:
       - name: Deploy (not configured yet)
         env:
           BOT_TOKEN: ${{ secrets.TRACKNEST_TELEGRAM_BOT_TOKEN }}
-          DB_USER: ${{ secrets.DB_USER }}
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          DB_HOST: ${{ secrets.DB_HOST }}
-          DB_NAME: ${{ secrets.DB_NAME }}
         run: echo "Deploy step not configured yet — add your steps above."
+        # Once configured, docker run needs a volume mount so the SQLite file
+        # survives redeploys, e.g.:
+        #   -v /home/ubuntu/tracknest-data:/app/data

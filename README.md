@@ -30,8 +30,7 @@ It helps you manage home inventory and track household expenses through a conver
 
 - [Python 3.9+](https://www.python.org/)
 - [python-telegram-bot](https://github.com/python-telegram-bot/python-telegram-bot)
-- [MySQL](https://www.mysql.com/) – persistent storage
-- `python-dotenv` – environment variable management
+- [SQLite](https://sqlite.org/) – persistent storage (stdlib `sqlite3`, no server to run)
 
 ---
 
@@ -59,48 +58,21 @@ pip install -r requirements.txt
 
 ### 4. Configure environment variables
 
-Create a `.env` file in the project root:
+No `.env` file — export this as a real shell environment variable (e.g. add
+it to `~/.bashrc` so every terminal session has it automatically):
 
+```bash
+export BOT_TOKEN=your_telegram_bot_token
 ```
-BOT_TOKEN=your_telegram_bot_token
-DB_HOST=localhost
-DB_USER=your_mysql_user
-DB_PASSWORD=your_mysql_password
-DB_NAME=tracknest_db
-```
+
+`DB_PATH` is optional and defaults to `data/tracknest.db` (relative to
+`tracknest/`, git-ignored) — only set it if you want the SQLite file
+somewhere else.
 
 ### 5. Set up the database
 
-```bash
-mysql -u root -p < setup_db.sql
-```
-
-Or manually:
-
-```sql
-CREATE DATABASE IF NOT EXISTS tracknest_db;
-
-CREATE TABLE IF NOT EXISTS inventory_items (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(255) NOT NULL UNIQUE,
-    quantity INT NOT NULL,
-    unit VARCHAR(50),
-    category VARCHAR(100),
-    alert_threshold INT,
-    image_path TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS item_expenses (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    item_id INT,
-    quantity_purchased INT,
-    unit_price DECIMAL(10,2),
-    store VARCHAR(255),
-    purchase_date DATE,
-    FOREIGN KEY (item_id) REFERENCES inventory_items(id) ON DELETE CASCADE
-);
-```
+Nothing to do — the SQLite file and its schema are created automatically the
+first time the bot runs (`init_db()` in `db/database.py`).
 
 ### 6. Run the bot
 
@@ -141,7 +113,7 @@ tracknest/
 ## Troubleshooting
 
 - **ModuleNotFoundError** — make sure the virtual environment is activated.
-- **MySQL connection error** — check your `.env` credentials and that the MySQL server is running.
+- **SQLite errors** — check `DB_PATH` (if set) points to a writable location; the file and schema are created automatically otherwise.
 
 ---
 

@@ -20,8 +20,8 @@ def add_item(name, quantity, unit=None, category=None, alert_threshold=None):
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO inventory_items (name, quantity, unit, category, alert_threshold)
-        VALUES (%s, %s, %s, %s, %s)
-        ON DUPLICATE KEY UPDATE quantity = quantity + VALUES(quantity)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(name) DO UPDATE SET quantity = quantity + excluded.quantity
     """, (name, quantity, unit, category, alert_threshold))
     conn.commit()
     cursor.close()
@@ -38,12 +38,12 @@ def get_item(name):
         A dict of column values, or None if no matching row exists.
     """
     conn = get_connection()
-    cursor = conn.cursor(dictionary=True)
-    cursor.execute("SELECT * FROM inventory_items WHERE name = %s", (name,))
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM inventory_items WHERE name = ?", (name,))
     item = cursor.fetchone()
     cursor.close()
     conn.close()
-    return item
+    return dict(item) if item else None
 
 
 def get_all_items():
@@ -53,12 +53,12 @@ def get_all_items():
         List of dicts, one per row. Empty list if the table has no rows.
     """
     conn = get_connection()
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor()
     cursor.execute("SELECT * FROM inventory_items ORDER BY name")
     items = cursor.fetchall()
     cursor.close()
     conn.close()
-    return items
+    return [dict(item) for item in items]
 
 
 def update_item_quantity(name, quantity):
@@ -76,7 +76,7 @@ def update_item_quantity(name, quantity):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "UPDATE inventory_items SET quantity = %s WHERE name = %s",
+        "UPDATE inventory_items SET quantity = ? WHERE name = ?",
         (quantity, name)
     )
     affected = cursor.rowcount
@@ -99,7 +99,7 @@ def delete_item(name):
     """
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM inventory_items WHERE name = %s", (name,))
+    cursor.execute("DELETE FROM inventory_items WHERE name = ?", (name,))
     affected = cursor.rowcount
     conn.commit()
     cursor.close()

@@ -29,3 +29,7 @@ tracknest/logs/
 
 # Local environment folder (if used)
 tracknest_bot_env/
+
+# Local SQLite database
+data/
+*.db

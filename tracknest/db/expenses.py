@@ -18,8 +18,8 @@ def log_expense(item_name, quantity_purchased, unit_price, store=None):
         True if the expense was logged, False if the item does not exist.
     """
     conn = get_connection()
-    cursor = conn.cursor(dictionary=True)
-    cursor.execute("SELECT id FROM inventory_items WHERE name = %s", (item_name,))
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM inventory_items WHERE name = ?", (item_name,))
     item = cursor.fetchone()
     if not item:
         cursor.close()
@@ -27,8 +27,8 @@ def log_expense(item_name, quantity_purchased, unit_price, store=None):
         return False
     cursor.execute("""
         INSERT INTO item_expenses (item_id, quantity_purchased, unit_price, store, purchase_date)
-        VALUES (%s, %s, %s, %s, %s)
-    """, (item["id"], quantity_purchased, unit_price, store, datetime.now(tz=timezone.utc).date()))
+        VALUES (?, ?, ?, ?, ?)
+    """, (item["id"], quantity_purchased, unit_price, store, datetime.now(tz=timezone.utc).date().isoformat()))
     conn.commit()
     cursor.close()
     conn.close()
@@ -45,14 +45,14 @@ def get_expenses(item_name=None):
         List of dicts ordered by purchase_date descending. Empty list if none found.
     """
     conn = get_connection()
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor()
     if item_name:
         cursor.execute("""
             SELECT e.*, i.name,
                    (e.quantity_purchased * e.unit_price) AS total_cost
             FROM item_expenses e
             JOIN inventory_items i ON e.item_id = i.id
-            WHERE i.name = %s
+            WHERE i.name = ?
             ORDER BY e.purchase_date DESC
         """, (item_name,))
     else:
@@ -66,7 +66,7 @@ def get_expenses(item_name=None):
     rows = cursor.fetchall()
     cursor.close()
     conn.close()
-    return rows
+    return [dict(row) for row in rows]
 
 
 def get_total_spent(item_name=None):
@@ -85,7 +85,7 @@ def get_total_spent(item_name=None):
             SELECT COALESCE(SUM(e.quantity_purchased * e.unit_price), 0)
             FROM item_expenses e
             JOIN inventory_items i ON e.item_id = i.id
-            WHERE i.name = %s
+            WHERE i.name = ?
         """, (item_name,))
     else:
         cursor.execute("""

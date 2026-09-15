@@ -1,5 +1,7 @@
 .git
 .env
+data/
+*.db
 tracknest_bot_env/
 **/__pycache__/
 **/*.pyc

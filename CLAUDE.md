@@ -1,40 +1,41 @@
 # TrackNest Bot — Developer Agent
 
 ## Project Overview
-TrackNest is a Telegram bot for household inventory and expense tracking, built with `python-telegram-bot` v20+ and MySQL.
+TrackNest is a Telegram bot for household inventory and expense tracking, built with `python-telegram-bot` v20+ and SQLite.
 
 ## Structure
 ```
 tracknest/
   bot/main.py          — bot entry point, all command handlers
-  config/__init__.py   — reads env vars (BOT_TOKEN, DB_*)
+  config/__init__.py   — reads env vars (BOT_TOKEN, DB_PATH)
   db/
-    database.py        — MySQL connection + schema init (init_db)
+    database.py        — SQLite connection + schema init (init_db)
     crud.py            — inventory CRUD operations
     expenses.py        — expense log operations
   tests/
     test_crud.py       — unit tests for db/crud.py (mocked DB)
     test_expenses.py   — unit tests for db/expenses.py (mocked DB)
 .github/workflows/ci_cd.yml  — CI runs tests; CD placeholder
-.env.example                 — required env var template
-requirements.txt             — python-telegram-bot, mysql-connector-python, python-dotenv, pytest, ruff
+requirements.txt             — python-telegram-bot, pytest, ruff
 ```
 
 ## Environment Variables
-| Variable      | Required | Default       |
-|---------------|----------|---------------|
-| BOT_TOKEN     | yes      | —             |
-| DB_USER       | yes      | —             |
-| DB_PASSWORD   | yes      | —             |
-| DB_HOST       | no       | localhost     |
-| DB_NAME       | no       | tracknest_db  |
+| Variable      | Required | Default            |
+|---------------|----------|--------------------|
+| BOT_TOKEN     | yes      | —                  |
+| DB_PATH       | no       | data/tracknest.db  |
 
-Local dev: copy `.env.example` → `.env` and fill in values.
+No `.env` file, in local dev or production. Export `BOT_TOKEN` as a real shell
+environment variable (e.g. in `~/.bashrc`) for local dev; in production it's
+injected by the CD workflow from GitHub Actions secrets at `docker run` time.
+`config/__init__.py` only ever reads `os.environ[]` — it doesn't care where
+the values came from. `DB_PATH` is not a secret — it's just a file path, and
+defaults to `data/tracknest.db` (git-ignored) if unset.
 
 ## Commands to Know
 ```bash
 # Run tests (from tracknest/)
-BOT_TOKEN=dummy DB_USER=dummy DB_PASSWORD=dummy pytest tests/ -q
+BOT_TOKEN=dummy pytest tests/ -q
 
 # Lint
 ruff check tracknest/

@@ -11,8 +11,10 @@ TrackNest is a Telegram bot for household inventory and expense tracking, with s
 ## 🔧 Requirements
 
 - Python 3.9+
-- MySQL server
 - Virtual environment (recommended)
+
+No database server to install — TrackNest uses SQLite (Python's built-in
+`sqlite3` module), a single file created automatically on first run.
 
 ## 🚀 Setup Steps
 
@@ -36,17 +38,19 @@ source tracknest_bot_env/bin/activate  # Windows: tracknest_bot_env\Scripts\acti
 pip install -r requirements.txt
 ```
 
-## ⚙️ Configuration File
+## ⚙️ Configuration
 
-Copy `.env.example` to `.env` and fill in your values:
+No `.env` file — export this as a real shell environment variable (e.g. add
+it to `~/.bashrc` so every terminal session has it automatically, no file to
+manage):
 
+```bash
+export BOT_TOKEN=your_telegram_bot_token
 ```
-BOT_TOKEN=your_telegram_bot_token
-DB_HOST=localhost
-DB_USER=your_mysql_user
-DB_PASSWORD=your_mysql_password
-DB_NAME=tracknest_db
-```
+
+`DB_PATH` is optional and defaults to `data/tracknest.db` (relative to
+`tracknest/`, git-ignored) — only set it if you want the SQLite file
+somewhere else.
 
 ## 🛢️ Repository structure
 
@@ -56,12 +60,12 @@ tracknest/
 │   └── main.py              # bot entry point and all command handlers
 │
 ├── config/
-│   └── __init__.py          # loads environment variables from .env / os.environ
+│   └── __init__.py          # loads environment variables from os.environ
 │
 ├── db/
 │   ├── crud.py              # inventory item CRUD operations
 │   ├── expenses.py          # expense logging and reporting
-│   └── database.py          # MySQL connection factory + schema init
+│   └── database.py          # SQLite connection factory + schema init
 │
 ├── docs/
 │   ├── setup.md             # this file — full setup guide
@@ -75,53 +79,11 @@ tracknest/
 
 ## 🛢️ Database Creation
 
-**Database Initialization (DDL)**
-
-If you prefer to create the database and tables manually, here are the SQL statements.
-
-### Create the database
-
-```sql
-CREATE DATABASE IF NOT EXISTS tracknest_db;
-
-```
-
-### Create inventory_items table
-
-```
-CREATE TABLE IF NOT EXISTS inventory_items (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    quantity INT NOT NULL,
-    category VARCHAR(100),
-    alert_threshold INT,
-    image_path TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-```
-
-### Create item_expenses table
-
-```
-CREATE TABLE IF NOT EXISTS item_expenses (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    item_id INT,
-    quantity_purchased INT,
-    unit_price DECIMAL(10,2),
-    total_cost DECIMAL(10,2),
-    purchase_date DATE,
-    FOREIGN KEY (item_id) REFERENCES inventory_items(id) ON DELETE CASCADE
-);
-
-```
-
-### Sample DML
-
-```
-INSERT INTO inventory_items (name, quantity, category, alert_threshold)
-VALUES ('Oat Milk', 2, 'Drinks', 1);
-```
+Nothing to do manually — `init_db()` in `db/database.py` creates the SQLite
+file and both tables (`inventory_items`, `item_expenses`) automatically the
+first time the bot runs. The full current schema (including `unit` and
+`store` columns) lives in that function; treat it as the source of truth
+rather than duplicating the DDL here.
 
 
 
@@ -129,6 +91,6 @@ VALUES ('Oat Milk', 2, 'Drinks', 1);
 
 ```
 - If you get a `ModuleNotFoundError`, make sure your virtual environment is activated.
-- If you can't connect to MySQL, check your `.env` credentials and if the MySQL server is running.
+- If you get a SQLite error, check `DB_PATH` (if set) points to a writable location.
 ```
 

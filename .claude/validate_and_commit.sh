@@ -20,7 +20,7 @@ source "$VENV"
 # --- Run tests ---
 TEST_OUTPUT=$(
   cd tracknest
-  BOT_TOKEN=dummy DB_USER=dummy DB_PASSWORD=dummy pytest tests/ -q 2>&1
+  BOT_TOKEN=dummy pytest tests/ -q 2>&1
 ) && TEST_OK=1 || TEST_OK=0
 
 # --- Run lint ---
