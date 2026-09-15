@@ -153,9 +153,8 @@ GHCR** rather than running the bot as a bare `python bot/main.py` process.
       long-polls Telegram)
 - [ ] Add GitHub Actions secrets: `SSH_HOST`, `SSH_USER`, `SSH_PRIVATE_KEY`
       (private key content is `~/ssh-key-2026-05-22.key` on `Lapras`). `BOT_TOKEN`
-      already exists per `TODO.md`; the old `DB_USER`/`DB_PASSWORD`/`DB_HOST`/
-      `DB_NAME` secrets are no longer needed now that SQLite has landed — safe
-      to delete from the repo settings.
+      already exists per `TODO.md`. (`DB_USER`/`DB_PASSWORD`/`DB_HOST`/`DB_NAME`
+      were never actually created as secrets — non-issue, nothing to clean up.)
 - [x] Write the `Dockerfile` — done 2026-08-09, updated 2026-09-15 for SQLite:
       creates `/app/data`, sets `ENV DB_PATH=/app/data/tracknest.db`, declares
       `VOLUME ["/app/data"]`. No MySQL client libs needed (never were — it's a
