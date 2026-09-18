@@ -2,49 +2,86 @@
 
 import logging
 
+from bot.parser import parse_line
+from bot.receipt import parse_receipt
 from config import BOT_TOKEN
-from db import crud, expenses
+from db import crud, expenses, shopping_list
 from db.database import init_db
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 logging.basicConfig(
     format="%(asctime)s %(name)s %(levelname)s %(message)s",
     level=logging.INFO,
 )
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Send the welcome message listing all available commands."""
+    """Send the welcome message explaining plain-text entry and the management commands."""
     await update.message.reply_text(
         "Welcome to TrackNest!\n\n"
-        "Inventory:\n"
-        "  /add_item <name> <qty> [unit] — Add or restock an item\n"
-        "  /list_items — Show all inventory\n"
+        "Just type whatever you need, one item per line, whenever you think of it:\n"
+        "  Oat Milk\n"
+        "  Oat Milk 3\n\n"
+        "It goes straight onto your shopping list. Check it any time with /list.\n\n"
+        "When you're done shopping, just send a photo of the receipt — it logs "
+        "everything and clears matching items off your list.\n\n"
+        "Other commands:\n"
+        "  /list_items — Show current inventory\n"
         "  /update_item <name> <qty> — Set item quantity\n"
-        "  /remove_item <name> — Remove an item\n\n"
-        "Expenses:\n"
-        "  /log_expense <name> <qty> <unit_price> — Log a purchase\n"
+        "  /remove_item <name> — Remove an item\n"
         "  /my_expenses [item_name] — View spending history\n"
         "  /total_spent [item_name] — Total amount spent"
     )
 
 
-async def add_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /add_item <name> <qty> [unit] — add a new item or restock an existing one."""
-    args = context.args
-    if len(args) < 2:
-        await update.message.reply_text("Usage: /add_item <name> <qty> [unit]")
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle plain-text messages: one shopping list entry per line."""
+    lines = [line for line in update.message.text.splitlines() if line.strip()]
+    replies = []
+    for line in lines:
+        try:
+            name, qty, _unit_price = parse_line(line)
+        except ValueError:
+            replies.append(f"Couldn't understand: '{line}'")
+            continue
+        shopping_list.add_item(name, qty)
+        replies.append(f"Added {qty}x {name} to your shopping list.")
+    await update.message.reply_text("\n".join(replies))
+
+
+async def show_shopping_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /list — display the current shopping list."""
+    items = shopping_list.get_all_items()
+    if not items:
+        await update.message.reply_text("Your shopping list is empty.")
         return
-    name, qty = args[0], args[1]
-    unit = args[2] if len(args) >= 3 else None
-    if not qty.isdigit():
-        await update.message.reply_text("Quantity must be a whole number.")
+    lines = [f"• {i['name']} ({i['quantity']}x)" for i in items]
+    await update.message.reply_text("Shopping list:\n" + "\n".join(lines))
+
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle a receipt photo: log purchases, and clear matching shopping list items."""
+    photo_file = await update.message.photo[-1].get_file()
+    image_bytes = bytes(await photo_file.download_as_bytearray())
+    current_list = [i["name"] for i in shopping_list.get_all_items()]
+    items = parse_receipt(image_bytes, current_list)
+    if not items:
+        await update.message.reply_text("Couldn't find any items on that receipt.")
         return
-    crud.add_item(name, int(qty), unit=unit)
-    label = f"{qty} {unit} {name}" if unit else f"{qty}x {name}"
-    await update.message.reply_text(f"Added {label} to inventory.")
+    replies = []
+    for item in items:
+        name, qty, price = item["name"], item["quantity"], item["unit_price"]
+        crud.add_item(name, qty)
+        expenses.log_expense(name, qty, price)
+        line = f"• {qty}x {name} at €{price:.2f} each"
+        matched = item["matched_shopping_list_item"]
+        if matched and shopping_list.remove_item(matched):
+            line += " (cleared from your list)"
+        replies.append(line)
+    await update.message.reply_text("Receipt processed:\n" + "\n".join(replies))
 
 
 async def list_items(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -89,28 +126,6 @@ async def remove_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Item '{name}' not found.")
 
 
-async def log_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /log_expense <name> <qty> <unit_price> — record a purchase for an item."""
-    args = context.args
-    if len(args) < 3:
-        await update.message.reply_text("Usage: /log_expense <name> <qty> <unit_price>")
-        return
-    name, qty_str, price_str = args[0], args[1], args[2]
-    try:
-        ok = expenses.log_expense(name, int(qty_str), float(price_str))
-    except ValueError:
-        await update.message.reply_text("qty must be an integer and unit_price a number.")
-        return
-    if ok:
-        await update.message.reply_text(
-            f"Logged: {qty_str}x {name} at €{float(price_str):.2f} each."
-        )
-    else:
-        await update.message.reply_text(
-            f"Item '{name}' not found. Add it first with /add_item."
-        )
-
-
 async def my_expenses(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /my_expenses [item_name] — show expense history, optionally filtered by item."""
     item_name = context.args[0] if context.args else None
@@ -146,24 +161,27 @@ async def handle_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> No
 def main():
     """Initialise the database schema and start the bot with long polling."""
     init_db()
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .read_timeout(10)
+        .write_timeout(10)
+        .connect_timeout(10)
+        .pool_timeout(10)
+        .build()
+    )
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("add_item", add_item))
+    app.add_handler(CommandHandler("list", show_shopping_list))
     app.add_handler(CommandHandler("list_items", list_items))
     app.add_handler(CommandHandler("update_item", update_item))
     app.add_handler(CommandHandler("remove_item", remove_item))
-    app.add_handler(CommandHandler("log_expense", log_expense))
     app.add_handler(CommandHandler("my_expenses", my_expenses))
     app.add_handler(CommandHandler("total_spent", total_spent))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_error_handler(handle_error)
     logger.info("TrackNest bot starting.")
-    app.run_polling(
-        timeout=30,
-        read_timeout=10,
-        write_timeout=10,
-        connect_timeout=10,
-        pool_timeout=10,
-    )
+    app.run_polling(timeout=30)
 
 
 if __name__ == "__main__":

@@ -56,6 +56,14 @@ def init_db():
         )
     """)
     cursor.execute("""
+        CREATE TABLE IF NOT EXISTS shopping_list_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            quantity INTEGER NOT NULL,
+            added_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS item_expenses (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             item_id INTEGER,

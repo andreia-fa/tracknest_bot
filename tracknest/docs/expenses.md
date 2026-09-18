@@ -6,9 +6,12 @@ The expense module lets users log household purchases against existing inventory
 
 | Command | Arguments | Description |
 |---------|-----------|-------------|
-| `/log_expense` | `<name> <qty> <unit_price>` | Record a purchase. Computes `total_cost = qty × unit_price`. |
 | `/my_expenses` | `[item_name]` | List all expense records, or only those for a specific item. |
 | `/total_spent` | `[item_name]` | Sum of all spending, or spending on one item. |
+
+Expenses are logged in bulk from a receipt photo (local Ollama vision model,
+see `bot/receipt.py`), which also bulk-adds the purchased items to inventory
+and clears them off the shopping list.
 
 ## Rules
 - An item must exist in inventory before an expense can be logged against it.

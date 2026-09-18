@@ -8,18 +8,20 @@ It helps you manage home inventory and track household expenses through a conver
 
 ## Features
 
+### Shopping List
+- ✅ `/start` – Welcome and usage guide
+- ✅ Plain text, one item per line — `Oat Milk` or `Oat Milk 3` – add something you need to buy, anytime, mid-conversation
+- ✅ `/list` – Show your current shopping list (check it as many times as you like while out shopping)
+- ✅ Receipt photo — send a photo of your receipt, a local Ollama vision model reads it, bulk-adds items to inventory with quantity/price, logs the expenses, and clears matching items off the shopping list
+
 ### Inventory Management
-- ✅ `/start` – Welcome and command list
-- ✅ `/add_item <name> <qty>` – Add a new item or restock an existing one
 - ✅ `/list_items` – Show current inventory
 - ✅ `/remove_item <name>` – Remove an item
 - ✅ `/update_item <name> <qty>` – Set item quantity to an absolute value
 - 🧠 Planned: Low-stock alerts
 - 🧠 Planned: Category tagging and expiration tracking
-- 🧠 Planned: Image-based product detection (Azure)
 
 ### Expense Tracking
-- ✅ `/log_expense <name> <qty> <unit_price>` – Log a purchase tied to an inventory item
 - ✅ `/my_expenses [item_name]` – View spending history
 - ✅ `/total_spent [item_name]` – Total amount spent
 - 🧠 Planned: Monthly/category spending summaries
@@ -69,6 +71,19 @@ export BOT_TOKEN=your_telegram_bot_token
 `tracknest/`, git-ignored) — only set it if you want the SQLite file
 somewhere else.
 
+Receipt photos are read by a local [Ollama](https://ollama.com) vision
+model (`minicpm-v4.5`) — fully offline, no API key, no billing. Install
+Ollama and pull the model once:
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+sudo systemctl disable ollama && sudo systemctl stop ollama  # no boot autostart
+ollama pull minicpm-v4.5
+```
+
+`bot/receipt.py` starts the Ollama server itself on first use (since the
+systemd service is disabled) and leaves it running afterward.
+
 ### 5. Set up the database
 
 Nothing to do — the SQLite file and its schema are created automatically the
@@ -93,19 +108,24 @@ pytest tracknest/tests/
 ```
 tracknest/
 ├── bot/
-│   └── main.py              # bot entry point and command handlers
+│   ├── main.py               # bot entry point and command/message/photo handlers
+│   ├── parser.py             # plain-text entry parsing (name/qty/price)
+│   └── receipt.py            # receipt photo parsing via local Ollama vision model
 ├── config/
 │   └── __init__.py          # loads environment variables
 ├── db/
 │   ├── crud.py              # inventory CRUD operations
 │   ├── expenses.py          # expense tracking logic
+│   ├── shopping_list.py     # shopping list CRUD operations
 │   └── database.py          # DB connection and schema
 ├── docs/
 │   ├── setup.md             # extended setup guide
 │   └── expenses.md          # expense module design
 └── tests/
     ├── test_crud.py
-    └── test_expenses.py
+    ├── test_expenses.py
+    ├── test_shopping_list.py
+    └── test_parser.py
 ```
 
 ---

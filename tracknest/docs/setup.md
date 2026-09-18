@@ -52,12 +52,28 @@ export BOT_TOKEN=your_telegram_bot_token
 `tracknest/`, git-ignored) — only set it if you want the SQLite file
 somewhere else.
 
+Receipt photos are read by a local [Ollama](https://ollama.com) vision
+model — fully offline, no API key, no billing. One-time setup:
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+sudo systemctl disable ollama && sudo systemctl stop ollama  # no boot autostart
+ollama pull minicpm-v4.5
+```
+
+The systemd service is disabled on purpose — `bot/receipt.py` starts
+`ollama serve` itself the first time a receipt photo is sent, and leaves it
+running afterward. The bot starts and the shopping-list feature works fine
+even without Ollama installed at all.
+
 ## 🛢️ Repository structure
 
 ```
 tracknest/
 ├── bot/
-│   └── main.py              # bot entry point and all command handlers
+│   ├── main.py              # bot entry point and command/message/photo handlers
+│   ├── parser.py            # parses plain-text entries (name/qty/unit_price)
+│   └── receipt.py           # receipt photo parsing via local Ollama vision model
 │
 ├── config/
 │   └── __init__.py          # loads environment variables from os.environ
@@ -65,6 +81,7 @@ tracknest/
 ├── db/
 │   ├── crud.py              # inventory item CRUD operations
 │   ├── expenses.py          # expense logging and reporting
+│   ├── shopping_list.py     # shopping list CRUD operations
 │   └── database.py          # SQLite connection factory + schema init
 │
 ├── docs/
@@ -74,6 +91,8 @@ tracknest/
 └── tests/
     ├── test_crud.py
     ├── test_expenses.py
+    ├── test_shopping_list.py
+    ├── test_parser.py
     └── __init__.py
 ```
 

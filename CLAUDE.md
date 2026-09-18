@@ -6,28 +6,41 @@ TrackNest is a Telegram bot for household inventory and expense tracking, built 
 ## Structure
 ```
 tracknest/
-  bot/main.py          — bot entry point, all command handlers
+  bot/main.py          — bot entry point, command + plain-text + photo handlers
+  bot/parser.py        — parses plain-text entries (name/qty/unit_price)
+  bot/receipt.py       — receipt photo parsing via local Ollama vision model
   config/__init__.py   — reads env vars (BOT_TOKEN, DB_PATH)
   db/
     database.py        — SQLite connection + schema init (init_db)
     crud.py            — inventory CRUD operations
     expenses.py        — expense log operations
+    shopping_list.py   — shopping list CRUD operations
   tests/
     test_crud.py       — unit tests for db/crud.py (mocked DB)
     test_expenses.py   — unit tests for db/expenses.py (mocked DB)
+    test_shopping_list.py — unit tests for db/shopping_list.py (mocked DB)
+    test_parser.py     — unit tests for bot/parser.py (pure, no DB)
+    (bot/receipt.py has no unit tests yet — it's a thin wrapper over a live
+    Ollama call; would need a mocked client to test meaningfully)
 .github/workflows/ci_cd.yml  — CI runs tests; CD placeholder
 requirements.txt             — python-telegram-bot, pytest, ruff
 ```
 
 ## Environment Variables
-| Variable      | Required | Default            |
-|---------------|----------|--------------------|
-| BOT_TOKEN     | yes      | —                  |
-| DB_PATH       | no       | data/tracknest.db  |
+| Variable        | Required | Default            |
+|-----------------|----------|--------------------|
+| BOT_TOKEN       | yes      | —                  |
+| DB_PATH         | no       | data/tracknest.db  |
 
-No `.env` file, in local dev or production. Export `BOT_TOKEN` as a real shell
-environment variable (e.g. in `~/.bashrc`) for local dev; in production it's
+No `.env` file, in local dev or production. Export these as real shell
+environment variables (e.g. in `~/.bashrc`) for local dev; in production it's
 injected by the CD workflow from GitHub Actions secrets at `docker run` time.
+Receipt photos need a local [Ollama](https://ollama.com) install with the
+`minicpm-v4.5` model pulled — no env var, no API key, fully offline. The
+systemd service is disabled (no boot autostart); `bot/receipt.py` starts
+`ollama serve` itself on first use and leaves it running. The
+shopping-list feature works fine even without Ollama installed at all —
+only sending a receipt photo needs it.
 `config/__init__.py` only ever reads `os.environ[]` — it doesn't care where
 the values came from. `DB_PATH` is not a secret — it's just a file path, and
 defaults to `data/tracknest.db` (git-ignored) if unset.
