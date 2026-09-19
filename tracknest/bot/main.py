@@ -87,7 +87,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     replies = []
     for item in items:
         name, qty, price = item["name"], item["quantity"], item["unit_price"]
-        crud.add_item(name, qty)
+        if expenses.is_duplicate_purchase(name, price):
+            replies.append(
+                f"• {qty}x {name} at €{price:.2f} each — skipped, this exact item/price "
+                "was already logged in the last hour (looks like the same receipt sent twice)"
+            )
+            continue
+        crud.add_item(name, qty, category=item.get("category") or None)
         expenses.log_expense(name, qty, price)
         line = f"• {qty}x {name} at €{price:.2f} each"
         matched = item["matched_shopping_list_item"]

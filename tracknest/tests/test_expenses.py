@@ -74,3 +74,17 @@ def test_get_total_spent_zero(mock_conn):
     conn, _cursor = make_mock_conn(fetchone=(0,))
     mock_conn.return_value = conn
     assert expenses.get_total_spent() == 0.0
+
+
+@patch("db.expenses.get_connection")
+def test_is_duplicate_purchase_found(mock_conn):
+    conn, _cursor = make_mock_conn(fetchone=(1,))
+    mock_conn.return_value = conn
+    assert expenses.is_duplicate_purchase("Milk", 1.50) is True
+
+
+@patch("db.expenses.get_connection")
+def test_is_duplicate_purchase_not_found(mock_conn):
+    conn, _cursor = make_mock_conn(fetchone=None)
+    mock_conn.return_value = conn
+    assert expenses.is_duplicate_purchase("Milk", 1.50) is False

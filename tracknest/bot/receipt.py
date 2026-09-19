@@ -23,6 +23,19 @@ _RESPONSE_SCHEMA = {
                     },
                     "quantity": {"type": "integer", "description": "Units purchased"},
                     "unit_price": {"type": "number", "description": "Price per single unit, not the line total"},
+                    "category": {
+                        "type": "string",
+                        "description": (
+                            "Grocery category this item belongs to, inferred from its "
+                            "name even if abbreviated or written in another language "
+                            "(e.g. 'Proteinbrötchen' is German for a protein bread "
+                            "roll -> Bread; 'Happy Calif.' is a California-roll-style "
+                            "sushi product name -> Sushi/Prepared Food). Use a short "
+                            "common category such as Bread, Dairy, Produce, Meat, "
+                            "Sushi/Prepared Food, Snacks, Beverages, Household, or "
+                            "Other."
+                        ),
+                    },
                     "matched_shopping_list_item": {
                         "type": "string",
                         "description": (
@@ -33,7 +46,7 @@ _RESPONSE_SCHEMA = {
                         ),
                     },
                 },
-                "required": ["name", "quantity", "unit_price", "matched_shopping_list_item"],
+                "required": ["name", "quantity", "unit_price", "category", "matched_shopping_list_item"],
             },
         },
     },
@@ -79,8 +92,8 @@ def parse_receipt(image_bytes: bytes, shopping_list_names: list[str]) -> list[di
             match receipt lines to them across languages, abbreviations, and typos.
 
     Returns:
-        List of dicts: name, quantity, unit_price, matched_shopping_list_item
-        (empty string when nothing matched).
+        List of dicts: name, quantity, unit_price, category,
+        matched_shopping_list_item (empty string when nothing matched).
     """
     _ensure_server_running()
     shopping_list_text = "\n".join(shopping_list_names) if shopping_list_names else "(empty)"

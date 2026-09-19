@@ -1,6 +1,6 @@
 """Expense logging and reporting for item purchases."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from db.database import get_connection
 
@@ -25,14 +25,47 @@ def log_expense(item_name, quantity_purchased, unit_price, store=None):
         cursor.close()
         conn.close()
         return False
+    now = datetime.now(tz=timezone.utc)
     cursor.execute("""
-        INSERT INTO item_expenses (item_id, quantity_purchased, unit_price, store, purchase_date)
-        VALUES (?, ?, ?, ?, ?)
-    """, (item["id"], quantity_purchased, unit_price, store, datetime.now(tz=timezone.utc).date().isoformat()))
+        INSERT INTO item_expenses (item_id, quantity_purchased, unit_price, store, purchase_date, logged_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (item["id"], quantity_purchased, unit_price, store, now.date().isoformat(), now.isoformat()))
     conn.commit()
     cursor.close()
     conn.close()
     return True
+
+
+def is_duplicate_purchase(item_name, unit_price, window_minutes=60):
+    """Check whether this exact item/price was already logged within the recent window.
+
+    Guards against the same physical receipt getting processed twice (e.g.
+    two photos of one receipt) and double-counted — nobody genuinely buys
+    the identical item at the identical price again within such a short
+    window, so treat a repeat within it as an accidental resend rather than
+    a real second purchase.
+
+    Args:
+        item_name: Name of the item to check.
+        unit_price: Price per unit to match against recent expense records.
+        window_minutes: How far back counts as "too recent to be real".
+
+    Returns:
+        True if a matching expense was logged within the window.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cutoff = (datetime.now(tz=timezone.utc) - timedelta(minutes=window_minutes)).isoformat()
+    cursor.execute("""
+        SELECT 1 FROM item_expenses e
+        JOIN inventory_items i ON i.id = e.item_id
+        WHERE i.name = ? AND e.unit_price = ? AND e.logged_at >= ?
+        LIMIT 1
+    """, (item_name, unit_price, cutoff))
+    found = cursor.fetchone() is not None
+    cursor.close()
+    conn.close()
+    return found
 
 
 def get_expenses(item_name=None):

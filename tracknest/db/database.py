@@ -74,6 +74,11 @@ def init_db():
             FOREIGN KEY (item_id) REFERENCES inventory_items(id) ON DELETE CASCADE
         )
     """)
+    # logged_at added after the initial schema — ALTER instead of a fresh
+    # CREATE so existing databases pick it up without losing data.
+    existing_cols = {row[1] for row in cursor.execute("PRAGMA table_info(item_expenses)")}
+    if "logged_at" not in existing_cols:
+        cursor.execute("ALTER TABLE item_expenses ADD COLUMN logged_at TEXT")
     conn.commit()
     cursor.close()
     conn.close()

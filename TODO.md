@@ -1,19 +1,28 @@
 # TODO
 
-## ⚠️ HIGH PRIORITY — start next session here (2026-09-15)
-Run the bot locally, for real, against Telegram — the SQLite migration has
-only been proven with a direct smoke-test script, not through
-`python-telegram-bot`'s actual handlers. You already have a bot token (it's
-already in GitHub Actions secrets) — it just needs to also be exported in
-your local shell, since GH Actions secrets and local shell env vars are two
-separate places (production having it doesn't put it on your laptop).
+## ✅ Done (2026-09-19) — bot confirmed running live against Telegram
+Ran `python -m bot.main` from `tracknest/` for real, tested the shopping-list
++ receipt-photo flow end to end against a live chat (`@tracknest_app_bot`),
+confirmed `tracknest/data/tracknest.db` (note: relative `DB_PATH`, resolves
+against the process's cwd) gets written to correctly. Also fixed two real
+bugs found along the way: `handle_photo` was blocking the whole event loop
+synchronously during receipt parsing (now off-thread via `asyncio.to_thread`),
+and duplicate receipt submissions were double-counting expenses (now guarded
+by `expenses.is_duplicate_purchase()`). Added item categorization to receipt
+parsing for the future expenses dashboard.
 
-1. `export BOT_TOKEN=...` in `~/.bashrc` (same token already in GH Actions)
-2. `python -m bot.main` from `tracknest/` and try real commands (`/add_item`,
-   `/log_expense`, `/list_items`, etc.) against a real chat
-3. Confirm `data/tracknest.db` gets created and data persists across a restart
-
-Once this is confirmed working, move on to the CD pipeline work below.
+## ⚠️ TODO — GitHub Actions secret is stale
+The bot token has been rotated multiple times locally (2026-09-19, security
+incident — see git history) but the `TRACKNEST_TELEGRAM_BOT_TOKEN` GitHub
+Actions secret was only ever updated once, right after the first rotation.
+CI's "Test Telegram connection" step (deploy job, `ci_cd.yml`) is failing on
+every push to `main` as a result — expected, not a real bug, but worth fixing
+so CI goes green again:
+```
+gh secret set TRACKNEST_TELEGRAM_BOT_TOKEN --repo andreia-fa/tracknest_bot
+```
+Not urgent — the actual deploy step is still a placeholder, so this doesn't
+block anything functional yet.
 
 ## ✅ Done (2026-09-15) — deploy-concepts walkthrough + secrets/DB decisions
 The `.env`/secrets, `.dockerignore`, and full Docker flow (VM → Docker engine →
