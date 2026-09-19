@@ -1,0 +1,18 @@
+[Unit]
+# TEMPORARY local-dev autostart. Remove this once the real Oracle VM +
+# Docker + GitHub Actions CD pipeline (see DEPLOY_STRATEGY.md) is live —
+# this exists only so the bot survives a laptop reboot until then.
+Description=TrackNest Telegram bot (local-dev autostart, temporary)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/afa/my_projects/tracknest_bot/tracknest
+EnvironmentFile=%h/.config/tracknest-bot.env
+ExecStart=/home/afa/my_projects/tracknest_bot/tracknest_bot_env/bin/python -m bot.main
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

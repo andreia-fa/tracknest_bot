@@ -1,5 +1,24 @@
 # TODO
 
+## ✅ Done (2026-09-19) — local autostart via systemd, no more manual restarts
+The bot was being started manually (`python -m bot.main &` + `disown`) every
+session, which meant a reboot or closed terminal silently killed it until
+someone remembered to restart it. Replaced with a `systemd --user` service
+(`deploy/local/tracknest-bot.service`, installed to
+`~/.config/systemd/user/`) — `Restart=on-failure`, enabled + `loginctl
+enable-linger afa` so it starts at boot without needing an active login
+session. Token moved out of `~/.bashrc` reliance into
+`~/.config/tracknest-bot.env` (`EnvironmentFile=`, not in git, `chmod 600`),
+since a non-interactive systemd service never sources `.bashrc`. See
+`CLAUDE.md`'s "Local autostart" section for the day-to-day commands
+(`systemctl --user status/restart`, `journalctl --user -f`).
+
+**This is explicitly temporary** — remove `deploy/local/` and the systemd
+unit once the real Oracle VM + Docker + CD pipeline below actually deploys
+the bot somewhere. It's also machine-specific (hardcoded `/home/afa/...`
+paths), so replicating this setup on another laptop needs the paths in
+`deploy/local/tracknest-bot.service` adjusted first.
+
 ## 💡 Future features (ideas from 2026-09-19 testing session, not yet built)
 
 **Smart quantity-mismatch check.** Prompted by a real miss: a receipt logged

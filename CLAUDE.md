@@ -53,9 +53,31 @@ BOT_TOKEN=dummy pytest tests/ -q
 # Lint
 ruff check tracknest/
 
-# Run the bot (from tracknest/)
-python bot/main.py
+# Run the bot manually, for one-off local testing (from tracknest/)
+# Must run as a module — bot/main.py uses absolute imports (from bot.x
+# import y), so `python bot/main.py` fails with ModuleNotFoundError.
+python -m bot.main
 ```
+
+## Local autostart (temporary, until real CD deploy)
+
+The bot normally runs as a `systemd --user` service, not manually — it
+survives reboots and restarts on crash, so you don't need to remember to
+start it. This is a local-dev stopgap (see `deploy/local/tracknest-bot.service`)
+and should be removed once the Oracle VM + Docker + GitHub Actions CD
+pipeline in `DEPLOY_STRATEGY.md` actually deploys the bot somewhere real.
+
+```bash
+systemctl --user status tracknest-bot.service   # is it running?
+journalctl --user -u tracknest-bot.service -f   # live logs
+systemctl --user restart tracknest-bot.service  # after a code change
+```
+
+Token lives in `~/.config/tracknest-bot.env` (`BOT_TOKEN=...`, `chmod 600`,
+not in git) — `EnvironmentFile=` in the unit reads it directly instead of
+`~/.bashrc`, since a non-interactive process like a systemd service doesn't
+source `.bashrc` anyway. If the token is ever rotated, regenerate that file
+from the new value and `systemctl --user restart tracknest-bot.service`.
 
 ## Development Rules
 - **Always read the relevant source files before making changes.** Never assume structure.
