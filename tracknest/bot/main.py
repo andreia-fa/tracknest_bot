@@ -1,5 +1,6 @@
 """Telegram bot entry point and command handler registration for TrackNest."""
 
+import asyncio
 import logging
 
 from bot.parser import parse_line
@@ -64,10 +65,22 @@ async def show_shopping_list(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle a receipt photo: log purchases, and clear matching shopping list items."""
+    logger.info("Receipt photo received, starting parse.")
     photo_file = await update.message.photo[-1].get_file()
     image_bytes = bytes(await photo_file.download_as_bytearray())
     current_list = [i["name"] for i in shopping_list.get_all_items()]
-    items = parse_receipt(image_bytes, current_list)
+    try:
+        # Runs off the event loop thread — parse_receipt is a blocking network
+        # call to the local Ollama model that can take minutes on CPU-only
+        # hardware, and would otherwise freeze the whole bot for everyone.
+        items = await asyncio.to_thread(parse_receipt, image_bytes, current_list)
+    except Exception:
+        logger.exception("Receipt parsing failed.")
+        await update.message.reply_text(
+            "Sorry, I couldn't process that receipt (parsing error). Please try again."
+        )
+        return
+    logger.info("Receipt parsed: %d item(s).", len(items))
     if not items:
         await update.message.reply_text("Couldn't find any items on that receipt.")
         return
