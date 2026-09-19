@@ -108,6 +108,44 @@ def test_set_profile_partial_update(mock_conn):
 
 
 @patch("db.crud.get_connection")
+def test_get_checkin_candidates(mock_conn):
+    rows = [{"name": "Milk", "shelf_life_days": 7, "last_purchase": "2026-04-01T00:00:00+00:00"}]
+    conn, _cursor = make_mock_conn(fetchall=rows)
+    mock_conn.return_value = conn
+    result = crud.get_checkin_candidates()
+    assert result == rows
+
+
+@patch("db.crud.get_connection")
+def test_get_pending_checkin_item_found(mock_conn):
+    conn, _cursor = make_mock_conn(fetchone={"name": "Milk"})
+    mock_conn.return_value = conn
+    assert crud.get_pending_checkin_item() == "Milk"
+
+
+@patch("db.crud.get_connection")
+def test_get_pending_checkin_item_none(mock_conn):
+    conn, _cursor = make_mock_conn(fetchone=None)
+    mock_conn.return_value = conn
+    assert crud.get_pending_checkin_item() is None
+
+
+@patch("db.crud.get_connection")
+def test_mark_checkin_pending(mock_conn):
+    conn, cursor = make_mock_conn(rowcount=1)
+    mock_conn.return_value = conn
+    assert crud.mark_checkin_pending("Milk", pending=True) is True
+    assert cursor.execute.call_args[0][1] == (1, "Milk")
+
+
+@patch("db.crud.get_connection")
+def test_bump_shelf_life(mock_conn):
+    conn, _cursor = make_mock_conn(rowcount=1)
+    mock_conn.return_value = conn
+    assert crud.bump_shelf_life("Milk", 3) is True
+
+
+@patch("db.crud.get_connection")
 def test_delete_item_found(mock_conn):
     conn, _cursor = make_mock_conn(rowcount=1)
     mock_conn.return_value = conn

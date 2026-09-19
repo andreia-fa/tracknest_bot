@@ -64,6 +64,10 @@ def init_db():
         cursor.execute("ALTER TABLE inventory_items ADD COLUMN shelf_life_days INTEGER")
     if "is_luxury" not in existing_inv_cols:
         cursor.execute("ALTER TABLE inventory_items ADD COLUMN is_luxury INTEGER")
+    if "checkin_pending" not in existing_inv_cols:
+        cursor.execute(
+            "ALTER TABLE inventory_items ADD COLUMN checkin_pending INTEGER NOT NULL DEFAULT 0"
+        )
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS shopping_list_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,6 +92,12 @@ def init_db():
     existing_cols = {row[1] for row in cursor.execute("PRAGMA table_info(item_expenses)")}
     if "logged_at" not in existing_cols:
         cursor.execute("ALTER TABLE item_expenses ADD COLUMN logged_at TEXT")
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS bot_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
     conn.commit()
     cursor.close()
     conn.close()

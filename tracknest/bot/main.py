@@ -2,14 +2,17 @@
 
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
 
 from bot.parser import parse_line
 from bot.receipt import parse_receipt
 from config import BOT_TOKEN
-from db import crud, expenses, shopping_list
+from db import crud, expenses, settings, shopping_list
 from db.database import init_db
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+
+_CHECKIN_INTERVAL = timedelta(hours=24)
 
 logging.basicConfig(
     format="%(asctime)s %(name)s %(levelname)s %(message)s",
@@ -20,7 +23,8 @@ logger = logging.getLogger(__name__)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Send the welcome message explaining plain-text entry and the management commands."""
+    """Send the welcome message and remember this chat for proactive check-ins."""
+    settings.set_chat_id(update.effective_chat.id)
     await update.message.reply_text(
         "Welcome to TrackNest!\n\n"
         "Just type whatever you need, one item per line, whenever you think of it:\n"
@@ -94,15 +98,46 @@ async def _handle_profile_answer(update: Update, context: ContextTypes.DEFAULT_T
     await _ask_next_profile_question(update, context)
 
 
+_CHECKIN_NO_WORDS = {"no", "n", "ran out", "gone", "finished", "empty"}
+_CHECKIN_YES_WORDS = {"yes", "y", "still good", "still lasts", "still have it"}
+_CHECKIN_EXTEND_DAYS = 3
+
+
+async def _handle_checkin_answer(update: Update, context: ContextTypes.DEFAULT_TYPE, item_name: str):
+    """Interpret a plain-text reply to a pending shelf-life check-in.
+
+    A "still good" answer means the estimate was too short — push it out a
+    few days so the next check-in isn't immediate, while a real early
+    repurchase (if one happens) will keep correcting it down via the usual
+    signal in expenses.log_expense.
+    """
+    text = update.message.text.strip().lower()
+    crud.mark_checkin_pending(item_name, pending=False)
+    if text in _CHECKIN_NO_WORDS or "no" in text.split():
+        await update.message.reply_text(f"Thanks — noted {item_name} ran out.")
+        return
+    if text in _CHECKIN_YES_WORDS or "yes" in text.split():
+        crud.bump_shelf_life(item_name, _CHECKIN_EXTEND_DAYS)
+        await update.message.reply_text(f"Good to know — I'll check back on {item_name} again later.")
+        return
+    await update.message.reply_text("Reply 'yes' or 'no'.")
+    crud.mark_checkin_pending(item_name, pending=True)
+
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle plain-text messages: one shopping list entry per line.
 
-    If an item-profiling question is pending for this chat, the message is
-    treated as the answer to that instead of new shopping-list entries.
+    If an item-profiling or shelf-life check-in question is pending for this
+    chat, the message is treated as the answer to that instead of new
+    shopping-list entries.
     """
-    pending = context.chat_data.get("awaiting_profile")
-    if pending:
-        await _handle_profile_answer(update, context, pending)
+    pending_profile = context.chat_data.get("awaiting_profile")
+    if pending_profile:
+        await _handle_profile_answer(update, context, pending_profile)
+        return
+    pending_checkin = crud.get_pending_checkin_item()
+    if pending_checkin:
+        await _handle_checkin_answer(update, context, pending_checkin)
         return
     lines = [line for line in update.message.text.splitlines() if line.strip()]
     replies = []
@@ -176,6 +211,28 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 queue.append(name)
         if "awaiting_profile" not in context.chat_data:
             await _ask_next_profile_question(update, context)
+
+
+async def check_expiring_items(context: ContextTypes.DEFAULT_TYPE):
+    """Daily job: proactively ask about any essential item past its estimated shelf life.
+
+    Luxury items are excluded entirely (see get_checkin_candidates) — a
+    treat bought on mood/budget doesn't follow a consumption schedule.
+    """
+    chat_id = settings.get_chat_id()
+    if not chat_id:
+        return
+    now = datetime.now(tz=timezone.utc)
+    for item in crud.get_checkin_candidates():
+        if not item["last_purchase"]:
+            continue
+        last = datetime.fromisoformat(item["last_purchase"])
+        if now >= last + timedelta(days=item["shelf_life_days"]):
+            crud.mark_checkin_pending(item["name"])
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"Quick check — does {item['name']} still last, or did it run out? Reply 'yes' or 'no'.",
+            )
 
 
 async def list_items(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -274,6 +331,12 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_error_handler(handle_error)
+    if app.job_queue is not None:
+        app.job_queue.run_repeating(
+            check_expiring_items, interval=_CHECKIN_INTERVAL, first=timedelta(minutes=1)
+        )
+    else:
+        logger.warning("JobQueue unavailable (missing job-queue extra) — shelf-life check-ins disabled.")
     logger.info("TrackNest bot starting.")
     app.run_polling(timeout=30)
 
