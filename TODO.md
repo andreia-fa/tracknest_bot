@@ -1,5 +1,24 @@
 # TODO
 
+## 💡 Future features (ideas from 2026-09-19 testing session, not yet built)
+
+**Smart quantity-mismatch check.** Prompted by a real miss: a receipt logged
+qty 2 for an item but only 1 was actually received. Quantities of ≤2 are easy
+for a person to self-verify and shouldn't be flagged — the idea is to only
+offer an optional, playful check when the *pattern* of a receipt looks worth
+a second look, e.g.:
+- A short receipt where most/all items have qty > 2 (like 4 of 4 items), or
+- A long receipt where a handful of items are outliers (e.g. 3 of 25 items
+  have qty > 2).
+After processing, prompt something like "Want a fast check on your
+groceries?" — opt-in, not forced on every receipt. Needs a concrete rule for
+"pattern looks worth flagging" before building (the two examples above are a
+starting point, not a spec).
+
+**Shopping bag review.** A broader end-of-trip assessment of that day's
+haul — spend, categories, any quantity flags — rather than just the
+per-item confirmation lines sent during processing. Not yet scoped.
+
 ## ✅ Done (2026-09-19) — bot confirmed running live against Telegram
 Ran `python -m bot.main` from `tracknest/` for real, tested the shopping-list
 + receipt-photo flow end to end against a live chat (`@tracknest_app_bot`),
