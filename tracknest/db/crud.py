@@ -86,6 +86,39 @@ def update_item_quantity(name, quantity):
     return affected > 0
 
 
+def set_profile(name, shelf_life_days=None, is_luxury=None):
+    """Set shelf-life and/or luxury-tier metadata on an existing item.
+
+    Each field is only overwritten when explicitly passed (via SQL COALESCE),
+    so the two can be set independently across separate calls — e.g. asking
+    the user two follow-up questions in sequence.
+
+    Args:
+        name: Exact item name to update.
+        shelf_life_days: Typical days until it spoils; 0 means "doesn't
+            apply / non-perishable" (distinct from NULL, meaning "not yet
+            asked"). Leave unset to not touch this field.
+        is_luxury: 1 for a luxury/treat purchase, 0 for a regular essential.
+            Leave unset to not touch this field.
+
+    Returns:
+        True if the item was found and updated, False otherwise.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE inventory_items
+        SET shelf_life_days = COALESCE(?, shelf_life_days),
+            is_luxury = COALESCE(?, is_luxury)
+        WHERE name = ?
+    """, (shelf_life_days, is_luxury, name))
+    affected = cursor.rowcount
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return affected > 0
+
+
 def delete_item(name):
     """Remove an item from inventory by name.
 

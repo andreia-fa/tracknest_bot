@@ -38,8 +38,72 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+_SHELF_LIFE_NA_WORDS = {"n/a", "na", "no", "none", "never", "doesn't spoil", "does not spoil"}
+_LUXURY_WORDS = {"luxury", "lux", "treat", "l"}
+_ESSENTIAL_WORDS = {"essential", "regular", "basic", "e"}
+
+
+async def _ask_next_profile_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send the next queued item-profiling question, or clear state if the queue is empty."""
+    queue = context.chat_data.get("profile_queue", [])
+    if not queue:
+        context.chat_data.pop("awaiting_profile", None)
+        context.chat_data.pop("profile_queue", None)
+        return
+    name = queue[0]
+    context.chat_data["awaiting_profile"] = {"item": name, "stage": "shelf_life"}
+    await update.message.reply_text(
+        f"Quick one — how many days does {name} usually last before it goes bad? "
+        "Reply with a number, or 'n/a' if it doesn't really spoil (pantry items etc.)."
+    )
+
+
+async def _handle_profile_answer(update: Update, context: ContextTypes.DEFAULT_TYPE, pending: dict):
+    """Interpret a plain-text reply as the answer to a pending item-profiling question."""
+    text = update.message.text.strip().lower()
+    name = pending["item"]
+    if pending["stage"] == "shelf_life":
+        if text in _SHELF_LIFE_NA_WORDS:
+            days = 0
+        else:
+            try:
+                days = int(text)
+            except ValueError:
+                await update.message.reply_text("Reply with a number of days, or 'n/a'.")
+                return
+        crud.set_profile(name, shelf_life_days=days)
+        context.chat_data["awaiting_profile"] = {"item": name, "stage": "luxury"}
+        await update.message.reply_text(
+            f"Got it. Is {name} more of a luxury/treat purchase, or a regular essential? "
+            "Reply 'luxury' or 'essential'."
+        )
+        return
+    # stage == "luxury"
+    if text in _LUXURY_WORDS:
+        is_luxury = 1
+    elif text in _ESSENTIAL_WORDS:
+        is_luxury = 0
+    else:
+        await update.message.reply_text("Reply 'luxury' or 'essential'.")
+        return
+    crud.set_profile(name, is_luxury=is_luxury)
+    queue = context.chat_data.get("profile_queue", [])
+    if queue and queue[0] == name:
+        queue.pop(0)
+    context.chat_data["profile_queue"] = queue
+    await _ask_next_profile_question(update, context)
+
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle plain-text messages: one shopping list entry per line."""
+    """Handle plain-text messages: one shopping list entry per line.
+
+    If an item-profiling question is pending for this chat, the message is
+    treated as the answer to that instead of new shopping-list entries.
+    """
+    pending = context.chat_data.get("awaiting_profile")
+    if pending:
+        await _handle_profile_answer(update, context, pending)
+        return
     lines = [line for line in update.message.text.splitlines() if line.strip()]
     replies = []
     for line in lines:
@@ -85,6 +149,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Couldn't find any items on that receipt.")
         return
     replies = []
+    to_profile = []
     for item in items:
         name, qty, price = item["name"], item["quantity"], item["unit_price"]
         if expenses.is_duplicate_purchase(name, price):
@@ -95,12 +160,22 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             continue
         crud.add_item(name, qty, category=item.get("category") or None)
         expenses.log_expense(name, qty, price)
+        current = crud.get_item(name)
+        if current and current["shelf_life_days"] is None:
+            to_profile.append(name)
         line = f"• {qty}x {name} at €{price:.2f} each"
         matched = item["matched_shopping_list_item"]
         if matched and shopping_list.remove_item(matched):
             line += " (cleared from your list)"
         replies.append(line)
     await update.message.reply_text("Receipt processed:\n" + "\n".join(replies))
+    if to_profile:
+        queue = context.chat_data.setdefault("profile_queue", [])
+        for name in to_profile:
+            if name not in queue:
+                queue.append(name)
+        if "awaiting_profile" not in context.chat_data:
+            await _ask_next_profile_question(update, context)
 
 
 async def list_items(update: Update, context: ContextTypes.DEFAULT_TYPE):

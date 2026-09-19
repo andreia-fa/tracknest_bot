@@ -55,6 +55,15 @@ def init_db():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # shelf_life_days / is_luxury added after the initial schema — ALTER
+    # instead of a fresh CREATE so existing databases keep their data.
+    # shelf_life_days: NULL = not yet asked, 0 = doesn't spoil / n/a.
+    # is_luxury: NULL = not yet asked, 0 = essential, 1 = luxury/treat.
+    existing_inv_cols = {row[1] for row in cursor.execute("PRAGMA table_info(inventory_items)")}
+    if "shelf_life_days" not in existing_inv_cols:
+        cursor.execute("ALTER TABLE inventory_items ADD COLUMN shelf_life_days INTEGER")
+    if "is_luxury" not in existing_inv_cols:
+        cursor.execute("ALTER TABLE inventory_items ADD COLUMN is_luxury INTEGER")
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS shopping_list_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

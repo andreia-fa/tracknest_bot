@@ -83,6 +83,31 @@ def test_update_item_quantity_not_found(mock_conn):
 
 
 @patch("db.crud.get_connection")
+def test_set_profile_found(mock_conn):
+    conn, _cursor = make_mock_conn(rowcount=1)
+    mock_conn.return_value = conn
+    assert crud.set_profile("Milk", shelf_life_days=7, is_luxury=0) is True
+    conn.commit.assert_called_once()
+
+
+@patch("db.crud.get_connection")
+def test_set_profile_not_found(mock_conn):
+    conn, _cursor = make_mock_conn(rowcount=0)
+    mock_conn.return_value = conn
+    assert crud.set_profile("Ghost", shelf_life_days=7) is False
+
+
+@patch("db.crud.get_connection")
+def test_set_profile_partial_update(mock_conn):
+    conn, cursor = make_mock_conn(rowcount=1)
+    mock_conn.return_value = conn
+    crud.set_profile("Milk", shelf_life_days=7)
+    args = cursor.execute.call_args[0][1]
+    assert args[0] == 7
+    assert args[1] is None
+
+
+@patch("db.crud.get_connection")
 def test_delete_item_found(mock_conn):
     conn, _cursor = make_mock_conn(rowcount=1)
     mock_conn.return_value = conn
