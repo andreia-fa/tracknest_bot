@@ -22,6 +22,7 @@ def test_get_spending_summary(mock_conn):
     conn, _cursor = make_mock_conn(
         fetchone_side_effect=[(45.5,)],
         fetchall_side_effect=[
+            [{"is_luxury": 0, "total": 25.5}, {"is_luxury": 1, "total": 20.0}],
             [{"name": "Milk", "total": 20.0}],
             [{"category": "Dairy", "total": 20.0}],
         ],
@@ -31,6 +32,22 @@ def test_get_spending_summary(mock_conn):
     assert result["total"] == 45.5
     assert result["top_items"] == [{"name": "Milk", "total": 20.0}]
     assert result["top_categories"] == [{"category": "Dairy", "total": 20.0}]
+    assert result["luxury"] == 20.0
+    assert result["essential"] == 25.5
+    assert result["unclassified"] == 0.0
+
+
+@patch("db.metrics.get_connection")
+def test_get_spending_summary_keeps_unprofiled_out_of_essentials(mock_conn):
+    conn, _cursor = make_mock_conn(
+        fetchone_side_effect=[(10.0,)],
+        fetchall_side_effect=[[{"is_luxury": None, "total": 10.0}], [], []],
+    )
+    mock_conn.return_value = conn
+    result = metrics.get_spending_summary(year=2026, month=4)
+    assert result["unclassified"] == 10.0
+    assert result["essential"] == 0.0
+    assert result["luxury"] == 0.0
 
 
 @patch("db.metrics.get_spending_summary")
@@ -48,6 +65,69 @@ def test_get_budget_status_with_budget(mock_budget, mock_summary):
     mock_summary.return_value = {"total": 150.0, "top_items": [], "top_categories": []}
     result = metrics.get_budget_status()
     assert result == {"budget": 200.0, "spent": 150.0, "pct": 75.0}
+
+
+@patch("db.metrics.get_spending_summary")
+def test_get_month_pace_projects_from_days_elapsed(mock_summary):
+    mock_summary.return_value = {"total": 100.0}
+    now = datetime.now(tz=timezone.utc)
+    result = metrics.get_month_pace()
+    assert result["spent"] == 100.0
+    assert result["days_elapsed"] == now.day
+    if now.day >= 5:
+        assert result["projected"] == pytest.approx(100.0 / now.day * result["days_in_month"])
+    else:
+        assert result["projected"] is None
+
+
+@patch("db.metrics.get_spending_summary")
+def test_get_month_pace_no_projection_for_finished_month(mock_summary):
+    mock_summary.return_value = {"total": 80.0}
+    result = metrics.get_month_pace(year=2024, month=1)
+    assert result["projected"] is None
+    assert result["days_elapsed"] == 31
+    assert result["days_in_month"] == 31
+
+
+@patch("db.metrics.get_connection")
+def test_get_running_low_within_window(mock_conn):
+    yesterday = (datetime.now(tz=timezone.utc) - timedelta(days=1)).isoformat()
+    long_ago = (datetime.now(tz=timezone.utc) - timedelta(days=30)).isoformat()
+    conn, _cursor = make_mock_conn(fetchall_side_effect=[[
+        {"name": "Bread", "shelf_life_days": 6, "last_purchase": yesterday},
+        {"name": "Peanut Butter", "shelf_life_days": 60, "last_purchase": yesterday},
+        {"name": "Overdue Spinach", "shelf_life_days": 10, "last_purchase": long_ago},
+        {"name": "Never Bought", "shelf_life_days": 5, "last_purchase": None},
+    ]])
+    mock_conn.return_value = conn
+    result = metrics.get_running_low(days_ahead=7)
+    assert [item["name"] for item in result] == ["Bread"]
+    assert result[0]["days_left"] == 4
+
+
+@patch("db.metrics.get_connection")
+def test_get_running_low_handles_date_only_last_purchase(mock_conn):
+    """Rows predating the logged_at column carry a bare YYYY-MM-DD date."""
+    date_only = (datetime.now(tz=timezone.utc) - timedelta(days=2)).date().isoformat()
+    conn, _cursor = make_mock_conn(fetchall_side_effect=[[
+        {"name": "Bread", "shelf_life_days": 6, "last_purchase": date_only},
+    ]])
+    mock_conn.return_value = conn
+    result = metrics.get_running_low()
+    assert result[0]["name"] == "Bread"
+
+
+@patch("db.metrics.get_connection")
+def test_get_daily_cost_ranks_by_cost_per_day(mock_conn):
+    conn, _cursor = make_mock_conn(fetchall_side_effect=[[
+        {"name": "Peanut Butter", "shelf_life_days": 60, "is_luxury": 0, "unit_price": 6.99},
+        {"name": "Sushi", "shelf_life_days": 2, "is_luxury": 1, "unit_price": 10.99},
+        {"name": "Never Bought", "shelf_life_days": 5, "is_luxury": 0, "unit_price": None},
+    ]])
+    mock_conn.return_value = conn
+    result = metrics.get_daily_cost()
+    assert [item["name"] for item in result] == ["Sushi", "Peanut Butter"]
+    assert result[0]["cost_per_day"] == pytest.approx(5.495)
 
 
 @patch("db.settings.get_financial_goal")

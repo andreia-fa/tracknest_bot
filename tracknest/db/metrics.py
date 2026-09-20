@@ -5,13 +5,29 @@ a future web page can call the same functions instead of re-deriving these
 numbers from a different layer.
 """
 
-from datetime import datetime, timezone
+import calendar
+from datetime import datetime, timedelta, timezone
 
 from db.database import get_connection
 
+# Extrapolating a month-end total from only a few days of spend is noise, not
+# a forecast — get_month_pace returns no projection below this many days in.
+_MIN_DAYS_FOR_PROJECTION = 5
+
+
+def _as_utc(value):
+    """Parse an ISO date or datetime string from the DB as an aware UTC datetime.
+
+    Rows logged before the `logged_at` column existed only carry a
+    `purchase_date` ("YYYY-MM-DD"), which parses as naive — treat those as
+    midnight UTC so date maths never mixes aware and naive values.
+    """
+    parsed = datetime.fromisoformat(value)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
 
 def get_spending_summary(year=None, month=None, top_n=3):
-    """Return spend totals for a calendar month, broken down by item and category.
+    """Return spend totals for a calendar month, broken down by item, category, and tier.
 
     Args:
         year: Calendar year to scope to. Defaults to the current month.
@@ -20,7 +36,11 @@ def get_spending_summary(year=None, month=None, top_n=3):
 
     Returns:
         Dict with keys: total (float), top_items (list of {name, total}),
-        top_categories (list of {category, total}).
+        top_categories (list of {category, total}), luxury (float spent on
+        items flagged as treats), essential (float spent on items flagged as
+        essentials), and unclassified (float spent on items never profiled —
+        kept separate so an unanswered question never masquerades as an
+        essential).
     """
     now = datetime.now(tz=timezone.utc)
     year = year or now.year
@@ -35,6 +55,16 @@ def get_spending_summary(year=None, month=None, top_n=3):
         WHERE purchase_date LIKE ?
     """, (f"{prefix}%",))
     total = float(cursor.fetchone()[0])
+
+    cursor.execute("""
+        SELECT i.is_luxury AS is_luxury,
+               SUM(e.quantity_purchased * e.unit_price) AS total
+        FROM item_expenses e
+        JOIN inventory_items i ON i.id = e.item_id
+        WHERE e.purchase_date LIKE ?
+        GROUP BY i.is_luxury
+    """, (f"{prefix}%",))
+    by_tier = {row["is_luxury"]: float(row["total"]) for row in cursor.fetchall()}
 
     cursor.execute("""
         SELECT i.name AS name, SUM(e.quantity_purchased * e.unit_price) AS total
@@ -61,7 +91,139 @@ def get_spending_summary(year=None, month=None, top_n=3):
 
     cursor.close()
     conn.close()
-    return {"total": total, "top_items": top_items, "top_categories": top_categories}
+    return {
+        "total": total,
+        "top_items": top_items,
+        "top_categories": top_categories,
+        "luxury": by_tier.get(1, 0.0),
+        "essential": by_tier.get(0, 0.0),
+        "unclassified": by_tier.get(None, 0.0),
+    }
+
+
+def get_month_pace(year=None, month=None):
+    """Return a month's spend so far alongside a straight-line month-end projection.
+
+    The projection is deliberately naive (spend per day so far × days in the
+    month) and is withheld early in the month, when too few days have passed
+    for extrapolation to mean anything.
+
+    Args:
+        year: Calendar year. Defaults to the current month.
+        month: Calendar month (1-12). Defaults to the current month.
+
+    Returns:
+        Dict with keys spent, days_elapsed, days_in_month, and projected
+        (None when the month is too young to extrapolate, or when looking at
+        a month that has already finished — there, spent is the final figure).
+    """
+    now = datetime.now(tz=timezone.utc)
+    year = year or now.year
+    month = month or now.month
+    days_in_month = calendar.monthrange(year, month)[1]
+    is_current_month = (year, month) == (now.year, now.month)
+    days_elapsed = now.day if is_current_month else days_in_month
+
+    spent = get_spending_summary(year, month)["total"]
+    if is_current_month and days_elapsed >= _MIN_DAYS_FOR_PROJECTION:
+        projected = spent / days_elapsed * days_in_month
+    else:
+        projected = None
+    return {
+        "spent": spent,
+        "days_elapsed": days_elapsed,
+        "days_in_month": days_in_month,
+        "projected": projected,
+    }
+
+
+def get_running_low(days_ahead=7):
+    """Return essentials whose estimated run-out date falls within the next few days.
+
+    Forward-looking counterpart to the shelf-life check-in, which only speaks
+    up once an item is already due. Luxury items are excluded — a treat
+    running out isn't a restocking need.
+
+    Args:
+        days_ahead: How far ahead to look.
+
+    Returns:
+        List of dicts (name, days_left, run_out_date as an ISO date string),
+        soonest first. Items already overdue are left out; those are the
+        check-in flow's job.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT i.name AS name, i.shelf_life_days AS shelf_life_days,
+               (SELECT COALESCE(MAX(e.logged_at), MAX(e.purchase_date))
+                FROM item_expenses e WHERE e.item_id = i.id) AS last_purchase
+        FROM inventory_items i
+        WHERE i.is_luxury = 0 AND i.shelf_life_days > 0
+    """)
+    rows = cursor.fetchall()
+    cursor.close()
+    conn.close()
+
+    now = datetime.now(tz=timezone.utc)
+    due = []
+    for row in rows:
+        if not row["last_purchase"]:
+            continue
+        run_out = _as_utc(row["last_purchase"]) + timedelta(days=row["shelf_life_days"])
+        days_left = (run_out - now).days
+        if 0 <= days_left <= days_ahead:
+            due.append({
+                "name": row["name"],
+                "days_left": days_left,
+                "run_out_date": run_out.date().isoformat(),
+            })
+    due.sort(key=lambda item: item["days_left"])
+    return due
+
+
+def get_daily_cost(top_n=3):
+    """Return items ranked by what they cost per day of use.
+
+    Latest unit price divided by the item's shelf-life estimate — the one
+    thing a receipt can never show you, since it separates "expensive to
+    buy" from "expensive to keep around". Treats are included: that's
+    usually where the spread shows up.
+
+    Args:
+        top_n: How many items to return, most expensive per day first.
+
+    Returns:
+        List of dicts: name, cost_per_day, unit_price, shelf_life_days,
+        is_luxury. Items with no shelf-life estimate (or one of 0, meaning
+        "doesn't spoil") and items never purchased are excluded.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT i.name AS name, i.shelf_life_days AS shelf_life_days,
+               i.is_luxury AS is_luxury,
+               (SELECT e.unit_price FROM item_expenses e
+                WHERE e.item_id = i.id ORDER BY e.id DESC LIMIT 1) AS unit_price
+        FROM inventory_items i
+        WHERE i.shelf_life_days IS NOT NULL AND i.shelf_life_days > 0
+    """)
+    rows = cursor.fetchall()
+    cursor.close()
+    conn.close()
+
+    costs = [
+        {
+            "name": row["name"],
+            "cost_per_day": row["unit_price"] / row["shelf_life_days"],
+            "unit_price": row["unit_price"],
+            "shelf_life_days": row["shelf_life_days"],
+            "is_luxury": row["is_luxury"],
+        }
+        for row in rows if row["unit_price"]
+    ]
+    costs.sort(key=lambda item: item["cost_per_day"], reverse=True)
+    return costs[:top_n]
 
 
 def get_budget_status():

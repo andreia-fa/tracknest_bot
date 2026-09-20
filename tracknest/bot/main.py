@@ -582,18 +582,65 @@ async def handle_goal_date_choice(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def report(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /report — spending, price trends, and what (if anything) needs your attention."""
-    spending = metrics.get_spending_summary()
-    budget = metrics.get_budget_status()
-    health = metrics.get_inventory_health()
+    """Handle /report — what the receipts add up to that a receipt can't tell you.
 
-    lines = ["📊 This month", f"  Spent: €{spending['total']:.2f}"]
+    Ordered so the surprising things come first (where the money actually
+    went, what each habit costs per day, what's about to run out) and the
+    reassuring "nothing needs you" line comes last.
+    """
+    spending = metrics.get_spending_summary()
+    pace = metrics.get_month_pace()
+    budget = metrics.get_budget_status()
+
+    month_name = datetime.now(tz=timezone.utc).strftime("%B")
+    lines = [f"📊 {month_name} so far ({pace['days_elapsed']} of {pace['days_in_month']} days)"]
+    spent_line = f"  €{spending['total']:.2f} spent"
+    if pace["projected"] is not None:
+        spent_line += f" · on pace for ~€{pace['projected']:.0f} by month end"
+    lines.append(spent_line)
     if budget:
-        lines.append(f"  Budget: €{budget['spent']:.2f} / €{budget['budget']:.2f} ({budget['pct']:.0f}%)")
+        lines.append(f"  Budget: €{budget['spent']:.2f} of €{budget['budget']:.2f} ({budget['pct']:.0f}%)")
+
+    # The split the user's own luxury/essential answers add up to — nobody
+    # totals this for themselves, and it reframes the month more than the
+    # headline number does.
+    if spending["total"] > 0 and (spending["luxury"] or spending["essential"]):
+        luxury_pct = spending["luxury"] / spending["total"] * 100
+        lines.append(
+            f"  Treats: €{spending['luxury']:.2f} ({luxury_pct:.0f}%) · "
+            f"essentials: €{spending['essential']:.2f}"
+        )
+    if spending["unclassified"]:
+        lines.append(f"  Not yet classified: €{spending['unclassified']:.2f}")
     if spending["top_categories"]:
-        lines.append("  Top categories: " + ", ".join(
+        lines.append("  Biggest: " + ", ".join(
             f"{c['category']} (€{c['total']:.2f})" for c in spending["top_categories"]
         ))
+
+    daily = metrics.get_daily_cost()
+    if daily:
+        lines.append("\n💸 Cost per day you own it")
+        lines.extend(
+            f"  {d['name']} — €{d['cost_per_day']:.2f}/day "
+            f"(€{d['unit_price']:.2f}, lasts {d['shelf_life_days']}d)"
+            for d in daily
+        )
+
+    running_low = metrics.get_running_low()
+    if running_low:
+        lines.append("\n⏳ Running out soon")
+        lines.extend(
+            f"  {item['name']} — in ~{item['days_left']} day{'s' if item['days_left'] != 1 else ''}"
+            for item in running_low
+        )
+
+    trends = metrics.get_price_trends()
+    if trends:
+        lines.append("\n📈 Creeping up")
+        lines.extend(
+            f"  {t['name']}: +{t['pct_change']:.0f}% (now €{t['latest_price']:.2f}, was ~€{t['avg_price']:.2f})"
+            for t in trends
+        )
 
     goal = metrics.get_goal_status()
     if goal:
@@ -606,18 +653,11 @@ async def report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             lines.append(f"  {goal['name']}: target date ({goal['target_date']}) has passed")
 
-    trends = metrics.get_price_trends()
-    if trends:
-        lines.append("\n📈 Creeping up")
-        lines.extend(
-            f"  {t['name']}: +{t['pct_change']:.0f}% (now €{t['latest_price']:.2f}, was ~€{t['avg_price']:.2f})"
-            for t in trends
-        )
-
-    lines.append("\n🚦 Status")
+    health = metrics.get_inventory_health()
     if not any(health.values()):
-        lines.append("  🟢 All good — nothing needs your attention.")
+        lines.append("\n🟢 Nothing needs your attention.")
     else:
+        lines.append("\n🚦 Needs you")
         for name in health["unprofiled"]:
             lines.append(f"  🟡 {name} — still needs profiling (shelf-life/luxury)")
         for name in health["checkin_pending"]:

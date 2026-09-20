@@ -37,8 +37,17 @@ It helps you manage home inventory and track household expenses through a conver
   (opt-in only, never asked upfront)
 - ✅ Every receipt item shows its % change vs. its own purchase history (not just
   spikes), flagged distinctly once it crosses +15%
-- ✅ `/report` – Spending, budget, goal pace, price trends, and a status line: a
-  green light when nothing needs you, or specific items when something does
+- ✅ `/report` – Built around what a receipt *can't* tell you, not what it already says:
+  - **Treats vs. essentials** – what share of the month went to things you flagged as
+    luxuries. Your own answers, totalled up.
+  - **Cost per day you own it** – latest price ÷ shelf life, which separates "expensive
+    to buy" from "expensive to keep around" (a €10.99 box lasting 2 days costs €5.50/day;
+    €6.99 peanut butter lasting 60 days costs €0.12/day).
+  - **Month-end pace** – straight-line projection of where this month lands, withheld
+    early in the month when there's too little to extrapolate from.
+  - **Running out soon** – essentials due within a week, so one trip replaces three.
+  - Plus price creep, goal pace, and a green light when genuinely nothing needs you.
+
   (data layer in `db/metrics.py` is Telegram-agnostic, so a future web page can
   reuse it directly)
 

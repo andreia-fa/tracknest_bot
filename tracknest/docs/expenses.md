@@ -74,6 +74,31 @@ get_price_delta(item_name, new_price, min_history=1) -> dict | None
     # there isn't enough history yet. Call before log_expense() — see "Rules" above.
 ```
 
+## Related: What `/report` shows, and why (`bot/main.py`, `db/metrics.py`)
+
+Every line in `/report` has to answer something the user couldn't work out
+from the receipt itself. Reporting the obvious ("you spent money", "you
+bought sushi") was deliberately cut. What survived, and the function behind
+each:
+
+| Line | Function | Why it earns its place |
+|------|----------|------------------------|
+| Spent + month-end pace | `get_month_pace()` | Straight-line projection (spend/day × days in month). Withheld before `_MIN_DAYS_FOR_PROJECTION` days, since extrapolating from 2 days is noise. |
+| Treats vs. essentials | `get_spending_summary()` (`luxury`/`essential`/`unclassified`) | The user's own luxury/essential answers, totalled — nobody sums this for themselves, and it reframes the month harder than the headline number. `unclassified` stays separate so an unanswered question never masquerades as an essential. |
+| Cost per day you own it | `get_daily_cost()` | Latest unit price ÷ shelf life. Separates "expensive to buy" from "expensive to keep around" — invisible on a receipt. Treats included; that's where the spread usually is. |
+| Running out soon | `get_running_low()` | Forward-looking counterpart to the check-in, which only speaks up once an item is *already* due. Essentials only, 7-day window, so one shopping trip can replace three. |
+| Creeping up | `get_price_trends()` | Inflation per item vs. its own history. |
+| Goal pace | `get_goal_status()` | Honest anchor, not a fake progress bar (no savings ledger exists). |
+| Green light / needs you | `get_inventory_health()` | Named items and what they need, or a single 🟢 line. |
+
+Ordering is deliberate: the surprising things first, the reassuring
+"nothing needs your attention" last.
+
+**Cut, and why:** a "consumption tracking accuracy" metric (how many
+shelf-life guesses had been corrected) — an internal calibration signal the
+user can't act on; and a frequency-based "most purchased item" — euro totals
+already answer "where does my money go" better.
+
 ## Related: Onboarding (`bot/main.py`)
 
 On a brand-new chat (no chat id ever saved — `settings.get_chat_id()` is
