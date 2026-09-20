@@ -617,18 +617,26 @@ async def report(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{c['category']} (€{c['total']:.2f})" for c in spending["top_categories"]
         ))
 
+    # Held back until a repurchase has tested each item's shelf life — see
+    # get_daily_cost. Says what it's waiting for rather than going quiet, so
+    # the number doesn't look like it was dropped.
     daily = metrics.get_daily_cost()
-    if daily:
-        lines.append("\n💸 Cost per day you own it")
+    lines.append("\n💸 Cost per day you own it")
+    if daily["items"]:
         lines.extend(
             f"  {d['name']} — €{d['cost_per_day']:.2f}/day "
             f"(€{d['unit_price']:.2f}, lasts {d['shelf_life_days']}d)"
-            for d in daily
+            for d in daily["items"]
+        )
+    else:
+        lines.append(
+            f"  Waiting on repeat purchases — an item needs buying twice before its "
+            f"shelf life is worth dividing by (0 of {daily['tracked']} ready)."
         )
 
     running_low = metrics.get_running_low()
     if running_low:
-        lines.append("\n⏳ Running out soon")
+        lines.append("\n⏳ Running out soon (based on your own estimates)")
         lines.extend(
             f"  {item['name']} — in ~{item['days_left']} day{'s' if item['days_left'] != 1 else ''}"
             for item in running_low

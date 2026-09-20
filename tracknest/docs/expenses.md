@@ -99,6 +99,39 @@ shelf-life guesses had been corrected) — an internal calibration signal the
 user can't act on; and a frequency-based "most purchased item" — euro totals
 already answer "where does my money go" better.
 
+### How much to trust a shelf-life estimate
+
+`shelf_life_days` starts life as the user's cold guess, made the first time
+an item is bought, and only becomes evidence once a real repurchase interval
+has tested it (`log_expense` corrects it downward when a repurchase beats the
+estimate; a "still good" check-in reply bumps it up). The user made the point
+concretely: sushi was declared a 2-day item but was still being eaten on day
+three.
+
+So the two shelf-life-derived report lines are treated differently, on
+purpose:
+
+- **Cost per day is gated** behind `_MIN_PURCHASES_FOR_SHELF_LIFE_TRUST`
+  (currently 2 purchases, i.e. at least one observed interval). A price
+  divided by an untested guess *looks* like a measurement, and because the
+  figure ranks items against each other, one bad estimate reorders the whole
+  list. When nothing qualifies, `/report` says what it's waiting for rather
+  than dropping the section silently.
+- **Running out soon is not gated.** It's a cheap, self-correcting nudge
+  built on a number the user supplied themselves — if it's wrong, they just
+  don't buy bread — and the report labels it "based on your own estimates"
+  so the basis is visible.
+
+The check-in and spare-stock alert jobs are deliberately *not* gated either:
+asking early is how the estimate gets corrected in the first place, so
+gating them would prevent the very data the gate is waiting for.
+
+> **REVISIT 2026-11-20** (two months on, agreed with the user 2026-09-20):
+> re-tune `_MIN_PURCHASES_FOR_SHELF_LIFE_TRUST` once real repurchase data
+> exists — raise toward 3 if single intervals still read as noisy, lower if
+> too few items ever qualify — and reconsider whether the run-out forecast
+> has earned more or less prominence.
+
 ## Related: Onboarding (`bot/main.py`)
 
 On a brand-new chat (no chat id ever saved — `settings.get_chat_id()` is

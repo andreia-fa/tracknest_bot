@@ -120,14 +120,33 @@ def test_get_running_low_handles_date_only_last_purchase(mock_conn):
 @patch("db.metrics.get_connection")
 def test_get_daily_cost_ranks_by_cost_per_day(mock_conn):
     conn, _cursor = make_mock_conn(fetchall_side_effect=[[
-        {"name": "Peanut Butter", "shelf_life_days": 60, "is_luxury": 0, "unit_price": 6.99},
-        {"name": "Sushi", "shelf_life_days": 2, "is_luxury": 1, "unit_price": 10.99},
-        {"name": "Never Bought", "shelf_life_days": 5, "is_luxury": 0, "unit_price": None},
+        {"name": "Peanut Butter", "shelf_life_days": 60, "is_luxury": 0,
+         "unit_price": 6.99, "purchase_count": 3},
+        {"name": "Sushi", "shelf_life_days": 2, "is_luxury": 1,
+         "unit_price": 10.99, "purchase_count": 2},
+        {"name": "Never Bought", "shelf_life_days": 5, "is_luxury": 0,
+         "unit_price": None, "purchase_count": 0},
     ]])
     mock_conn.return_value = conn
     result = metrics.get_daily_cost()
-    assert [item["name"] for item in result] == ["Sushi", "Peanut Butter"]
-    assert result[0]["cost_per_day"] == pytest.approx(5.495)
+    assert [item["name"] for item in result["items"]] == ["Sushi", "Peanut Butter"]
+    assert result["items"][0]["cost_per_day"] == pytest.approx(5.495)
+    assert result["ready"] == 2
+    assert result["tracked"] == 3
+
+
+@patch("db.metrics.get_connection")
+def test_get_daily_cost_withholds_untested_shelf_life(mock_conn):
+    """A single purchase means the shelf life is still just the user's guess."""
+    conn, _cursor = make_mock_conn(fetchall_side_effect=[[
+        {"name": "Sushi", "shelf_life_days": 2, "is_luxury": 1,
+         "unit_price": 10.99, "purchase_count": 1},
+    ]])
+    mock_conn.return_value = conn
+    result = metrics.get_daily_cost()
+    assert result["items"] == []
+    assert result["ready"] == 0
+    assert result["tracked"] == 1
 
 
 @patch("db.settings.get_financial_goal")
