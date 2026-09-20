@@ -28,8 +28,10 @@ It helps you manage home inventory and track household expenses through a conver
 - ✅ `/my_expenses [item_name]` – View spending history
 - ✅ `/total_spent [item_name]` – Total amount spent
 - ✅ `/set_budget <amount>` – Set a monthly spending budget, with an alert at 80%/100%
-- ✅ `/set_goal <name> <amount> <YYYY-MM-DD>` – Optional savings goal, shown in
-  `/report` as the pace you'd need per month to hit it (opt-in only, never asked upfront)
+- ✅ `/set_goal` – Optional savings goal: a short guided conversation (what
+  you're saving for, how much, then a date picked from buttons or typed
+  custom), shown in `/report` as the pace you'd need per month to hit it
+  (opt-in only, never asked upfront)
 - ✅ Every receipt item shows its % change vs. its own purchase history (not just
   spikes), flagged distinctly once it crosses +15%
 - ✅ `/report` – Spending, budget, goal pace, price trends, and a status line: a

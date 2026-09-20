@@ -94,12 +94,16 @@ it doesn't repeat every day within the same month.
 
 ## Related: Financial Goal (`db/settings.py`, `db/metrics.py`)
 
-`/set_goal <name> <amount> <YYYY-MM-DD>` is opt-in only — never asked upfront,
-run only if and when the user wants it. `metrics.get_goal_status()` doesn't
-track real progress (TrackNest has no savings ledger, only spending) — it
-computes an honest anchor number instead: the amount per month needed from
-today to hit the target by the target date. `/report` shows this, or that the
-target date has passed if `pace_per_month` comes back `None`.
+`/set_goal` is opt-in only — never asked upfront, run only if and when the
+user wants it. It's a short guided conversation (`bot/main.py`'s
+`_handle_goal_answer`, mirroring the shelf-life/luxury profiling flow):
+what the goal is for, how much, then a target date — either an inline-keyboard
+preset (3/6/12/24 months from today, via `handle_goal_date_choice`) or a typed
+custom `YYYY-MM-DD`. `metrics.get_goal_status()` doesn't track real progress
+(TrackNest has no savings ledger, only spending) — it computes an honest
+anchor number instead: the amount per month needed from today to hit the
+target by the target date. `/report` shows this, or that the target date has
+passed if `pace_per_month` comes back `None`.
 
 ## Related: Price Trends (`db/metrics.py`)
 

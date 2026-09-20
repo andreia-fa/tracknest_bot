@@ -9,12 +9,25 @@ from bot.receipt import parse_receipt
 from config import BOT_TOKEN
 from db import crud, expenses, metrics, settings, shopping_list
 from db.database import init_db
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
 _CHECKIN_INTERVAL = timedelta(hours=24)
 _PRICE_SPIKE_THRESHOLD_PCT = 15
 _PRICE_SPIKE_MIN_HISTORY = 2
+_GOAL_DATE_PRESETS = {
+    "3m": ("3 months", 91),
+    "6m": ("6 months", 182),
+    "1y": ("1 year", 365),
+    "2y": ("2 years", 730),
+}
 
 logging.basicConfig(
     format="%(asctime)s %(name)s %(levelname)s %(message)s",
@@ -44,8 +57,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "  /par_level [item_name] <1|2> — 1 = replace when low, 2 = always "
         "keep a spare. No item name sets the household default.\n"
         "  /set_budget <amount> — Set a monthly spending budget\n"
-        "  /set_goal <name> <amount> <YYYY-MM-DD> — Optional: set a savings "
-        "goal, shown in /report\n"
+        "  /set_goal — Optional: walks you through setting a savings goal "
+        "(name, amount, date), shown in /report\n"
         "  /report — Spending, price trends, and what needs your attention"
     )
 
@@ -135,10 +148,14 @@ async def _handle_checkin_answer(update: Update, context: ContextTypes.DEFAULT_T
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle plain-text messages: one shopping list entry per line.
 
-    If an item-profiling or shelf-life check-in question is pending for this
-    chat, the message is treated as the answer to that instead of new
-    shopping-list entries.
+    If a /set_goal conversation, item-profiling, or shelf-life check-in
+    question is pending for this chat, the message is treated as the answer
+    to that instead of new shopping-list entries.
     """
+    pending_goal = context.chat_data.get("awaiting_goal")
+    if pending_goal:
+        await _handle_goal_answer(update, context, pending_goal)
+        return
     pending_profile = context.chat_data.get("awaiting_profile")
     if pending_profile:
         await _handle_profile_answer(update, context, pending_profile)
@@ -355,31 +372,70 @@ async def set_budget_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def set_goal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /set_goal <name> <amount> <YYYY-MM-DD> — set the household's financial goal.
+    """Handle /set_goal — start a guided conversation to set an optional savings goal.
 
-    Opt-in only — never asked upfront, run only if and when you want it.
+    Opt-in only — never asked upfront, run only if and when you want one.
     """
-    args = context.args
-    if len(args) < 3:
-        await update.message.reply_text("Usage: /set_goal <name> <amount> <YYYY-MM-DD>")
+    context.chat_data["awaiting_goal"] = {"stage": "name"}
+    await update.message.reply_text("What are you saving for?")
+
+
+async def _handle_goal_answer(update: Update, context: ContextTypes.DEFAULT_TYPE, pending: dict):
+    """Interpret a plain-text reply as the next step in the /set_goal conversation."""
+    text = update.message.text.strip()
+    if pending["stage"] == "name":
+        pending["name"] = text
+        pending["stage"] = "amount"
+        await update.message.reply_text(f'How much do you need for "{text}"?')
         return
-    date_str = args[-1]
+    if pending["stage"] == "amount":
+        try:
+            pending["amount"] = float(text)
+        except ValueError:
+            await update.message.reply_text("Reply with a number, e.g. 2000.")
+            return
+        pending["stage"] = "date"
+        keys = list(_GOAL_DATE_PRESETS)
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(_GOAL_DATE_PRESETS[k][0], callback_data=f"goal_date:{k}") for k in keys[:2]],
+            [InlineKeyboardButton(_GOAL_DATE_PRESETS[k][0], callback_data=f"goal_date:{k}") for k in keys[2:]],
+            [InlineKeyboardButton("Custom date", callback_data="goal_date:custom")],
+        ])
+        await update.message.reply_text("By when?", reply_markup=keyboard)
+        return
+    # stage == "custom_date"
     try:
-        target = datetime.strptime(date_str, "%Y-%m-%d")
+        target = datetime.strptime(text, "%Y-%m-%d")
     except ValueError:
         await update.message.reply_text("Date must be in YYYY-MM-DD format.")
         return
     if target.date() <= datetime.now(tz=timezone.utc).date():
         await update.message.reply_text("Target date must be in the future.")
         return
-    try:
-        amount = float(args[-2])
-    except ValueError:
-        await update.message.reply_text("Amount must be a number.")
+    settings.set_financial_goal(pending["name"], pending["amount"], text)
+    context.chat_data.pop("awaiting_goal", None)
+    await update.message.reply_text(f"Goal set: {pending['name']} — €{pending['amount']:.2f} by {text}.")
+
+
+async def handle_goal_date_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle a button press on the /set_goal date-preset keyboard."""
+    query = update.callback_query
+    await query.answer()
+    pending = context.chat_data.get("awaiting_goal")
+    if not pending or pending.get("stage") != "date":
         return
-    name = " ".join(args[:-2])
-    settings.set_financial_goal(name, amount, date_str)
-    await update.message.reply_text(f"Goal set: {name} — €{amount:.2f} by {date_str}.")
+    choice = query.data.split(":", 1)[1]
+    if choice == "custom":
+        pending["stage"] = "custom_date"
+        await query.edit_message_text("What date? Reply with YYYY-MM-DD.")
+        return
+    label, days = _GOAL_DATE_PRESETS[choice]
+    target_date = (datetime.now(tz=timezone.utc) + timedelta(days=days)).date().isoformat()
+    settings.set_financial_goal(pending["name"], pending["amount"], target_date)
+    context.chat_data.pop("awaiting_goal", None)
+    await query.edit_message_text(
+        f"Goal set: {pending['name']} — €{pending['amount']:.2f} by {target_date} ({label} from today)."
+    )
 
 
 async def report(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -526,6 +582,7 @@ def main():
     app.add_handler(CommandHandler("set_budget", set_budget_cmd))
     app.add_handler(CommandHandler("set_goal", set_goal_cmd))
     app.add_handler(CommandHandler("report", report))
+    app.add_handler(CallbackQueryHandler(handle_goal_date_choice, pattern=r"^goal_date:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_error_handler(handle_error)
