@@ -1,5 +1,31 @@
 # TODO
 
+## ⏰ TODO (due 2026-11-20) — Revisit /report's shelf-life confidence gate
+`/report`'s "Cost per day you own it" line divides an item's latest price by
+its `shelf_life_days` estimate — but that estimate starts as the user's cold
+guess and only becomes evidence once a real repurchase interval has tested
+it. Concrete example that prompted this: sushi was declared a 2-day item,
+then was still being eaten on day three, making the naive €/day figure ~33%
+off — and since the figure also ranks items against each other, one bad
+estimate reorders the whole list.
+
+Fixed 2026-09-20 by gating the line behind
+`_MIN_PURCHASES_FOR_SHELF_LIFE_TRUST` (currently 2 purchases per item) in
+`tracknest/db/metrics.py` — see the `REVISIT 2026-11-20` comment on that
+constant and the "How much to trust a shelf-life estimate" section in
+`tracknest/docs/expenses.md` for the full reasoning.
+
+**When this date arrives:**
+- [ ] Run `metrics.get_daily_cost()` and check `ready` vs `tracked` — if
+      `ready` is still 0 after two months, the gate is too strict to ever
+      deliver the insight and needs rethinking, not just tuning.
+- [ ] Raise the threshold toward 3 if single intervals still produce noisy
+      figures; lower it if too few items ever qualify (slow-moving items
+      like a 60-day peanut butter may take 6 months to earn 2 purchases).
+- [ ] Reconsider whether "Running out soon" (deliberately left ungated,
+      since it's a cheap self-correcting nudge rather than an analytical
+      claim) has earned more or less prominence.
+
 ## ✅ Done (2026-09-19) — local autostart via systemd, no more manual restarts
 The bot was being started manually (`python -m bot.main &` + `disown`) every
 session, which meant a reboot or closed terminal silently killed it until
