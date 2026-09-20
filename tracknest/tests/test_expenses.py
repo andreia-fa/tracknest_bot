@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from db import expenses
 
 
@@ -70,31 +72,33 @@ def test_log_expense_marks_correction(mock_conn):
 
 
 @patch("db.expenses.get_connection")
-def test_check_price_spike_detected(mock_conn):
+def test_get_price_delta_positive(mock_conn):
     conn, _cursor = make_mock_conn(fetchone={"avg_price": 2.00, "n": 3})
     mock_conn.return_value = conn
-    assert expenses.check_price_spike("Milk", 3.00) == 2.00
+    result = expenses.get_price_delta("Milk", 3.00)
+    assert result == {"avg_price": 2.00, "pct_change": 50.0, "n": 3}
 
 
 @patch("db.expenses.get_connection")
-def test_check_price_spike_not_a_spike(mock_conn):
+def test_get_price_delta_negative(mock_conn):
     conn, _cursor = make_mock_conn(fetchone={"avg_price": 2.00, "n": 3})
     mock_conn.return_value = conn
-    assert expenses.check_price_spike("Milk", 2.10) is None
+    result = expenses.get_price_delta("Milk", 1.80)
+    assert result == pytest.approx({"avg_price": 2.00, "pct_change": -10.0, "n": 3})
 
 
 @patch("db.expenses.get_connection")
-def test_check_price_spike_insufficient_history(mock_conn):
-    conn, _cursor = make_mock_conn(fetchone={"avg_price": 2.00, "n": 1})
+def test_get_price_delta_insufficient_history(mock_conn):
+    conn, _cursor = make_mock_conn(fetchone={"avg_price": 2.00, "n": 0})
     mock_conn.return_value = conn
-    assert expenses.check_price_spike("Milk", 10.00) is None
+    assert expenses.get_price_delta("Milk", 10.00, min_history=1) is None
 
 
 @patch("db.expenses.get_connection")
-def test_check_price_spike_no_history(mock_conn):
+def test_get_price_delta_no_history(mock_conn):
     conn, _cursor = make_mock_conn(fetchone={"avg_price": None, "n": 0})
     mock_conn.return_value = conn
-    assert expenses.check_price_spike("Milk", 10.00) is None
+    assert expenses.get_price_delta("Milk", 10.00) is None
 
 
 @patch("db.expenses.get_connection")

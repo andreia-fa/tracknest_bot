@@ -13,6 +13,8 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 _CHECKIN_INTERVAL = timedelta(hours=24)
+_PRICE_SPIKE_THRESHOLD_PCT = 15
+_PRICE_SPIKE_MIN_HISTORY = 2
 
 logging.basicConfig(
     format="%(asctime)s %(name)s %(levelname)s %(message)s",
@@ -198,7 +200,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             continue
         crud.add_item(name, qty, category=item.get("category") or None)
-        spike_avg = expenses.check_price_spike(name, price)
+        delta = expenses.get_price_delta(name, price)
         expenses.log_expense(name, qty, price)
         current = crud.get_item(name)
         if current and current["shelf_life_days"] is None:
@@ -207,8 +209,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         matched = item["matched_shopping_list_item"]
         if matched and shopping_list.remove_item(matched):
             line += " (cleared from your list)"
-        if spike_avg is not None:
-            line += f" — heads up, that's above the usual ~€{spike_avg:.2f}"
+        if delta is not None:
+            sign = "+" if delta["pct_change"] >= 0 else ""
+            delta_text = f"{sign}{delta['pct_change']:.0f}% vs usual €{delta['avg_price']:.2f}"
+            if delta["pct_change"] >= _PRICE_SPIKE_THRESHOLD_PCT and delta["n"] >= _PRICE_SPIKE_MIN_HISTORY:
+                line += f" — ⚠️ {delta_text}, that's a jump"
+            else:
+                line += f" ({delta_text})"
         replies.append(line)
     await update.message.reply_text("Receipt processed:\n" + "\n".join(replies))
     if to_profile:
@@ -356,6 +363,14 @@ async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append("  Top categories: " + ", ".join(
             f"{c['category']} (€{c['total']:.2f})" for c in spending["top_categories"]
         ))
+
+    trends = metrics.get_price_trends()
+    if trends:
+        lines.append("\n📈 Creeping up")
+        lines.extend(
+            f"  {t['name']}: +{t['pct_change']:.0f}% (now €{t['latest_price']:.2f}, was ~€{t['avg_price']:.2f})"
+            for t in trends
+        )
 
     lines.append("\n🔍 Consumption tracking")
     lines.append(f"  {accuracy['tracked']} item(s) with a shelf-life estimate, "

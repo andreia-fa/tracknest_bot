@@ -100,22 +100,26 @@ def is_duplicate_purchase(item_name, unit_price, window_minutes=60):
     return found
 
 
-def check_price_spike(item_name, new_price, factor=1.3, min_history=2):
-    """Check whether a new price is an unusual spike against an item's purchase history.
+def get_price_delta(item_name, new_price, min_history=1):
+    """Compare a new price against an item's purchase history.
 
     Must be called before log_expense records the new purchase, so the
-    average is computed over prior purchases only.
+    average is computed over prior purchases only. Unlike a spike-only
+    check, this returns a comparison on every repurchase (not just unusually
+    large jumps) so the caller can surface everyday price drift, not only
+    dramatic outliers — useful for tracking creeping inflation on an item.
 
     Args:
         item_name: Name of the item being purchased.
         new_price: Unit price about to be logged.
-        factor: How far above the historical average counts as a spike.
-        min_history: Minimum number of prior purchases required to judge a
-            spike — too little history makes the average unreliable.
+        min_history: Minimum number of prior purchases required before a
+            comparison is meaningful — too little history makes the average
+            unreliable.
 
     Returns:
-        The historical average price (float) if new_price is a spike,
-        otherwise None.
+        Dict with keys avg_price (historical average), pct_change (signed,
+        e.g. 8.0 for +8%), and n (number of prior purchases), or None if
+        there isn't enough history yet.
     """
     conn = get_connection()
     cursor = conn.cursor()
@@ -131,7 +135,8 @@ def check_price_spike(item_name, new_price, factor=1.3, min_history=2):
     if not row or row["n"] < min_history or row["avg_price"] is None:
         return None
     avg_price = row["avg_price"]
-    return avg_price if new_price > avg_price * factor else None
+    pct_change = (new_price - avg_price) / avg_price * 100
+    return {"avg_price": avg_price, "pct_change": pct_change, "n": row["n"]}
 
 
 def get_expenses(item_name=None):

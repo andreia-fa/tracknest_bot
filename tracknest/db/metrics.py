@@ -102,6 +102,58 @@ def get_consumption_accuracy():
     return {"tracked": row["tracked"] or 0, "corrected": row["corrected"] or 0}
 
 
+def get_price_trends(min_history=2, top_n=3):
+    """Return the items whose latest price has crept up the most against their own history.
+
+    Compares each item's most recent purchase price to the average of its
+    earlier purchases — the same comparison used for the per-purchase price
+    delta, but aggregated across all items so the dashboard can surface
+    creeping inflation, not just one-off jumps.
+
+    Args:
+        min_history: Minimum number of purchases (including the latest)
+            required before an item is considered.
+        top_n: How many items to return, highest increase first.
+
+    Returns:
+        List of dicts: name, pct_change (signed), latest_price, avg_price.
+        Only items with a positive pct_change are included.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT i.name AS name, e.unit_price AS unit_price
+        FROM item_expenses e
+        JOIN inventory_items i ON i.id = e.item_id
+        ORDER BY i.name, e.id ASC
+    """)
+    rows = cursor.fetchall()
+    cursor.close()
+    conn.close()
+
+    prices_by_item = {}
+    for row in rows:
+        prices_by_item.setdefault(row["name"], []).append(row["unit_price"])
+
+    trends = []
+    for name, prices in prices_by_item.items():
+        if len(prices) < min_history:
+            continue
+        *prior, latest = prices
+        avg_price = sum(prior) / len(prior)
+        if avg_price <= 0:
+            continue
+        pct_change = (latest - avg_price) / avg_price * 100
+        if pct_change > 0:
+            trends.append({
+                "name": name, "pct_change": pct_change,
+                "latest_price": latest, "avg_price": avg_price,
+            })
+
+    trends.sort(key=lambda t: t["pct_change"], reverse=True)
+    return trends[:top_n]
+
+
 def get_inventory_health():
     """Return counts of items needing attention: pending alerts, missing profile data.
 

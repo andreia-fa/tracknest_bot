@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from db import metrics
 
 
@@ -59,6 +61,33 @@ def test_get_consumption_accuracy_empty(mock_conn):
     conn, _cursor = make_mock_conn(fetchone_side_effect=[{"tracked": 0, "corrected": None}])
     mock_conn.return_value = conn
     assert metrics.get_consumption_accuracy() == {"tracked": 0, "corrected": 0}
+
+
+@patch("db.metrics.get_connection")
+def test_get_price_trends(mock_conn):
+    rows = [
+        {"name": "Milk", "unit_price": 2.00},
+        {"name": "Milk", "unit_price": 2.20},
+        {"name": "Milk", "unit_price": 3.00},
+        {"name": "Rice", "unit_price": 1.00},
+        {"name": "Rice", "unit_price": 0.90},
+    ]
+    conn, _cursor = make_mock_conn(fetchall_side_effect=[rows])
+    mock_conn.return_value = conn
+    result = metrics.get_price_trends()
+    assert len(result) == 1
+    assert result[0]["name"] == "Milk"
+    assert result[0]["pct_change"] == pytest.approx(42.857142857142854)
+    assert result[0]["latest_price"] == 3.00
+    assert result[0]["avg_price"] == pytest.approx(2.10)
+
+
+@patch("db.metrics.get_connection")
+def test_get_price_trends_insufficient_history(mock_conn):
+    rows = [{"name": "Milk", "unit_price": 2.00}]
+    conn, _cursor = make_mock_conn(fetchall_side_effect=[rows])
+    mock_conn.return_value = conn
+    assert metrics.get_price_trends() == []
 
 
 @patch("db.metrics.get_connection")
