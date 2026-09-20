@@ -23,11 +23,14 @@ and clears them off the shopping list.
   treated as the same physical receipt processed twice (e.g. two photos of one
   receipt) rather than a real second purchase, and is skipped instead of
   double-counted.
-- Also before logging, `handle_photo` calls `check_price_spike()`: if the new
-  unit price is more than 1.3x the item's historical average (with at least 2
-  prior purchases), the receipt reply flags it inline rather than silently
-  logging it. This must run before `log_expense()` inserts the new row, or the
-  average would include the very price being checked.
+- Also before logging, `handle_photo` calls `get_price_delta()`: with at least
+  one prior purchase, the receipt reply always shows the % change vs. the
+  item's historical average (e.g. "+8% vs usual €2.96"), not just when it's
+  unusual — this makes everyday price creep visible, not only dramatic jumps.
+  When the change is +15% or more (with at least 2 prior purchases), the line
+  is flagged as a jump instead of a plain parenthetical. This must run before
+  `log_expense()` inserts the new row, or the average would include the very
+  price being compared.
 - `log_expense()` also auto-corrects a non-luxury item's `shelf_life_days`
   estimate down to the real gap when a repurchase comes sooner than expected,
   setting `shelf_life_corrected = 1` — a signal `db/metrics.py` uses to report
@@ -67,9 +70,9 @@ get_total_spent(item_name=None) -> float
 is_duplicate_purchase(item_name, unit_price, window_minutes=60) -> bool
     # True if this item/price was already logged within window_minutes.
 
-check_price_spike(item_name, new_price, factor=1.3, min_history=2) -> float | None
-    # Returns the historical average price if new_price is a spike, else None.
-    # Call before log_expense() — see "Rules" above.
+get_price_delta(item_name, new_price, min_history=1) -> dict | None
+    # {avg_price, pct_change (signed), n} vs. purchase history, or None if
+    # there isn't enough history yet. Call before log_expense() — see "Rules" above.
 ```
 
 ## Related: Household Replenishment Policy (`db/settings.py`, `db/crud.py`)
@@ -89,3 +92,10 @@ the new columns this relies on.
 (`metrics.get_spending_summary()`) against it and alerts once when crossing
 80% and again at 100%, tracked via `settings.get/set_budget_alert_state()` so
 it doesn't repeat every day within the same month.
+
+## Related: Price Trends (`db/metrics.py`)
+
+`/dashboard` includes a "Creeping up" section from `metrics.get_price_trends()`,
+which compares each item's most recent purchase to the average of its earlier
+ones (same idea as `get_price_delta`, but aggregated across the whole
+inventory) and lists the items that have risen the most.

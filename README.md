@@ -28,7 +28,8 @@ It helps you manage home inventory and track household expenses through a conver
 - ✅ `/my_expenses [item_name]` – View spending history
 - ✅ `/total_spent [item_name]` – Total amount spent
 - ✅ `/set_budget <amount>` – Set a monthly spending budget, with an alert at 80%/100%
-- ✅ Price-spike warning on a receipt item priced well above its own purchase history
+- ✅ Every receipt item shows its % change vs. its own purchase history (not just
+  spikes), flagged distinctly once it crosses +15%
 - ✅ `/dashboard` – Spending, budget, consumption-tracking accuracy, and inventory
   health in one Telegram message (data layer in `db/metrics.py` is Telegram-agnostic,
   so a future web dashboard can reuse it directly)
