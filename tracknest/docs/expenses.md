@@ -74,36 +74,51 @@ get_price_delta(item_name, new_price, min_history=1) -> dict | None
     # there isn't enough history yet. Call before log_expense() — see "Rules" above.
 ```
 
+## Related: Onboarding (`bot/main.py`)
+
+On a brand-new chat (no chat id ever saved — `settings.get_chat_id()` is
+`None`), `start()` launches a short welcome questionnaire instead of the
+usual help text: household replenishment policy, then budget, then savings
+goal, each via inline-keyboard buttons with a "Skip for now" option — no
+question is required, and none of it is asked again on a later `/start`.
+`/setup` re-runs the same questionnaire manually any time (e.g. to fill in
+something skipped). This is deliberately the only place these three
+questions are asked upfront; everything else in the bot (shelf-life,
+luxury/essential) stays reactive — asked the first time an item is actually
+purchased, since there's no meaningful answer before then.
+
 ## Related: Household Replenishment Policy (`db/settings.py`, `db/crud.py`)
 
 Each item has an effective **par level** — 1 (replace right when it runs low)
 or 2 (always keep a spare) — resolved as the item's own `par_level` override
 if set, otherwise the household default from `settings.get_default_par_level()`
-(defaults to 1). Set via `/par_level [item_name] <1|2>`. Par=2 items get a
-proactive "buy a spare" alert ahead of the estimated run-out date, computed
-in `bot/main.py`'s `check_spare_stock_alerts` job — see `docs/setup.md` for
-the new columns this relies on.
+(defaults to 1). Set during onboarding, or any time via
+`/par_level [item_name] <1|2>`. Par=2 items get a proactive "buy a spare"
+alert ahead of the estimated run-out date, computed in `bot/main.py`'s
+`check_spare_stock_alerts` job — see `docs/setup.md` for the new columns
+this relies on.
 
 ## Related: Budget Alerts (`db/settings.py`, `db/metrics.py`)
 
-`/set_budget <amount>` sets a monthly spending cap. A daily job
-(`bot/main.py`'s `check_budget_alert`) compares the current month's total
-(`metrics.get_spending_summary()`) against it and alerts once when crossing
-80% and again at 100%, tracked via `settings.get/set_budget_alert_state()` so
-it doesn't repeat every day within the same month.
+A monthly spending cap, set during onboarding or any time via
+`/set_budget <amount>`. A daily job (`bot/main.py`'s `check_budget_alert`)
+compares the current month's total (`metrics.get_spending_summary()`)
+against it and alerts once when crossing 80% and again at 100%, tracked via
+`settings.get/set_budget_alert_state()` so it doesn't repeat every day
+within the same month.
 
 ## Related: Financial Goal (`db/settings.py`, `db/metrics.py`)
 
-`/set_goal` is opt-in only — never asked upfront, run only if and when the
-user wants it. It's a short guided conversation (`bot/main.py`'s
-`_handle_goal_answer`, mirroring the shelf-life/luxury profiling flow):
-what the goal is for, how much, then a target date — either an inline-keyboard
-preset (3/6/12/24 months from today, via `handle_goal_date_choice`) or a typed
-custom `YYYY-MM-DD`. `metrics.get_goal_status()` doesn't track real progress
-(TrackNest has no savings ledger, only spending) — it computes an honest
-anchor number instead: the amount per month needed from today to hit the
-target by the target date. `/report` shows this, or that the target date has
-passed if `pace_per_month` comes back `None`.
+Offered (skippable) during onboarding, or set any time via `/set_goal` — a
+short guided conversation (`bot/main.py`'s `_handle_goal_answer`, mirroring
+the shelf-life/luxury profiling flow): what the goal is for, how much, then
+a target date — either an inline-keyboard preset (3/6/12/24 months from
+today, via `handle_goal_date_choice`) or a typed custom `YYYY-MM-DD`.
+`metrics.get_goal_status()` doesn't track real progress (TrackNest has no
+savings ledger, only spending) — it computes an honest anchor number
+instead: the amount per month needed from today to hit the target by the
+target date. `/report` shows this, or that the target date has passed if
+`pace_per_month` comes back `None`.
 
 ## Related: Price Trends (`db/metrics.py`)
 

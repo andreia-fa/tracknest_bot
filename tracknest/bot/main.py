@@ -29,6 +29,20 @@ _GOAL_DATE_PRESETS = {
     "2y": ("2 years", 730),
 }
 
+_ONBOARD_PAR_KEYBOARD = InlineKeyboardMarkup([
+    [InlineKeyboardButton("Replace it when it runs low", callback_data="onboard_par:1")],
+    [InlineKeyboardButton("Always keep a spare", callback_data="onboard_par:2")],
+    [InlineKeyboardButton("Skip for now", callback_data="onboard_par:skip")],
+])
+_ONBOARD_BUDGET_KEYBOARD = InlineKeyboardMarkup([
+    [InlineKeyboardButton("Set one now", callback_data="onboard_budget:yes")],
+    [InlineKeyboardButton("Skip for now", callback_data="onboard_budget:skip")],
+])
+_ONBOARD_GOAL_KEYBOARD = InlineKeyboardMarkup([
+    [InlineKeyboardButton("Set one now", callback_data="onboard_goal:yes")],
+    [InlineKeyboardButton("Skip for now", callback_data="onboard_goal:skip")],
+])
+
 logging.basicConfig(
     format="%(asctime)s %(name)s %(levelname)s %(message)s",
     level=logging.INFO,
@@ -38,8 +52,17 @@ logger = logging.getLogger(__name__)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Send the welcome message and remember this chat for proactive check-ins."""
+    """Send the welcome message, remember this chat, and onboard true first-time users.
+
+    Onboarding (household policy, budget, goal — see _start_onboarding) only
+    fires when no chat id has ever been saved before; a repeat /start just
+    shows the command list. /setup re-runs onboarding manually any time.
+    """
+    is_first_run = settings.get_chat_id() is None
     settings.set_chat_id(update.effective_chat.id)
+    if is_first_run:
+        await _start_onboarding(update, context)
+        return
     await update.message.reply_text(
         "Welcome to TrackNest!\n\n"
         "Just type whatever you need, one item per line, whenever you think of it:\n"
@@ -59,8 +82,118 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "  /set_budget <amount> — Set a monthly spending budget\n"
         "  /set_goal — Optional: walks you through setting a savings goal "
         "(name, amount, date), shown in /report\n"
+        "  /setup — Re-run the welcome questions (policy, budget, goal)\n"
         "  /report — Spending, price trends, and what needs your attention"
     )
+
+
+async def setup_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /setup — re-run the onboarding conversation any time."""
+    await _start_onboarding(update, context)
+
+
+async def _start_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start the onboarding conversation: household policy, then budget, then goal.
+
+    Every question is skippable — nothing here is required, and each one can
+    also be set or changed later via /par_level, /set_budget, or /set_goal.
+    """
+    context.chat_data["onboarding"] = {"stage": "par_level"}
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=(
+            "Hi! Thanks for joining TrackNest 👋\n\n"
+            "Before we start, mind answering a couple of quick questions? "
+            "It helps me be useful right away — skip anything you're not sure about.\n\n"
+            "When something runs low, do you prefer to:"
+        ),
+        reply_markup=_ONBOARD_PAR_KEYBOARD,
+    )
+
+
+async def _ask_onboard_budget(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ask the onboarding budget question."""
+    context.chat_data["onboarding"] = {"stage": "budget_choice"}
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="Want to set a monthly spending budget?",
+        reply_markup=_ONBOARD_BUDGET_KEYBOARD,
+    )
+
+
+async def _ask_onboard_goal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ask the onboarding savings-goal question."""
+    context.chat_data["onboarding"] = {"stage": "goal_choice"}
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="Have a savings goal you'd like tracked alongside your spending?",
+        reply_markup=_ONBOARD_GOAL_KEYBOARD,
+    )
+
+
+async def _finish_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Close out onboarding with a pointer to everyday usage."""
+    context.chat_data.pop("onboarding", None)
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=(
+            "All set! I'll ask a couple more questions the first time you buy "
+            "something new — for now, just send me what you need to buy, or a "
+            "photo of a receipt.\n\n"
+            "Type /start anytime to see the full command list, or /report to "
+            "see how things are going."
+        ),
+    )
+
+
+async def _handle_onboarding_text(update: Update, context: ContextTypes.DEFAULT_TYPE, pending: dict):
+    """Interpret a plain-text reply during onboarding — currently only the budget amount."""
+    text = update.message.text.strip()
+    try:
+        amount = float(text)
+    except ValueError:
+        await update.message.reply_text("Reply with a number, e.g. 250.")
+        return
+    settings.set_monthly_budget(amount)
+    await update.message.reply_text(f"Budget set to €{amount:.2f}.")
+    await _ask_onboard_goal(update, context)
+
+
+async def handle_onboarding_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle a button press during the onboarding conversation."""
+    query = update.callback_query
+    await query.answer()
+    pending = context.chat_data.get("onboarding")
+    if not pending:
+        return
+    prefix, choice = query.data.split(":", 1)
+
+    if prefix == "onboard_par":
+        if choice in ("1", "2"):
+            settings.set_default_par_level(int(choice))
+            await query.edit_message_text("Got it — saved.")
+        else:
+            await query.edit_message_text("Skipped — set this anytime with /par_level.")
+        await _ask_onboard_budget(update, context)
+        return
+
+    if prefix == "onboard_budget":
+        if choice == "yes":
+            pending["stage"] = "budget_amount"
+            await query.edit_message_text("How much would you like to budget per month?")
+            return
+        await query.edit_message_text("Skipped — set this anytime with /set_budget.")
+        await _ask_onboard_goal(update, context)
+        return
+
+    if prefix == "onboard_goal":
+        if choice == "yes":
+            context.chat_data.pop("onboarding", None)
+            context.chat_data["awaiting_goal"] = {"stage": "name", "from_onboarding": True}
+            await query.edit_message_text("What are you saving for?")
+            return
+        await query.edit_message_text("Skipped — set this anytime with /set_goal.")
+        await _finish_onboarding(update, context)
 
 
 _SHELF_LIFE_NA_WORDS = {"n/a", "na", "no", "none", "never", "doesn't spoil", "does not spoil"}
@@ -148,10 +281,14 @@ async def _handle_checkin_answer(update: Update, context: ContextTypes.DEFAULT_T
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle plain-text messages: one shopping list entry per line.
 
-    If a /set_goal conversation, item-profiling, or shelf-life check-in
-    question is pending for this chat, the message is treated as the answer
-    to that instead of new shopping-list entries.
+    If onboarding, a /set_goal conversation, item-profiling, or shelf-life
+    check-in question is pending for this chat, the message is treated as
+    the answer to that instead of new shopping-list entries.
     """
+    pending_onboarding = context.chat_data.get("onboarding")
+    if pending_onboarding:
+        await _handle_onboarding_text(update, context, pending_onboarding)
+        return
     pending_goal = context.chat_data.get("awaiting_goal")
     if pending_goal:
         await _handle_goal_answer(update, context, pending_goal)
@@ -413,8 +550,11 @@ async def _handle_goal_answer(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("Target date must be in the future.")
         return
     settings.set_financial_goal(pending["name"], pending["amount"], text)
+    from_onboarding = pending.get("from_onboarding", False)
     context.chat_data.pop("awaiting_goal", None)
     await update.message.reply_text(f"Goal set: {pending['name']} — €{pending['amount']:.2f} by {text}.")
+    if from_onboarding:
+        await _finish_onboarding(update, context)
 
 
 async def handle_goal_date_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -432,10 +572,13 @@ async def handle_goal_date_choice(update: Update, context: ContextTypes.DEFAULT_
     label, days = _GOAL_DATE_PRESETS[choice]
     target_date = (datetime.now(tz=timezone.utc) + timedelta(days=days)).date().isoformat()
     settings.set_financial_goal(pending["name"], pending["amount"], target_date)
+    from_onboarding = pending.get("from_onboarding", False)
     context.chat_data.pop("awaiting_goal", None)
     await query.edit_message_text(
         f"Goal set: {pending['name']} — €{pending['amount']:.2f} by {target_date} ({label} from today)."
     )
+    if from_onboarding:
+        await _finish_onboarding(update, context)
 
 
 async def report(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -582,7 +725,9 @@ def main():
     app.add_handler(CommandHandler("set_budget", set_budget_cmd))
     app.add_handler(CommandHandler("set_goal", set_goal_cmd))
     app.add_handler(CommandHandler("report", report))
+    app.add_handler(CommandHandler("setup", setup_cmd))
     app.add_handler(CallbackQueryHandler(handle_goal_date_choice, pattern=r"^goal_date:"))
+    app.add_handler(CallbackQueryHandler(handle_onboarding_choice, pattern=r"^onboard_"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_error_handler(handle_error)
