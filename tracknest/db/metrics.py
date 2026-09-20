@@ -1,8 +1,8 @@
-"""Read-only aggregate queries backing /dashboard and proactive alerts.
+"""Read-only aggregate queries backing /report and proactive alerts.
 
 Deliberately Telegram-agnostic — every function returns plain dicts/lists so
-a future web dashboard can call the same functions instead of re-deriving
-these numbers from a different layer.
+a future web page can call the same functions instead of re-deriving these
+numbers from a different layer.
 """
 
 from datetime import datetime, timezone
@@ -80,28 +80,6 @@ def get_budget_status():
     return {"budget": budget, "spent": spent, "pct": pct}
 
 
-def get_consumption_accuracy():
-    """Return a health check on shelf-life estimates vs real repurchase timing.
-
-    Returns:
-        Dict with keys: tracked (count of items with a shelf-life estimate),
-        corrected (count of those where the original guess has been
-        auto-corrected by a real early repurchase).
-    """
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT COUNT(*) AS tracked,
-               SUM(CASE WHEN shelf_life_corrected = 1 THEN 1 ELSE 0 END) AS corrected
-        FROM inventory_items
-        WHERE shelf_life_days IS NOT NULL AND shelf_life_days > 0
-    """)
-    row = cursor.fetchone()
-    cursor.close()
-    conn.close()
-    return {"tracked": row["tracked"] or 0, "corrected": row["corrected"] or 0}
-
-
 def get_price_trends(min_history=2, top_n=3):
     """Return the items whose latest price has crept up the most against their own history.
 
@@ -155,23 +133,25 @@ def get_price_trends(min_history=2, top_n=3):
 
 
 def get_inventory_health():
-    """Return counts of items needing attention: pending alerts, missing profile data.
+    """Return items needing attention: pending alerts, missing profile data.
 
     Returns:
-        Dict with keys: checkin_pending, spare_alert_pending, unprofiled
-        (items never asked about shelf-life/luxury status).
+        Dict with keys checkin_pending, spare_alert_pending, unprofiled
+        (items never asked about shelf-life/luxury status) — each a list of
+        item names needing that kind of attention. An empty list means
+        nothing of that kind needs attention right now.
     """
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM inventory_items WHERE checkin_pending = 1")
-    checkin_pending = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(*) FROM inventory_items WHERE spare_alert_pending = 1")
-    spare_alert_pending = cursor.fetchone()[0]
+    cursor.execute("SELECT name FROM inventory_items WHERE checkin_pending = 1")
+    checkin_pending = [row["name"] for row in cursor.fetchall()]
+    cursor.execute("SELECT name FROM inventory_items WHERE spare_alert_pending = 1")
+    spare_alert_pending = [row["name"] for row in cursor.fetchall()]
     cursor.execute("""
-        SELECT COUNT(*) FROM inventory_items
+        SELECT name FROM inventory_items
         WHERE shelf_life_days IS NULL OR is_luxury IS NULL
     """)
-    unprofiled = cursor.fetchone()[0]
+    unprofiled = [row["name"] for row in cursor.fetchall()]
     cursor.close()
     conn.close()
     return {

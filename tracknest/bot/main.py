@@ -44,7 +44,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "  /par_level [item_name] <1|2> — 1 = replace when low, 2 = always "
         "keep a spare. No item name sets the household default.\n"
         "  /set_budget <amount> — Set a monthly spending budget\n"
-        "  /dashboard — Spending, alerts, and inventory health at a glance"
+        "  /report — Spending, price trends, and what needs your attention"
     )
 
 
@@ -352,20 +352,15 @@ async def set_budget_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Monthly budget set to €{amount:.2f}.")
 
 
-async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /dashboard — spending, alerts, and inventory health at a glance."""
+async def report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /report — spending, price trends, and what (if anything) needs your attention."""
     spending = metrics.get_spending_summary()
     budget = metrics.get_budget_status()
-    accuracy = metrics.get_consumption_accuracy()
     health = metrics.get_inventory_health()
 
     lines = ["📊 This month", f"  Spent: €{spending['total']:.2f}"]
     if budget:
         lines.append(f"  Budget: €{budget['spent']:.2f} / €{budget['budget']:.2f} ({budget['pct']:.0f}%)")
-    if spending["top_items"]:
-        lines.append("  Top items: " + ", ".join(
-            f"{i['name']} (€{i['total']:.2f})" for i in spending["top_items"]
-        ))
     if spending["top_categories"]:
         lines.append("  Top categories: " + ", ".join(
             f"{c['category']} (€{c['total']:.2f})" for c in spending["top_categories"]
@@ -379,14 +374,16 @@ async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for t in trends
         )
 
-    lines.append("\n🔍 Consumption tracking")
-    lines.append(f"  {accuracy['tracked']} item(s) with a shelf-life estimate, "
-                 f"{accuracy['corrected']} corrected from real repurchase timing")
-
-    lines.append("\n📦 Inventory health")
-    lines.append(f"  {health['checkin_pending']} check-in(s) pending")
-    lines.append(f"  {health['spare_alert_pending']} spare-stock alert(s) pending")
-    lines.append(f"  {health['unprofiled']} item(s) not yet profiled")
+    lines.append("\n🚦 Status")
+    if not any(health.values()):
+        lines.append("  🟢 All good — nothing needs your attention.")
+    else:
+        for name in health["unprofiled"]:
+            lines.append(f"  🟡 {name} — still needs profiling (shelf-life/luxury)")
+        for name in health["checkin_pending"]:
+            lines.append(f"  🟡 {name} — waiting on your check-in reply")
+        for name in health["spare_alert_pending"]:
+            lines.append(f"  🟡 {name} — spare-stock alert sent, add it to your list if you haven't")
 
     await update.message.reply_text("\n".join(lines))
 
@@ -486,7 +483,7 @@ def main():
     app.add_handler(CommandHandler("total_spent", total_spent))
     app.add_handler(CommandHandler("par_level", par_level_cmd))
     app.add_handler(CommandHandler("set_budget", set_budget_cmd))
-    app.add_handler(CommandHandler("dashboard", dashboard))
+    app.add_handler(CommandHandler("report", report))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_error_handler(handle_error)

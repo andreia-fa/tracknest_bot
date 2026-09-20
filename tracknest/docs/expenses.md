@@ -32,9 +32,8 @@ and clears them off the shopping list.
   `log_expense()` inserts the new row, or the average would include the very
   price being compared.
 - `log_expense()` also auto-corrects a non-luxury item's `shelf_life_days`
-  estimate down to the real gap when a repurchase comes sooner than expected,
-  setting `shelf_life_corrected = 1` — a signal `db/metrics.py` uses to report
-  how much of the household's consumption tracking is guessed vs. confirmed.
+  estimate down to the real gap when a repurchase comes sooner than expected —
+  real repurchase timing is a better signal than the original guess.
 
 ## Data Model
 
@@ -95,7 +94,7 @@ it doesn't repeat every day within the same month.
 
 ## Related: Price Trends (`db/metrics.py`)
 
-`/dashboard` includes a "Creeping up" section from `metrics.get_price_trends()`,
+`/report` includes a "Creeping up" section from `metrics.get_price_trends()`,
 which compares each item's most recent purchase to the average of its earlier
 ones (same idea as `get_price_delta`, but aggregated across the whole
 inventory) and lists the items that have risen the most.

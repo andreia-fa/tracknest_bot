@@ -15,7 +15,7 @@ tracknest/
     crud.py            — inventory CRUD operations
     expenses.py        — expense log operations
     shopping_list.py   — shopping list CRUD operations
-    metrics.py         — read-only aggregates for /dashboard and alerts
+    metrics.py         — read-only aggregates for /report and alerts
     settings.py        — household settings (chat id, par level, budget)
   tests/
     test_crud.py       — unit tests for db/crud.py (mocked DB)

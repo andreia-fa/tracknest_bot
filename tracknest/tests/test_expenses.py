@@ -58,20 +58,6 @@ def test_log_expense_skips_adjustment_for_luxury(mock_conn):
 
 
 @patch("db.expenses.get_connection")
-def test_log_expense_marks_correction(mock_conn):
-    conn, cursor = make_mock_conn()
-    mock_conn.return_value = conn
-    three_days_ago = (datetime.now(tz=timezone.utc) - timedelta(days=3)).isoformat()
-    cursor.fetchone.side_effect = [
-        {"id": 1, "shelf_life_days": 10, "is_luxury": 0},
-        {"logged_at": three_days_ago},
-    ]
-    expenses.log_expense("Spinach", 1, 1.11)
-    update_calls = [c for c in cursor.execute.call_args_list if "shelf_life_corrected = 1" in c[0][0]]
-    assert len(update_calls) == 1
-
-
-@patch("db.expenses.get_connection")
 def test_get_price_delta_positive(mock_conn):
     conn, _cursor = make_mock_conn(fetchone={"avg_price": 2.00, "n": 3})
     mock_conn.return_value = conn

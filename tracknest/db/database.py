@@ -76,13 +76,10 @@ def init_db():
         cursor.execute(
             "ALTER TABLE inventory_items ADD COLUMN spare_alert_pending INTEGER NOT NULL DEFAULT 0"
         )
-    # shelf_life_corrected: set once log_expense has auto-corrected the
-    # original guess against a real repurchase gap — a health signal for
-    # how much to trust the current estimate.
-    if "shelf_life_corrected" not in existing_inv_cols:
-        cursor.execute(
-            "ALTER TABLE inventory_items ADD COLUMN shelf_life_corrected INTEGER NOT NULL DEFAULT 0"
-        )
+    # shelf_life_corrected tracked whether log_expense had auto-corrected an
+    # estimate, but nothing ever read it — dropped 2026-09-20.
+    if "shelf_life_corrected" in existing_inv_cols:
+        cursor.execute("ALTER TABLE inventory_items DROP COLUMN shelf_life_corrected")
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS shopping_list_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

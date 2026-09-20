@@ -30,9 +30,9 @@ It helps you manage home inventory and track household expenses through a conver
 - ✅ `/set_budget <amount>` – Set a monthly spending budget, with an alert at 80%/100%
 - ✅ Every receipt item shows its % change vs. its own purchase history (not just
   spikes), flagged distinctly once it crosses +15%
-- ✅ `/dashboard` – Spending, budget, consumption-tracking accuracy, and inventory
-  health in one Telegram message (data layer in `db/metrics.py` is Telegram-agnostic,
-  so a future web dashboard can reuse it directly)
+- ✅ `/report` – Spending, budget, price trends, and a status line: a green light
+  when nothing needs you, or specific items when something does (data layer in
+  `db/metrics.py` is Telegram-agnostic, so a future web page can reuse it directly)
 
 ---
 
@@ -124,7 +124,7 @@ tracknest/
 ├── db/
 │   ├── crud.py              # inventory CRUD operations
 │   ├── expenses.py          # expense tracking logic
-│   ├── metrics.py           # read-only aggregates for /dashboard and alerts
+│   ├── metrics.py           # read-only aggregates for /report and alerts
 │   ├── settings.py          # household settings (chat id, par level, budget)
 │   ├── shopping_list.py     # shopping list CRUD operations
 │   └── database.py          # DB connection and schema

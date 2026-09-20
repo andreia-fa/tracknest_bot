@@ -81,7 +81,7 @@ tracknest/
 ├── db/
 │   ├── crud.py              # inventory item CRUD operations
 │   ├── expenses.py          # expense logging and reporting
-│   ├── metrics.py           # read-only aggregates for /dashboard and alerts
+│   ├── metrics.py           # read-only aggregates for /report and alerts
 │   ├── settings.py          # household settings (chat id, par level, budget)
 │   ├── shopping_list.py     # shopping list CRUD operations
 │   └── database.py          # SQLite connection factory + schema init
@@ -111,9 +111,8 @@ duplicating the DDL here. Notable `inventory_items` columns beyond the
 obvious: `shelf_life_days`/`is_luxury` (item profile, asked conversationally),
 `checkin_pending` (awaiting a "did it run out" reply), `par_level` (per-item
 override of the household's replenishment policy — NULL defers to the
-`default_par_level` household setting), `spare_alert_pending` (awaiting a
-par=2 "buy a spare" alert), and `shelf_life_corrected` (set once a real
-repurchase has corrected the original shelf-life guess).
+`default_par_level` household setting), and `spare_alert_pending` (awaiting a
+par=2 "buy a spare" alert).
 
 
 

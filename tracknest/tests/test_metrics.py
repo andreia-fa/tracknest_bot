@@ -50,20 +50,6 @@ def test_get_budget_status_with_budget(mock_budget, mock_summary):
 
 
 @patch("db.metrics.get_connection")
-def test_get_consumption_accuracy(mock_conn):
-    conn, _cursor = make_mock_conn(fetchone_side_effect=[{"tracked": 5, "corrected": 2}])
-    mock_conn.return_value = conn
-    assert metrics.get_consumption_accuracy() == {"tracked": 5, "corrected": 2}
-
-
-@patch("db.metrics.get_connection")
-def test_get_consumption_accuracy_empty(mock_conn):
-    conn, _cursor = make_mock_conn(fetchone_side_effect=[{"tracked": 0, "corrected": None}])
-    mock_conn.return_value = conn
-    assert metrics.get_consumption_accuracy() == {"tracked": 0, "corrected": 0}
-
-
-@patch("db.metrics.get_connection")
 def test_get_price_trends(mock_conn):
     rows = [
         {"name": "Milk", "unit_price": 2.00},
@@ -92,7 +78,23 @@ def test_get_price_trends_insufficient_history(mock_conn):
 
 @patch("db.metrics.get_connection")
 def test_get_inventory_health(mock_conn):
-    conn, _cursor = make_mock_conn(fetchone_side_effect=[(1,), (2,), (3,)])
+    conn, _cursor = make_mock_conn(fetchall_side_effect=[
+        [{"name": "Milk"}],
+        [{"name": "Toilet Paper"}],
+        [{"name": "dmBio schoko. Himbeeren 150g*"}],
+    ])
     mock_conn.return_value = conn
     result = metrics.get_inventory_health()
-    assert result == {"checkin_pending": 1, "spare_alert_pending": 2, "unprofiled": 3}
+    assert result == {
+        "checkin_pending": ["Milk"],
+        "spare_alert_pending": ["Toilet Paper"],
+        "unprofiled": ["dmBio schoko. Himbeeren 150g*"],
+    }
+
+
+@patch("db.metrics.get_connection")
+def test_get_inventory_health_all_clear(mock_conn):
+    conn, _cursor = make_mock_conn(fetchall_side_effect=[[], [], []])
+    mock_conn.return_value = conn
+    result = metrics.get_inventory_health()
+    assert result == {"checkin_pending": [], "spare_alert_pending": [], "unprofiled": []}

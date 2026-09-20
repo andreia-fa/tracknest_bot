@@ -48,7 +48,7 @@ def log_expense(item_name, quantity_purchased, unit_price, store=None):
             gap_days = (now - datetime.fromisoformat(prior["logged_at"])).days
             if 1 <= gap_days < item["shelf_life_days"]:
                 cursor.execute(
-                    "UPDATE inventory_items SET shelf_life_days = ?, shelf_life_corrected = 1 WHERE id = ?",
+                    "UPDATE inventory_items SET shelf_life_days = ? WHERE id = ?",
                     (gap_days, item["id"]),
                 )
 
