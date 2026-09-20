@@ -97,6 +97,7 @@ tracknest/
     ├── test_settings.py
     ├── test_shopping_list.py
     ├── test_parser.py
+    ├── test_receipt.py
     └── __init__.py
 ```
 

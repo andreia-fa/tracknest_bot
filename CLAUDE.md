@@ -15,13 +15,17 @@ tracknest/
     crud.py            — inventory CRUD operations
     expenses.py        — expense log operations
     shopping_list.py   — shopping list CRUD operations
+    metrics.py         — read-only aggregates for /dashboard and alerts
+    settings.py        — household settings (chat id, par level, budget)
   tests/
     test_crud.py       — unit tests for db/crud.py (mocked DB)
     test_expenses.py   — unit tests for db/expenses.py (mocked DB)
     test_shopping_list.py — unit tests for db/shopping_list.py (mocked DB)
+    test_metrics.py    — unit tests for db/metrics.py (mocked DB)
+    test_settings.py   — unit tests for db/settings.py (mocked DB)
     test_parser.py     — unit tests for bot/parser.py (pure, no DB)
-    (bot/receipt.py has no unit tests yet — it's a thin wrapper over a live
-    Ollama call; would need a mocked client to test meaningfully)
+    test_receipt.py    — unit tests for bot/receipt.py's pure reconciliation
+    logic (_items_total) and parse_receipt with a mocked ollama client
 .github/workflows/ci_cd.yml  — CI runs tests; CD placeholder
 requirements.txt             — python-telegram-bot, pytest, ruff
 ```

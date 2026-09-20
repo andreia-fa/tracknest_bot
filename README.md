@@ -12,7 +12,7 @@ It helps you manage home inventory and track household expenses through a conver
 - ✅ `/start` – Welcome and usage guide
 - ✅ Plain text, one item per line — `Oat Milk` or `Oat Milk 3` – add something you need to buy, anytime, mid-conversation
 - ✅ `/list` – Show your current shopping list (check it as many times as you like while out shopping)
-- ✅ Receipt photo — send a photo of your receipt, a local Ollama vision model reads it, bulk-adds items to inventory with quantity/price, logs the expenses, and clears matching items off the shopping list
+- ✅ Receipt photo — send a photo of your receipt, a local Ollama vision model reads it, bulk-adds items to inventory with quantity/price, logs the expenses, and clears matching items off the shopping list. The model is asked to reconcile its own item prices against the receipt's printed total before answering; if the numbers still don't add up (e.g. a multi-unit line's total mistaken for its per-unit price), the reply flags it instead of silently logging a wrong price.
 
 ### Inventory Management
 - ✅ `/list_items` – Show current inventory
@@ -137,7 +137,8 @@ tracknest/
     ├── test_metrics.py
     ├── test_settings.py
     ├── test_shopping_list.py
-    └── test_parser.py
+    ├── test_parser.py
+    └── test_receipt.py
 ```
 
 ---

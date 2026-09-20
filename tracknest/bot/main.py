@@ -178,13 +178,14 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Runs off the event loop thread — parse_receipt is a blocking network
         # call to the local Ollama model that can take minutes on CPU-only
         # hardware, and would otherwise freeze the whole bot for everyone.
-        items = await asyncio.to_thread(parse_receipt, image_bytes, current_list)
+        parsed = await asyncio.to_thread(parse_receipt, image_bytes, current_list)
     except Exception:
         logger.exception("Receipt parsing failed.")
         await update.message.reply_text(
             "Sorry, I couldn't process that receipt (parsing error). Please try again."
         )
         return
+    items = parsed["items"]
     logger.info("Receipt parsed: %d item(s).", len(items))
     if not items:
         await update.message.reply_text("Couldn't find any items on that receipt.")
@@ -217,6 +218,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 line += f" ({delta_text})"
         replies.append(line)
+    if not parsed["reconciled"]:
+        replies.append(
+            f"⚠️ Heads up: item prices add up to €{parsed['items_total']:.2f} but the "
+            f"receipt's total was €{parsed['total_paid']:.2f} — one of the amounts above "
+            "is probably off. Worth double-checking against the paper receipt."
+        )
     await update.message.reply_text("Receipt processed:\n" + "\n".join(replies))
     if to_profile:
         queue = context.chat_data.setdefault("profile_queue", [])

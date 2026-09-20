@@ -1,13 +1,17 @@
 """Receipt photo parsing via a local Ollama vision model (free, fully offline)."""
 
 import json
+import logging
 import subprocess
 import time
 
 import ollama
 
+logger = logging.getLogger(__name__)
+
 _MODEL = "minicpm-v4.5"
 _client = ollama.Client()
+_RECONCILE_TOLERANCE = 0.02
 
 _RESPONSE_SCHEMA = {
     "type": "object",
@@ -49,8 +53,17 @@ _RESPONSE_SCHEMA = {
                 "required": ["name", "quantity", "unit_price", "category", "matched_shopping_list_item"],
             },
         },
+        "total_paid": {
+            "type": "number",
+            "description": (
+                "The final total amount paid, as printed on the receipt (e.g. "
+                "'TOTAL', 'SUMME', 'TOTAL DUE'). Used to sanity-check the "
+                "extracted item prices — see the reconciliation instruction "
+                "in the prompt."
+            ),
+        },
     },
-    "required": ["items"],
+    "required": ["items", "total_paid"],
 }
 
 
@@ -82,7 +95,12 @@ def _ensure_server_running():
     raise RuntimeError("Ollama server did not start in time")
 
 
-def parse_receipt(image_bytes: bytes, shopping_list_names: list[str]) -> list[dict]:
+def _items_total(items: list[dict]) -> float:
+    """Sum quantity * unit_price across all parsed items, rounded to cents."""
+    return round(sum(item["quantity"] * item["unit_price"] for item in items), 2)
+
+
+def parse_receipt(image_bytes: bytes, shopping_list_names: list[str]) -> dict:
     """Extract purchased items from a receipt photo, matched against the shopping list.
 
     Args:
@@ -92,14 +110,29 @@ def parse_receipt(image_bytes: bytes, shopping_list_names: list[str]) -> list[di
             match receipt lines to them across languages, abbreviations, and typos.
 
     Returns:
-        List of dicts: name, quantity, unit_price, category,
-        matched_shopping_list_item (empty string when nothing matched).
+        Dict with keys:
+        - items: list of dicts (name, quantity, unit_price, category,
+          matched_shopping_list_item — empty string when nothing matched).
+        - total_paid: the receipt's printed total, as read by the model.
+        - items_total: quantity*unit_price summed across items.
+        - reconciled: True if items_total matches total_paid within a cent
+          or two — False means a line's price is probably wrong (e.g. a
+          multi-unit line's total mistaken for its per-unit price) and the
+          caller should warn the user rather than log it silently.
     """
     _ensure_server_running()
     shopping_list_text = "\n".join(shopping_list_names) if shopping_list_names else "(empty)"
     prompt = (
         "Read this grocery receipt and record every purchased item: its "
-        "name, quantity, and price per unit (not the line total).\n\n"
+        "name, quantity, and price per unit (not the line total). Also read "
+        "the receipt's final total paid.\n\n"
+        "Before answering, check your work: multiply each item's quantity "
+        "by its unit_price and add them up — this sum must equal the "
+        "receipt's total paid. If it doesn't, you have likely confused a "
+        "line's total price with its per-unit price (e.g. a line reading "
+        "'2 x €4.45' where €4.45 is the total for both units, not €4.45 "
+        "each). Find the mismatched line and correct its unit_price so the "
+        "numbers reconcile before giving your final answer.\n\n"
         "The shopper's current shopping list is:\n"
         f"{shopping_list_text}\n\n"
         "For each receipt item, set matched_shopping_list_item to the exact "
@@ -116,4 +149,19 @@ def parse_receipt(image_bytes: bytes, shopping_list_names: list[str]) -> list[di
         }],
         format=_RESPONSE_SCHEMA,
     )
-    return json.loads(response.message.content)["items"]
+    result = json.loads(response.message.content)
+    items = result["items"]
+    total_paid = result["total_paid"]
+    items_total = _items_total(items)
+    reconciled = abs(items_total - total_paid) <= _RECONCILE_TOLERANCE
+    if not reconciled:
+        logger.warning(
+            "Receipt reconciliation mismatch: items summed to %.2f but total_paid was %.2f",
+            items_total, total_paid,
+        )
+    return {
+        "items": items,
+        "total_paid": total_paid,
+        "items_total": items_total,
+        "reconciled": reconciled,
+    }
