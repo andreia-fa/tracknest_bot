@@ -92,6 +92,15 @@ the new columns this relies on.
 80% and again at 100%, tracked via `settings.get/set_budget_alert_state()` so
 it doesn't repeat every day within the same month.
 
+## Related: Financial Goal (`db/settings.py`, `db/metrics.py`)
+
+`/set_goal <name> <amount> <YYYY-MM-DD>` is opt-in only — never asked upfront,
+run only if and when the user wants it. `metrics.get_goal_status()` doesn't
+track real progress (TrackNest has no savings ledger, only spending) — it
+computes an honest anchor number instead: the amount per month needed from
+today to hit the target by the target date. `/report` shows this, or that the
+target date has passed if `pace_per_month` comes back `None`.
+
 ## Related: Price Trends (`db/metrics.py`)
 
 `/report` includes a "Creeping up" section from `metrics.get_price_trends()`,

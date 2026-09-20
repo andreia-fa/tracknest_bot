@@ -80,6 +80,34 @@ def get_budget_status():
     return {"budget": budget, "spent": spent, "pct": pct}
 
 
+def get_goal_status():
+    """Return the household's financial goal alongside the pace needed to hit it.
+
+    TrackNest only tracks spending, not actual savings, so this doesn't
+    measure real progress — it's an honest anchor number (how much you'd
+    need to set aside per month, starting today, to hit the target by the
+    target date), not a tracked balance.
+
+    Returns:
+        Dict with keys name, amount, target_date, days_left, and
+        pace_per_month (None if the target date has already passed), or
+        None if no goal is set.
+    """
+    from db.settings import get_financial_goal
+
+    goal = get_financial_goal()
+    if goal is None:
+        return None
+    target = datetime.strptime(goal["target_date"], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    days_left = (target - datetime.now(tz=timezone.utc)).days
+    if days_left <= 0:
+        pace_per_month = None
+    else:
+        months_left = days_left / 30.44
+        pace_per_month = goal["amount"] / months_left
+    return {**goal, "days_left": days_left, "pace_per_month": pace_per_month}
+
+
 def get_price_trends(min_history=2, top_n=3):
     """Return the items whose latest price has crept up the most against their own history.
 

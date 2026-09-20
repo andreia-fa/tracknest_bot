@@ -28,11 +28,14 @@ It helps you manage home inventory and track household expenses through a conver
 - ✅ `/my_expenses [item_name]` – View spending history
 - ✅ `/total_spent [item_name]` – Total amount spent
 - ✅ `/set_budget <amount>` – Set a monthly spending budget, with an alert at 80%/100%
+- ✅ `/set_goal <name> <amount> <YYYY-MM-DD>` – Optional savings goal, shown in
+  `/report` as the pace you'd need per month to hit it (opt-in only, never asked upfront)
 - ✅ Every receipt item shows its % change vs. its own purchase history (not just
   spikes), flagged distinctly once it crosses +15%
-- ✅ `/report` – Spending, budget, price trends, and a status line: a green light
-  when nothing needs you, or specific items when something does (data layer in
-  `db/metrics.py` is Telegram-agnostic, so a future web page can reuse it directly)
+- ✅ `/report` – Spending, budget, goal pace, price trends, and a status line: a
+  green light when nothing needs you, or specific items when something does
+  (data layer in `db/metrics.py` is Telegram-agnostic, so a future web page can
+  reuse it directly)
 
 ---
 

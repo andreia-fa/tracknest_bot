@@ -75,3 +75,23 @@ def test_get_budget_alert_state_set(mock_conn):
     mock_conn.return_value = conn
     cursor.fetchone.side_effect = [{"value": "2026-04"}, {"value": "80"}]
     assert settings.get_budget_alert_state() == ("2026-04", 80)
+
+
+@patch("db.settings.get_connection")
+def test_get_financial_goal_unset(mock_conn):
+    conn, cursor = make_mock_conn()
+    mock_conn.return_value = conn
+    cursor.fetchone.side_effect = [None, None, None]
+    assert settings.get_financial_goal() is None
+
+
+@patch("db.settings.get_connection")
+def test_get_financial_goal_set(mock_conn):
+    conn, cursor = make_mock_conn()
+    mock_conn.return_value = conn
+    cursor.fetchone.side_effect = [
+        {"value": "Japan trip"}, {"value": "2000.0"}, {"value": "2027-03-01"},
+    ]
+    assert settings.get_financial_goal() == {
+        "name": "Japan trip", "amount": 2000.0, "target_date": "2027-03-01",
+    }

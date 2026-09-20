@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -47,6 +48,30 @@ def test_get_budget_status_with_budget(mock_budget, mock_summary):
     mock_summary.return_value = {"total": 150.0, "top_items": [], "top_categories": []}
     result = metrics.get_budget_status()
     assert result == {"budget": 200.0, "spent": 150.0, "pct": 75.0}
+
+
+@patch("db.settings.get_financial_goal")
+def test_get_goal_status_no_goal(mock_goal):
+    mock_goal.return_value = None
+    assert metrics.get_goal_status() is None
+
+
+@patch("db.settings.get_financial_goal")
+def test_get_goal_status_future_target(mock_goal):
+    future_date = (datetime.now(tz=timezone.utc) + timedelta(days=304)).strftime("%Y-%m-%d")
+    mock_goal.return_value = {"name": "Japan trip", "amount": 3044.0, "target_date": future_date}
+    result = metrics.get_goal_status()
+    assert result["name"] == "Japan trip"
+    assert result["days_left"] in (303, 304)
+    assert result["pace_per_month"] == pytest.approx(304.0, rel=0.05)
+
+
+@patch("db.settings.get_financial_goal")
+def test_get_goal_status_past_target(mock_goal):
+    past_date = (datetime.now(tz=timezone.utc) - timedelta(days=5)).strftime("%Y-%m-%d")
+    mock_goal.return_value = {"name": "Old goal", "amount": 100.0, "target_date": past_date}
+    result = metrics.get_goal_status()
+    assert result["pace_per_month"] is None
 
 
 @patch("db.metrics.get_connection")

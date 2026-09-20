@@ -44,6 +44,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "  /par_level [item_name] <1|2> — 1 = replace when low, 2 = always "
         "keep a spare. No item name sets the household default.\n"
         "  /set_budget <amount> — Set a monthly spending budget\n"
+        "  /set_goal <name> <amount> <YYYY-MM-DD> — Optional: set a savings "
+        "goal, shown in /report\n"
         "  /report — Spending, price trends, and what needs your attention"
     )
 
@@ -352,6 +354,34 @@ async def set_budget_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Monthly budget set to €{amount:.2f}.")
 
 
+async def set_goal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /set_goal <name> <amount> <YYYY-MM-DD> — set the household's financial goal.
+
+    Opt-in only — never asked upfront, run only if and when you want it.
+    """
+    args = context.args
+    if len(args) < 3:
+        await update.message.reply_text("Usage: /set_goal <name> <amount> <YYYY-MM-DD>")
+        return
+    date_str = args[-1]
+    try:
+        target = datetime.strptime(date_str, "%Y-%m-%d")
+    except ValueError:
+        await update.message.reply_text("Date must be in YYYY-MM-DD format.")
+        return
+    if target.date() <= datetime.now(tz=timezone.utc).date():
+        await update.message.reply_text("Target date must be in the future.")
+        return
+    try:
+        amount = float(args[-2])
+    except ValueError:
+        await update.message.reply_text("Amount must be a number.")
+        return
+    name = " ".join(args[:-2])
+    settings.set_financial_goal(name, amount, date_str)
+    await update.message.reply_text(f"Goal set: {name} — €{amount:.2f} by {date_str}.")
+
+
 async def report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /report — spending, price trends, and what (if anything) needs your attention."""
     spending = metrics.get_spending_summary()
@@ -365,6 +395,17 @@ async def report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append("  Top categories: " + ", ".join(
             f"{c['category']} (€{c['total']:.2f})" for c in spending["top_categories"]
         ))
+
+    goal = metrics.get_goal_status()
+    if goal:
+        lines.append("\n🎯 Goal")
+        if goal["pace_per_month"] is not None:
+            lines.append(
+                f"  {goal['name']}: €{goal['amount']:.2f} by {goal['target_date']} "
+                f"({goal['days_left']} days) — about €{goal['pace_per_month']:.2f}/month to hit it"
+            )
+        else:
+            lines.append(f"  {goal['name']}: target date ({goal['target_date']}) has passed")
 
     trends = metrics.get_price_trends()
     if trends:
@@ -483,6 +524,7 @@ def main():
     app.add_handler(CommandHandler("total_spent", total_spent))
     app.add_handler(CommandHandler("par_level", par_level_cmd))
     app.add_handler(CommandHandler("set_budget", set_budget_cmd))
+    app.add_handler(CommandHandler("set_goal", set_goal_cmd))
     app.add_handler(CommandHandler("report", report))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))

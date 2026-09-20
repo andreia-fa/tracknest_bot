@@ -79,3 +79,33 @@ def set_budget_alert_state(month, threshold):
     """Record that a budget alert was sent for this month at this threshold."""
     _set_setting("budget_alert_month", month)
     _set_setting("budget_alert_threshold", threshold)
+
+
+def get_financial_goal():
+    """Return the household's financial goal, or None if not set.
+
+    Opt-in only — set via /set_goal, never asked upfront.
+
+    Returns:
+        Dict with keys name, amount (float), target_date (ISO date string),
+        or None if no goal has been set.
+    """
+    name = _get_setting("goal_name")
+    amount = _get_setting("goal_amount")
+    target_date = _get_setting("goal_target_date")
+    if not name or not amount or not target_date:
+        return None
+    return {"name": name, "amount": float(amount), "target_date": target_date}
+
+
+def set_financial_goal(name, amount, target_date):
+    """Save the household's financial goal.
+
+    Args:
+        name: What the goal is for (e.g. "Japan trip").
+        amount: Target amount.
+        target_date: Target date as an ISO string ("YYYY-MM-DD").
+    """
+    _set_setting("goal_name", name)
+    _set_setting("goal_amount", amount)
+    _set_setting("goal_target_date", target_date)
