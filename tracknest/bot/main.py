@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from bot.parser import parse_line
 from bot.receipt import parse_receipt
 from config import BOT_TOKEN
-from db import crud, expenses, settings, shopping_list
+from db import crud, expenses, metrics, settings, shopping_list
 from db.database import init_db
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
@@ -38,7 +38,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "  /update_item <name> <qty> — Set item quantity\n"
         "  /remove_item <name> — Remove an item\n"
         "  /my_expenses [item_name] — View spending history\n"
-        "  /total_spent [item_name] — Total amount spent"
+        "  /total_spent [item_name] — Total amount spent\n"
+        "  /par_level [item_name] <1|2> — 1 = replace when low, 2 = always "
+        "keep a spare. No item name sets the household default.\n"
+        "  /set_budget <amount> — Set a monthly spending budget\n"
+        "  /dashboard — Spending, alerts, and inventory health at a glance"
     )
 
 
@@ -194,6 +198,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             continue
         crud.add_item(name, qty, category=item.get("category") or None)
+        spike_avg = expenses.check_price_spike(name, price)
         expenses.log_expense(name, qty, price)
         current = crud.get_item(name)
         if current and current["shelf_life_days"] is None:
@@ -202,6 +207,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         matched = item["matched_shopping_list_item"]
         if matched and shopping_list.remove_item(matched):
             line += " (cleared from your list)"
+        if spike_avg is not None:
+            line += f" — heads up, that's above the usual ~€{spike_avg:.2f}"
         replies.append(line)
     await update.message.reply_text("Receipt processed:\n" + "\n".join(replies))
     if to_profile:
@@ -233,6 +240,133 @@ async def check_expiring_items(context: ContextTypes.DEFAULT_TYPE):
                 chat_id=chat_id,
                 text=f"Quick check — does {item['name']} still last, or did it run out? Reply 'yes' or 'no'.",
             )
+
+
+def _spare_alert_lead_days(shelf_life_days: int) -> int:
+    """Days before the estimated run-out date to alert a par=2 item, capped to the estimate itself."""
+    return min(shelf_life_days, max(1, round(shelf_life_days * 0.15)))
+
+
+async def check_spare_stock_alerts(context: ContextTypes.DEFAULT_TYPE):
+    """Daily job: for par=2 items, alert ahead of the estimated run-out date so a spare gets bought in time.
+
+    Unlike the par=1 check-in (which waits until the estimate says it's
+    already out), a par=2 household wants the spare on hand before that
+    point.
+    """
+    chat_id = settings.get_chat_id()
+    if not chat_id:
+        return
+    now = datetime.now(tz=timezone.utc)
+    default_par_level = settings.get_default_par_level()
+    for item in crud.get_par_alert_candidates(default_par_level):
+        if not item["last_purchase"]:
+            continue
+        last = datetime.fromisoformat(item["last_purchase"])
+        lead_days = _spare_alert_lead_days(item["shelf_life_days"])
+        alert_at = last + timedelta(days=item["shelf_life_days"] - lead_days)
+        if now >= alert_at:
+            crud.mark_spare_alert_pending(item["name"])
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"You're on a keep-a-spare policy for {item['name']} — might be time to "
+                     "add it to your shopping list before the current one runs out.",
+            )
+
+
+_BUDGET_ALERT_THRESHOLDS = (100, 80)
+
+
+async def check_budget_alert(context: ContextTypes.DEFAULT_TYPE):
+    """Daily job: alert once per month when spending crosses 80% or 100% of the household budget."""
+    chat_id = settings.get_chat_id()
+    if not chat_id:
+        return
+    status = metrics.get_budget_status()
+    if status is None:
+        return
+    now = datetime.now(tz=timezone.utc)
+    current_month = f"{now.year:04d}-{now.month:02d}"
+    alerted_month, alerted_threshold = settings.get_budget_alert_state()
+    already_alerted = alerted_threshold if alerted_month == current_month else None
+    for threshold in _BUDGET_ALERT_THRESHOLDS:
+        if status["pct"] >= threshold and (already_alerted is None or already_alerted < threshold):
+            settings.set_budget_alert_state(current_month, threshold)
+            verb = "hit" if threshold == 100 else "crossed"
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"Budget alert: you've {verb} {threshold}% of this month's €{status['budget']:.2f} "
+                     f"budget (€{status['spent']:.2f} spent so far).",
+            )
+            break
+
+
+async def par_level_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /par_level [item_name] <1|2> — set the household default, or a per-item override."""
+    args = context.args
+    if not args:
+        await update.message.reply_text("Usage: /par_level [item_name] <1|2>")
+        return
+    level_str = args[-1]
+    if level_str not in ("1", "2"):
+        await update.message.reply_text("Level must be 1 (replace when low) or 2 (keep a spare).")
+        return
+    level = int(level_str)
+    if len(args) == 1:
+        settings.set_default_par_level(level)
+        await update.message.reply_text(f"Household default par level set to {level}.")
+        return
+    name = " ".join(args[:-1])
+    if crud.set_par_level(name, level):
+        await update.message.reply_text(f"Par level for '{name}' set to {level}.")
+    else:
+        await update.message.reply_text(f"Item '{name}' not found.")
+
+
+async def set_budget_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /set_budget <amount> — set the household's monthly spending budget."""
+    args = context.args
+    if len(args) != 1:
+        await update.message.reply_text("Usage: /set_budget <amount>")
+        return
+    try:
+        amount = float(args[0])
+    except ValueError:
+        await update.message.reply_text("Amount must be a number.")
+        return
+    settings.set_monthly_budget(amount)
+    await update.message.reply_text(f"Monthly budget set to €{amount:.2f}.")
+
+
+async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /dashboard — spending, alerts, and inventory health at a glance."""
+    spending = metrics.get_spending_summary()
+    budget = metrics.get_budget_status()
+    accuracy = metrics.get_consumption_accuracy()
+    health = metrics.get_inventory_health()
+
+    lines = ["📊 This month", f"  Spent: €{spending['total']:.2f}"]
+    if budget:
+        lines.append(f"  Budget: €{budget['spent']:.2f} / €{budget['budget']:.2f} ({budget['pct']:.0f}%)")
+    if spending["top_items"]:
+        lines.append("  Top items: " + ", ".join(
+            f"{i['name']} (€{i['total']:.2f})" for i in spending["top_items"]
+        ))
+    if spending["top_categories"]:
+        lines.append("  Top categories: " + ", ".join(
+            f"{c['category']} (€{c['total']:.2f})" for c in spending["top_categories"]
+        ))
+
+    lines.append("\n🔍 Consumption tracking")
+    lines.append(f"  {accuracy['tracked']} item(s) with a shelf-life estimate, "
+                 f"{accuracy['corrected']} corrected from real repurchase timing")
+
+    lines.append("\n📦 Inventory health")
+    lines.append(f"  {health['checkin_pending']} check-in(s) pending")
+    lines.append(f"  {health['spare_alert_pending']} spare-stock alert(s) pending")
+    lines.append(f"  {health['unprofiled']} item(s) not yet profiled")
+
+    await update.message.reply_text("\n".join(lines))
 
 
 async def list_items(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -328,6 +462,9 @@ def main():
     app.add_handler(CommandHandler("remove_item", remove_item))
     app.add_handler(CommandHandler("my_expenses", my_expenses))
     app.add_handler(CommandHandler("total_spent", total_spent))
+    app.add_handler(CommandHandler("par_level", par_level_cmd))
+    app.add_handler(CommandHandler("set_budget", set_budget_cmd))
+    app.add_handler(CommandHandler("dashboard", dashboard))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_error_handler(handle_error)
@@ -335,8 +472,14 @@ def main():
         app.job_queue.run_repeating(
             check_expiring_items, interval=_CHECKIN_INTERVAL, first=timedelta(minutes=1)
         )
+        app.job_queue.run_repeating(
+            check_spare_stock_alerts, interval=_CHECKIN_INTERVAL, first=timedelta(minutes=1)
+        )
+        app.job_queue.run_repeating(
+            check_budget_alert, interval=_CHECKIN_INTERVAL, first=timedelta(minutes=1)
+        )
     else:
-        logger.warning("JobQueue unavailable (missing job-queue extra) — shelf-life check-ins disabled.")
+        logger.warning("JobQueue unavailable (missing job-queue extra) — proactive alerts disabled.")
     logger.info("TrackNest bot starting.")
     app.run_polling(timeout=30)
 

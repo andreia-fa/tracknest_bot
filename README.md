@@ -18,13 +18,20 @@ It helps you manage home inventory and track household expenses through a conver
 - ✅ `/list_items` – Show current inventory
 - ✅ `/remove_item <name>` – Remove an item
 - ✅ `/update_item <name> <qty>` – Set item quantity to an absolute value
-- 🧠 Planned: Low-stock alerts
-- 🧠 Planned: Category tagging and expiration tracking
+- ✅ `/par_level [item_name] <1|2>` – Household replenishment policy: 1 = replace
+  right when an item runs low, 2 = always keep a spare on hand. No item name
+  sets the household-wide default; with an item name, overrides it for that item.
+- ✅ Proactive "buy a spare" alert for par=2 items, ahead of the estimated run-out date
+- ✅ Category tagging (from receipt parsing)
 
 ### Expense Tracking
 - ✅ `/my_expenses [item_name]` – View spending history
 - ✅ `/total_spent [item_name]` – Total amount spent
-- 🧠 Planned: Monthly/category spending summaries
+- ✅ `/set_budget <amount>` – Set a monthly spending budget, with an alert at 80%/100%
+- ✅ Price-spike warning on a receipt item priced well above its own purchase history
+- ✅ `/dashboard` – Spending, budget, consumption-tracking accuracy, and inventory
+  health in one Telegram message (data layer in `db/metrics.py` is Telegram-agnostic,
+  so a future web dashboard can reuse it directly)
 
 ---
 
@@ -116,6 +123,8 @@ tracknest/
 ├── db/
 │   ├── crud.py              # inventory CRUD operations
 │   ├── expenses.py          # expense tracking logic
+│   ├── metrics.py           # read-only aggregates for /dashboard and alerts
+│   ├── settings.py          # household settings (chat id, par level, budget)
 │   ├── shopping_list.py     # shopping list CRUD operations
 │   └── database.py          # DB connection and schema
 ├── docs/
@@ -124,6 +133,8 @@ tracknest/
 └── tests/
     ├── test_crud.py
     ├── test_expenses.py
+    ├── test_metrics.py
+    ├── test_settings.py
     ├── test_shopping_list.py
     └── test_parser.py
 ```

@@ -119,6 +119,83 @@ def set_profile(name, shelf_life_days=None, is_luxury=None):
     return affected > 0
 
 
+def set_par_level(name, level):
+    """Set a per-item par-level override (1 or 2), superseding the household default.
+
+    Args:
+        name: Exact item name to update.
+        level: 1 (replace when low) or 2 (always keep a spare in stock).
+
+    Returns:
+        True if the item was found and updated, False otherwise.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE inventory_items SET par_level = ? WHERE name = ?", (level, name))
+    affected = cursor.rowcount
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return affected > 0
+
+
+def get_par_alert_candidates(default_par_level):
+    """Return non-luxury, profiled items on a par=2 policy eligible for a spare-stock alert.
+
+    Mirrors get_checkin_candidates, but only for items whose effective par
+    level (per-item override, or the household default) is 2 — a par=1 item
+    just waits for the regular shelf-life check-in instead.
+
+    Args:
+        default_par_level: The household's default par level, used for any
+            item without a per-item override.
+
+    Returns:
+        List of dicts: name, shelf_life_days, last_purchase (ISO datetime of
+        the most recent expense's logged_at, or None if never purchased).
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT i.name, i.shelf_life_days,
+               (SELECT MAX(e.logged_at) FROM item_expenses e WHERE e.item_id = i.id) AS last_purchase
+        FROM inventory_items i
+        WHERE i.is_luxury = 0
+          AND i.shelf_life_days IS NOT NULL
+          AND i.shelf_life_days > 0
+          AND i.spare_alert_pending = 0
+          AND COALESCE(i.par_level, ?) >= 2
+    """, (default_par_level,))
+    rows = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def mark_spare_alert_pending(name, pending=True):
+    """Set or clear the spare-stock alert flag for a par=2 item.
+
+    Args:
+        name: Exact item name to update.
+        pending: True once the "buy a spare" alert has been sent, False to
+            clear it (e.g. on a fresh purchase, starting a new cycle).
+
+    Returns:
+        True if the item was found and updated, False otherwise.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE inventory_items SET spare_alert_pending = ? WHERE name = ?",
+        (1 if pending else 0, name)
+    )
+    affected = cursor.rowcount
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return affected > 0
+
+
 def get_checkin_candidates():
     """Return non-luxury, profiled items eligible for a shelf-life check-in.
 

@@ -81,6 +81,8 @@ tracknest/
 ├── db/
 │   ├── crud.py              # inventory item CRUD operations
 │   ├── expenses.py          # expense logging and reporting
+│   ├── metrics.py           # read-only aggregates for /dashboard and alerts
+│   ├── settings.py          # household settings (chat id, par level, budget)
 │   ├── shopping_list.py     # shopping list CRUD operations
 │   └── database.py          # SQLite connection factory + schema init
 │
@@ -91,6 +93,8 @@ tracknest/
 └── tests/
     ├── test_crud.py
     ├── test_expenses.py
+    ├── test_metrics.py
+    ├── test_settings.py
     ├── test_shopping_list.py
     ├── test_parser.py
     └── __init__.py
@@ -99,10 +103,16 @@ tracknest/
 ## 🛢️ Database Creation
 
 Nothing to do manually — `init_db()` in `db/database.py` creates the SQLite
-file and both tables (`inventory_items`, `item_expenses`) automatically the
-first time the bot runs. The full current schema (including `unit` and
-`store` columns) lives in that function; treat it as the source of truth
-rather than duplicating the DDL here.
+file and its tables (`inventory_items`, `item_expenses`, `shopping_list_items`,
+`bot_settings`) automatically the first time the bot runs. The full current
+schema lives in that function; treat it as the source of truth rather than
+duplicating the DDL here. Notable `inventory_items` columns beyond the
+obvious: `shelf_life_days`/`is_luxury` (item profile, asked conversationally),
+`checkin_pending` (awaiting a "did it run out" reply), `par_level` (per-item
+override of the household's replenishment policy — NULL defers to the
+`default_par_level` household setting), `spare_alert_pending` (awaiting a
+par=2 "buy a spare" alert), and `shelf_life_corrected` (set once a real
+repurchase has corrected the original shelf-life guess).
 
 
 

@@ -56,6 +56,48 @@ def test_log_expense_skips_adjustment_for_luxury(mock_conn):
 
 
 @patch("db.expenses.get_connection")
+def test_log_expense_marks_correction(mock_conn):
+    conn, cursor = make_mock_conn()
+    mock_conn.return_value = conn
+    three_days_ago = (datetime.now(tz=timezone.utc) - timedelta(days=3)).isoformat()
+    cursor.fetchone.side_effect = [
+        {"id": 1, "shelf_life_days": 10, "is_luxury": 0},
+        {"logged_at": three_days_ago},
+    ]
+    expenses.log_expense("Spinach", 1, 1.11)
+    update_calls = [c for c in cursor.execute.call_args_list if "shelf_life_corrected = 1" in c[0][0]]
+    assert len(update_calls) == 1
+
+
+@patch("db.expenses.get_connection")
+def test_check_price_spike_detected(mock_conn):
+    conn, _cursor = make_mock_conn(fetchone={"avg_price": 2.00, "n": 3})
+    mock_conn.return_value = conn
+    assert expenses.check_price_spike("Milk", 3.00) == 2.00
+
+
+@patch("db.expenses.get_connection")
+def test_check_price_spike_not_a_spike(mock_conn):
+    conn, _cursor = make_mock_conn(fetchone={"avg_price": 2.00, "n": 3})
+    mock_conn.return_value = conn
+    assert expenses.check_price_spike("Milk", 2.10) is None
+
+
+@patch("db.expenses.get_connection")
+def test_check_price_spike_insufficient_history(mock_conn):
+    conn, _cursor = make_mock_conn(fetchone={"avg_price": 2.00, "n": 1})
+    mock_conn.return_value = conn
+    assert expenses.check_price_spike("Milk", 10.00) is None
+
+
+@patch("db.expenses.get_connection")
+def test_check_price_spike_no_history(mock_conn):
+    conn, _cursor = make_mock_conn(fetchone={"avg_price": None, "n": 0})
+    mock_conn.return_value = conn
+    assert expenses.check_price_spike("Milk", 10.00) is None
+
+
+@patch("db.expenses.get_connection")
 def test_get_expenses_all(mock_conn):
     rows = [{"name": "Milk", "quantity_purchased": 2, "unit_price": 1.5, "total_cost": 3.0, "purchase_date": "2026-04-01"}]
     conn, _cursor = make_mock_conn(fetchall=rows)

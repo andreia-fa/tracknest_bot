@@ -68,6 +68,21 @@ def init_db():
         cursor.execute(
             "ALTER TABLE inventory_items ADD COLUMN checkin_pending INTEGER NOT NULL DEFAULT 0"
         )
+    # par_level: NULL = use the household default (bot_settings), 1 = replace
+    # right when it runs low, 2 = always keep one spare in stock.
+    if "par_level" not in existing_inv_cols:
+        cursor.execute("ALTER TABLE inventory_items ADD COLUMN par_level INTEGER")
+    if "spare_alert_pending" not in existing_inv_cols:
+        cursor.execute(
+            "ALTER TABLE inventory_items ADD COLUMN spare_alert_pending INTEGER NOT NULL DEFAULT 0"
+        )
+    # shelf_life_corrected: set once log_expense has auto-corrected the
+    # original guess against a real repurchase gap — a health signal for
+    # how much to trust the current estimate.
+    if "shelf_life_corrected" not in existing_inv_cols:
+        cursor.execute(
+            "ALTER TABLE inventory_items ADD COLUMN shelf_life_corrected INTEGER NOT NULL DEFAULT 0"
+        )
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS shopping_list_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -1,0 +1,129 @@
+"""Read-only aggregate queries backing /dashboard and proactive alerts.
+
+Deliberately Telegram-agnostic — every function returns plain dicts/lists so
+a future web dashboard can call the same functions instead of re-deriving
+these numbers from a different layer.
+"""
+
+from datetime import datetime, timezone
+
+from db.database import get_connection
+
+
+def get_spending_summary(year=None, month=None, top_n=3):
+    """Return spend totals for a calendar month, broken down by item and category.
+
+    Args:
+        year: Calendar year to scope to. Defaults to the current month.
+        month: Calendar month (1-12) to scope to. Defaults to the current month.
+        top_n: How many top items/categories to include.
+
+    Returns:
+        Dict with keys: total (float), top_items (list of {name, total}),
+        top_categories (list of {category, total}).
+    """
+    now = datetime.now(tz=timezone.utc)
+    year = year or now.year
+    month = month or now.month
+    prefix = f"{year:04d}-{month:02d}"
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT COALESCE(SUM(quantity_purchased * unit_price), 0)
+        FROM item_expenses
+        WHERE purchase_date LIKE ?
+    """, (f"{prefix}%",))
+    total = float(cursor.fetchone()[0])
+
+    cursor.execute("""
+        SELECT i.name AS name, SUM(e.quantity_purchased * e.unit_price) AS total
+        FROM item_expenses e
+        JOIN inventory_items i ON i.id = e.item_id
+        WHERE e.purchase_date LIKE ?
+        GROUP BY i.name
+        ORDER BY total DESC
+        LIMIT ?
+    """, (f"{prefix}%", top_n))
+    top_items = [dict(r) for r in cursor.fetchall()]
+
+    cursor.execute("""
+        SELECT COALESCE(i.category, 'Uncategorized') AS category,
+               SUM(e.quantity_purchased * e.unit_price) AS total
+        FROM item_expenses e
+        JOIN inventory_items i ON i.id = e.item_id
+        WHERE e.purchase_date LIKE ?
+        GROUP BY category
+        ORDER BY total DESC
+        LIMIT ?
+    """, (f"{prefix}%", top_n))
+    top_categories = [dict(r) for r in cursor.fetchall()]
+
+    cursor.close()
+    conn.close()
+    return {"total": total, "top_items": top_items, "top_categories": top_categories}
+
+
+def get_budget_status():
+    """Return this month's spend against the household budget, or None if no budget is set.
+
+    Returns:
+        Dict with keys: budget, spent, pct (0-100+, float), or None.
+    """
+    from db.settings import get_monthly_budget
+
+    budget = get_monthly_budget()
+    if budget is None:
+        return None
+    spent = get_spending_summary()["total"]
+    pct = (spent / budget * 100) if budget else 0.0
+    return {"budget": budget, "spent": spent, "pct": pct}
+
+
+def get_consumption_accuracy():
+    """Return a health check on shelf-life estimates vs real repurchase timing.
+
+    Returns:
+        Dict with keys: tracked (count of items with a shelf-life estimate),
+        corrected (count of those where the original guess has been
+        auto-corrected by a real early repurchase).
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT COUNT(*) AS tracked,
+               SUM(CASE WHEN shelf_life_corrected = 1 THEN 1 ELSE 0 END) AS corrected
+        FROM inventory_items
+        WHERE shelf_life_days IS NOT NULL AND shelf_life_days > 0
+    """)
+    row = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    return {"tracked": row["tracked"] or 0, "corrected": row["corrected"] or 0}
+
+
+def get_inventory_health():
+    """Return counts of items needing attention: pending alerts, missing profile data.
+
+    Returns:
+        Dict with keys: checkin_pending, spare_alert_pending, unprofiled
+        (items never asked about shelf-life/luxury status).
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM inventory_items WHERE checkin_pending = 1")
+    checkin_pending = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM inventory_items WHERE spare_alert_pending = 1")
+    spare_alert_pending = cursor.fetchone()[0]
+    cursor.execute("""
+        SELECT COUNT(*) FROM inventory_items
+        WHERE shelf_life_days IS NULL OR is_luxury IS NULL
+    """)
+    unprofiled = cursor.fetchone()[0]
+    cursor.close()
+    conn.close()
+    return {
+        "checkin_pending": checkin_pending,
+        "spare_alert_pending": spare_alert_pending,
+        "unprofiled": unprofiled,
+    }

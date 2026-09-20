@@ -48,11 +48,16 @@ def log_expense(item_name, quantity_purchased, unit_price, store=None):
             gap_days = (now - datetime.fromisoformat(prior["logged_at"])).days
             if 1 <= gap_days < item["shelf_life_days"]:
                 cursor.execute(
-                    "UPDATE inventory_items SET shelf_life_days = ? WHERE id = ?",
+                    "UPDATE inventory_items SET shelf_life_days = ?, shelf_life_corrected = 1 WHERE id = ?",
                     (gap_days, item["id"]),
                 )
 
-    cursor.execute("UPDATE inventory_items SET checkin_pending = 0 WHERE id = ?", (item["id"],))
+    # A fresh purchase starts a new shelf-life cycle, so both the "did it
+    # run out" check-in and the par=2 "buy a spare" alert reset.
+    cursor.execute(
+        "UPDATE inventory_items SET checkin_pending = 0, spare_alert_pending = 0 WHERE id = ?",
+        (item["id"],)
+    )
     cursor.execute("""
         INSERT INTO item_expenses (item_id, quantity_purchased, unit_price, store, purchase_date, logged_at)
         VALUES (?, ?, ?, ?, ?, ?)
@@ -93,6 +98,40 @@ def is_duplicate_purchase(item_name, unit_price, window_minutes=60):
     cursor.close()
     conn.close()
     return found
+
+
+def check_price_spike(item_name, new_price, factor=1.3, min_history=2):
+    """Check whether a new price is an unusual spike against an item's purchase history.
+
+    Must be called before log_expense records the new purchase, so the
+    average is computed over prior purchases only.
+
+    Args:
+        item_name: Name of the item being purchased.
+        new_price: Unit price about to be logged.
+        factor: How far above the historical average counts as a spike.
+        min_history: Minimum number of prior purchases required to judge a
+            spike — too little history makes the average unreliable.
+
+    Returns:
+        The historical average price (float) if new_price is a spike,
+        otherwise None.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT AVG(e.unit_price) AS avg_price, COUNT(*) AS n
+        FROM item_expenses e
+        JOIN inventory_items i ON i.id = e.item_id
+        WHERE i.name = ?
+    """, (item_name,))
+    row = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    if not row or row["n"] < min_history or row["avg_price"] is None:
+        return None
+    avg_price = row["avg_price"]
+    return avg_price if new_price > avg_price * factor else None
 
 
 def get_expenses(item_name=None):

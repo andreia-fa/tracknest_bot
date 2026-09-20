@@ -146,6 +146,39 @@ def test_bump_shelf_life(mock_conn):
 
 
 @patch("db.crud.get_connection")
+def test_set_par_level_found(mock_conn):
+    conn, cursor = make_mock_conn(rowcount=1)
+    mock_conn.return_value = conn
+    assert crud.set_par_level("Toilet Paper", 2) is True
+    assert cursor.execute.call_args[0][1] == (2, "Toilet Paper")
+
+
+@patch("db.crud.get_connection")
+def test_set_par_level_not_found(mock_conn):
+    conn, _cursor = make_mock_conn(rowcount=0)
+    mock_conn.return_value = conn
+    assert crud.set_par_level("Ghost", 2) is False
+
+
+@patch("db.crud.get_connection")
+def test_get_par_alert_candidates(mock_conn):
+    rows = [{"name": "Toilet Paper", "shelf_life_days": 20, "last_purchase": "2026-04-01T00:00:00+00:00"}]
+    conn, cursor = make_mock_conn(fetchall=rows)
+    mock_conn.return_value = conn
+    result = crud.get_par_alert_candidates(default_par_level=1)
+    assert result == rows
+    assert cursor.execute.call_args[0][1] == (1,)
+
+
+@patch("db.crud.get_connection")
+def test_mark_spare_alert_pending(mock_conn):
+    conn, cursor = make_mock_conn(rowcount=1)
+    mock_conn.return_value = conn
+    assert crud.mark_spare_alert_pending("Toilet Paper", pending=True) is True
+    assert cursor.execute.call_args[0][1] == (1, "Toilet Paper")
+
+
+@patch("db.crud.get_connection")
 def test_delete_item_found(mock_conn):
     conn, _cursor = make_mock_conn(rowcount=1)
     mock_conn.return_value = conn
