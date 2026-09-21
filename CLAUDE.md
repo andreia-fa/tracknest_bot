@@ -6,26 +6,28 @@ TrackNest is a Telegram bot for household inventory and expense tracking, built 
 ## Structure
 ```
 tracknest/
-  bot/main.py          — bot entry point, command + plain-text + photo handlers
+  bot/main.py          — cloud bot entry point: command + plain-text handlers,
+                         and handle_photo (just queues the receipt, see below)
+  bot/receipt_worker.py — LOCAL-ONLY entry point: polls the cloud bot's
+                         receipt queue over SSH, runs Ollama, hands results
+                         back via db/remote_cli.py
   bot/parser.py        — parses plain-text entries (name/qty/unit_price)
   bot/receipt.py       — receipt photo parsing via local Ollama vision model
+                         (only ever called by receipt_worker.py now)
   config/__init__.py   — reads env vars (BOT_TOKEN, DB_PATH)
   db/
     database.py        — SQLite connection + schema init (init_db)
     crud.py            — inventory CRUD operations
     expenses.py        — expense log operations
     shopping_list.py   — shopping list CRUD operations
-    metrics.py         — read-only aggregates for /report and alerts
-    settings.py        — household settings (chat id, par level, budget)
-  tests/
-    test_crud.py       — unit tests for db/crud.py (mocked DB)
-    test_expenses.py   — unit tests for db/expenses.py (mocked DB)
-    test_shopping_list.py — unit tests for db/shopping_list.py (mocked DB)
-    test_metrics.py    — unit tests for db/metrics.py (mocked DB)
-    test_settings.py   — unit tests for db/settings.py (mocked DB)
-    test_parser.py     — unit tests for bot/parser.py (pure, no DB)
-    test_receipt.py    — unit tests for bot/receipt.py's pure reconciliation
-    logic (_items_total) and parse_receipt with a mocked ollama client
+    receipt_queue.py   — pending_receipts queue (cloud bot writes, worker reads/resolves)
+    remote_cli.py       — `python -m db.remote_cli <op> <json>`: the only
+                         thing receipt_worker.py invokes (via SSH + docker
+                         exec) to touch the cloud DB — reuses the real
+                         functions above rather than building SQL remotely
+    metrics.py          — read-only aggregates for /report and alerts
+    settings.py         — household settings (chat id, par level, budget)
+  tests/                — one test_*.py per db/ and bot/ module above (mocked DB / mocked Bot)
 .github/workflows/ci_cd.yml  — CI runs tests; CD placeholder
 requirements.txt             — python-telegram-bot, pytest, ruff
 ```
@@ -39,12 +41,19 @@ requirements.txt             — python-telegram-bot, pytest, ruff
 No `.env` file, in local dev or production. Export these as real shell
 environment variables (e.g. in `~/.bashrc`) for local dev; in production it's
 injected by the CD workflow from GitHub Actions secrets at `docker run` time.
-Receipt photos need a local [Ollama](https://ollama.com) install with the
-`minicpm-v4.5` model pulled — no env var, no API key, fully offline. The
-systemd service is disabled (no boot autostart); `bot/receipt.py` starts
-`ollama serve` itself on first use and leaves it running. The
-shopping-list feature works fine even without Ollama installed at all —
-only sending a receipt photo needs it.
+
+**Receipt photos are cloud-queued, locally processed.** The cloud bot
+(`bot/main.py`, running on the Oracle VM — see `DEPLOY_STRATEGY.md`) can't
+run Ollama (956Mi RAM VM), so `handle_photo` just stores the photo's
+Telegram `file_id` in `pending_receipts` and replies immediately. This
+laptop's `bot/receipt_worker.py` (started via `systemctl --user`, see
+"Local autostart" below) polls that queue whenever it's running, downloads
+the photo straight from Telegram, runs it through the local
+[Ollama](https://ollama.com) install (`minicpm-v4.5` model), and hands the
+result back to the cloud container via `db.remote_cli` over SSH. `bot/receipt.py`
+starts `ollama serve` itself on first use and leaves it running — no env
+var, no API key, fully offline. The shopping-list feature works
+independently of all this — only receipt photos wait on the worker.
 `config/__init__.py` only ever reads `os.environ[]` — it doesn't care where
 the values came from. `DB_PATH` is not a secret — it's just a file path, and
 defaults to `data/tracknest.db` (git-ignored) if unset.
@@ -57,19 +66,24 @@ BOT_TOKEN=dummy pytest tests/ -q
 # Lint
 ruff check tracknest/
 
-# Run the bot manually, for one-off local testing (from tracknest/)
+# Run the full bot manually — only meaningful against a fresh/local DB,
+# since the real one now runs in the cloud (from tracknest/)
 # Must run as a module — bot/main.py uses absolute imports (from bot.x
 # import y), so `python bot/main.py` fails with ModuleNotFoundError.
 python -m bot.main
+
+# Run the receipt worker manually, for one-off local testing (from tracknest/)
+python -m bot.receipt_worker
 ```
 
-## Local autostart (temporary, until real CD deploy)
+## Local autostart (permanent — runs the receipt worker, not the full bot)
 
-The bot normally runs as a `systemd --user` service, not manually — it
-survives reboots and restarts on crash, so you don't need to remember to
-start it. This is a local-dev stopgap (see `deploy/local/tracknest-bot.service`)
-and should be removed once the Oracle VM + Docker + GitHub Actions CD
-pipeline in `DEPLOY_STRATEGY.md` actually deploys the bot somewhere real.
+`deploy/local/tracknest-bot.service` runs `bot/receipt_worker.py` as a
+`systemd --user` service — it survives reboots and restarts on crash, so
+you don't need to remember to start it. This is **not** a stopgap: it's
+the permanent home for receipt processing, since that's the one thing that
+has to stay local (Ollama). The full bot (`bot/main.py`) no longer runs
+here at all — it runs in the cloud (Oracle VM, see `DEPLOY_STRATEGY.md`).
 
 ```bash
 systemctl --user status tracknest-bot.service   # is it running?
@@ -82,6 +96,11 @@ not in git) — `EnvironmentFile=` in the unit reads it directly instead of
 `~/.bashrc`, since a non-interactive process like a systemd service doesn't
 source `.bashrc` anyway. If the token is ever rotated, regenerate that file
 from the new value and `systemctl --user restart tracknest-bot.service`.
+
+The worker also needs a working `ssh oracle-tracknest` (see `~/.ssh/config`
+and `DEPLOY_STRATEGY.md`) with `docker exec` permission on the VM (the
+`ubuntu` user must be in the `docker` group) — that's how it reaches
+`db.remote_cli` inside the running container.
 
 ## Development Rules
 - **Always read the relevant source files before making changes.** Never assume structure.

@@ -1,8 +1,10 @@
 [Unit]
-# TEMPORARY local-dev autostart. Remove this once the real Oracle VM +
-# Docker + GitHub Actions CD pipeline (see DEPLOY_STRATEGY.md) is live —
-# this exists only so the bot survives a laptop reboot until then.
-Description=TrackNest Telegram bot (local-dev autostart, temporary)
+# Permanent, not a stopgap: the full bot now runs in the cloud (Oracle VM,
+# see DEPLOY_STRATEGY.md) — this only runs the receipt worker, which needs
+# to be local because it's the only thing with access to Ollama. It polls
+# the cloud bot's queue over SSH whenever this laptop is on; the cloud bot
+# owns Telegram polling and everything else.
+Description=TrackNest receipt worker (local Ollama processing for queued receipts)
 After=network-online.target
 Wants=network-online.target
 
@@ -10,7 +12,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/home/afa/my_projects/tracknest_bot/tracknest
 EnvironmentFile=%h/.config/tracknest-bot.env
-ExecStart=/home/afa/my_projects/tracknest_bot/tracknest_bot_env/bin/python -m bot.main
+ExecStart=/home/afa/my_projects/tracknest_bot/tracknest_bot_env/bin/python -m bot.receipt_worker
 Restart=on-failure
 RestartSec=5
 
