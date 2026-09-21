@@ -224,6 +224,39 @@ def get_checkin_candidates():
     return [dict(r) for r in rows]
 
 
+def get_pending_profile_item():
+    """Return (name, stage) for the oldest item still mid item-profiling, or None.
+
+    Derived entirely from shelf_life_days/is_luxury being NULL ("not yet
+    asked") rather than a separate flag — an item only ever gets these
+    columns via the profiling flow, so this is a faithful, persisted
+    replacement for an in-memory queue: stage 'shelf_life' comes first for
+    any item that's never been asked at all, then 'luxury' for one that has
+    a shelf-life estimate but no luxury/essential answer yet. Works the same
+    regardless of which process (the live bot or the offline receipt worker)
+    logged the item, since both just leave these columns NULL.
+
+    Returns:
+        (name, stage) tuple, stage being 'shelf_life' or 'luxury', or None
+        if no item needs profiling right now.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM inventory_items WHERE shelf_life_days IS NULL ORDER BY id LIMIT 1")
+    row = cursor.fetchone()
+    if row:
+        cursor.close()
+        conn.close()
+        return row["name"], "shelf_life"
+    cursor.execute(
+        "SELECT name FROM inventory_items WHERE shelf_life_days IS NOT NULL AND is_luxury IS NULL ORDER BY id LIMIT 1"
+    )
+    row = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    return (row["name"], "luxury") if row else None
+
+
 def get_pending_checkin_item():
     """Return the name of the oldest item awaiting a check-in reply, or None."""
     conn = get_connection()

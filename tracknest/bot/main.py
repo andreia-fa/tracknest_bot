@@ -1,13 +1,11 @@
 """Telegram bot entry point and command handler registration for TrackNest."""
 
-import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
 from bot.parser import parse_line
-from bot.receipt import parse_receipt
 from config import BOT_TOKEN
-from db import crud, expenses, metrics, settings, shopping_list
+from db import crud, expenses, metrics, receipt_queue, settings, shopping_list
 from db.database import init_db
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -201,26 +199,40 @@ _LUXURY_WORDS = {"luxury", "lux", "treat", "l"}
 _ESSENTIAL_WORDS = {"essential", "regular", "basic", "e"}
 
 
-async def _ask_next_profile_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Send the next queued item-profiling question, or clear state if the queue is empty."""
-    queue = context.chat_data.get("profile_queue", [])
-    if not queue:
-        context.chat_data.pop("awaiting_profile", None)
-        context.chat_data.pop("profile_queue", None)
+async def send_pending_profile_question(bot, chat_id: int):
+    """Send the next item-profiling question, if any item still needs one.
+
+    Reads state from the DB (crud.get_pending_profile_item) rather than
+    per-chat memory, so it works the same whether called from a live update
+    handler or from the offline receipt worker (which has no chat_data).
+
+    Args:
+        bot: A telegram.Bot (or Application context's .bot) to send with.
+        chat_id: Chat to send the question to.
+    """
+    pending = crud.get_pending_profile_item()
+    if not pending:
         return
-    name = queue[0]
-    context.chat_data["awaiting_profile"] = {"item": name, "stage": "shelf_life"}
-    await update.message.reply_text(
-        f"Quick one — how many days does {name} usually last before it goes bad? "
-        "Reply with a number, or 'n/a' if it doesn't really spoil (pantry items etc.)."
-    )
+    name, stage = pending
+    if stage == "shelf_life":
+        await bot.send_message(
+            chat_id,
+            f"Quick one — how many days does {name} usually last before it goes bad? "
+            "Reply with a number, or 'n/a' if it doesn't really spoil (pantry items etc.).",
+        )
+    else:
+        await bot.send_message(
+            chat_id,
+            f"Got it. Is {name} more of a luxury/treat purchase, or a regular essential? "
+            "Reply 'luxury' or 'essential'.",
+        )
 
 
-async def _handle_profile_answer(update: Update, context: ContextTypes.DEFAULT_TYPE, pending: dict):
+async def _handle_profile_answer(update: Update, context: ContextTypes.DEFAULT_TYPE, pending: tuple):
     """Interpret a plain-text reply as the answer to a pending item-profiling question."""
     text = update.message.text.strip().lower()
-    name = pending["item"]
-    if pending["stage"] == "shelf_life":
+    name, stage = pending
+    if stage == "shelf_life":
         if text in _SHELF_LIFE_NA_WORDS:
             days = 0
         else:
@@ -230,11 +242,7 @@ async def _handle_profile_answer(update: Update, context: ContextTypes.DEFAULT_T
                 await update.message.reply_text("Reply with a number of days, or 'n/a'.")
                 return
         crud.set_profile(name, shelf_life_days=days)
-        context.chat_data["awaiting_profile"] = {"item": name, "stage": "luxury"}
-        await update.message.reply_text(
-            f"Got it. Is {name} more of a luxury/treat purchase, or a regular essential? "
-            "Reply 'luxury' or 'essential'."
-        )
+        await send_pending_profile_question(context.bot, update.effective_chat.id)
         return
     # stage == "luxury"
     if text in _LUXURY_WORDS:
@@ -245,11 +253,7 @@ async def _handle_profile_answer(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text("Reply 'luxury' or 'essential'.")
         return
     crud.set_profile(name, is_luxury=is_luxury)
-    queue = context.chat_data.get("profile_queue", [])
-    if queue and queue[0] == name:
-        queue.pop(0)
-    context.chat_data["profile_queue"] = queue
-    await _ask_next_profile_question(update, context)
+    await send_pending_profile_question(context.bot, update.effective_chat.id)
 
 
 _CHECKIN_NO_WORDS = {"no", "n", "ran out", "gone", "finished", "empty"}
@@ -293,7 +297,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if pending_goal:
         await _handle_goal_answer(update, context, pending_goal)
         return
-    pending_profile = context.chat_data.get("awaiting_profile")
+    pending_profile = crud.get_pending_profile_item()
     if pending_profile:
         await _handle_profile_answer(update, context, pending_profile)
         return
@@ -325,29 +329,39 @@ async def show_shopping_list(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle a receipt photo: log purchases, and clear matching shopping list items."""
-    logger.info("Receipt photo received, starting parse.")
-    photo_file = await update.message.photo[-1].get_file()
-    image_bytes = bytes(await photo_file.download_as_bytearray())
-    current_list = [i["name"] for i in shopping_list.get_all_items()]
-    try:
-        # Runs off the event loop thread — parse_receipt is a blocking network
-        # call to the local Ollama model that can take minutes on CPU-only
-        # hardware, and would otherwise freeze the whole bot for everyone.
-        parsed = await asyncio.to_thread(parse_receipt, image_bytes, current_list)
-    except Exception:
-        logger.exception("Receipt parsing failed.")
-        await update.message.reply_text(
-            "Sorry, I couldn't process that receipt (parsing error). Please try again."
-        )
-        return
+    """Handle a receipt photo: queue it for the local Ollama worker to process.
+
+    This bot instance doesn't have access to Ollama (it runs in the cloud) —
+    it just remembers the photo and chat, and replies once it's actually
+    processed and logged, whenever the local worker next runs.
+    """
+    file_id = update.message.photo[-1].file_id
+    receipt_queue.queue_receipt(chat_id=update.effective_chat.id, telegram_file_id=file_id)
+    logger.info("Receipt photo queued for local processing.")
+    await update.message.reply_text(
+        "Got your receipt — I'll read it and log the items once your computer's on."
+    )
+
+
+async def process_receipt_result(parsed: dict) -> str:
+    """Log a parsed receipt's items and build the summary reply text.
+
+    Used by the local receipt worker after it runs parse_receipt. Newly
+    added items with no shelf-life estimate yet are picked up automatically
+    by crud.get_pending_profile_item() — the caller should follow up with
+    send_pending_profile_question() once this returns.
+
+    Args:
+        parsed: Output of bot.receipt.parse_receipt.
+
+    Returns:
+        The reply text to send back to the user.
+    """
     items = parsed["items"]
     logger.info("Receipt parsed: %d item(s).", len(items))
     if not items:
-        await update.message.reply_text("Couldn't find any items on that receipt.")
-        return
+        return "Couldn't find any items on that receipt."
     replies = []
-    to_profile = []
     for item in items:
         name, qty, price = item["name"], item["quantity"], item["unit_price"]
         if expenses.is_duplicate_purchase(name, price):
@@ -359,9 +373,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         crud.add_item(name, qty, category=item.get("category") or None)
         delta = expenses.get_price_delta(name, price)
         expenses.log_expense(name, qty, price)
-        current = crud.get_item(name)
-        if current and current["shelf_life_days"] is None:
-            to_profile.append(name)
         line = f"• {qty}x {name} at €{price:.2f} each"
         matched = item["matched_shopping_list_item"]
         if matched and shopping_list.remove_item(matched):
@@ -380,14 +391,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"receipt's total was €{parsed['total_paid']:.2f} — one of the amounts above "
             "is probably off. Worth double-checking against the paper receipt."
         )
-    await update.message.reply_text("Receipt processed:\n" + "\n".join(replies))
-    if to_profile:
-        queue = context.chat_data.setdefault("profile_queue", [])
-        for name in to_profile:
-            if name not in queue:
-                queue.append(name)
-        if "awaiting_profile" not in context.chat_data:
-            await _ask_next_profile_question(update, context)
+    return "Receipt processed:\n" + "\n".join(replies)
 
 
 async def check_expiring_items(context: ContextTypes.DEFAULT_TYPE):

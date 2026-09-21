@@ -110,6 +110,18 @@ def init_db():
             value TEXT
         )
     """)
+    # Receipt photos are queued here by the (cloud) bot and processed later by
+    # the local worker, which is the only thing with access to Ollama.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS pending_receipts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id INTEGER NOT NULL,
+            telegram_file_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            queued_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            resolved_at TEXT
+        )
+    """)
     conn.commit()
     cursor.close()
     conn.close()

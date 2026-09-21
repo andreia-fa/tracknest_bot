@@ -190,3 +190,29 @@ def test_delete_item_not_found(mock_conn):
     conn, _cursor = make_mock_conn(rowcount=0)
     mock_conn.return_value = conn
     assert crud.delete_item("Ghost") is False
+
+
+@patch("db.crud.get_connection")
+def test_get_pending_profile_item_shelf_life_stage_first(mock_conn):
+    conn, cursor = make_mock_conn()
+    mock_conn.return_value = conn
+    cursor.fetchone.side_effect = [{"name": "Sushi"}]
+    assert crud.get_pending_profile_item() == ("Sushi", "shelf_life")
+    assert cursor.execute.call_count == 1
+
+
+@patch("db.crud.get_connection")
+def test_get_pending_profile_item_falls_back_to_luxury_stage(mock_conn):
+    conn, cursor = make_mock_conn()
+    mock_conn.return_value = conn
+    cursor.fetchone.side_effect = [None, {"name": "Milk"}]
+    assert crud.get_pending_profile_item() == ("Milk", "luxury")
+    assert cursor.execute.call_count == 2
+
+
+@patch("db.crud.get_connection")
+def test_get_pending_profile_item_none_when_nothing_pending(mock_conn):
+    conn, cursor = make_mock_conn()
+    mock_conn.return_value = conn
+    cursor.fetchone.side_effect = [None, None]
+    assert crud.get_pending_profile_item() is None
