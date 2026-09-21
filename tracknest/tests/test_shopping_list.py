@@ -50,3 +50,14 @@ def test_remove_item_not_found(mock_conn):
     cursor.rowcount = 0
     mock_conn.return_value = conn
     assert shopping_list.remove_item("Ghost") is False
+
+
+@patch("db.shopping_list.get_connection")
+def test_remove_item_case_insensitive(mock_conn):
+    conn, cursor = make_mock_conn()
+    cursor.rowcount = 1
+    mock_conn.return_value = conn
+    assert shopping_list.remove_item("bananas") is True
+    cursor.execute.assert_called_once_with(
+        "DELETE FROM shopping_list_items WHERE name = ? COLLATE NOCASE", ("bananas",)
+    )

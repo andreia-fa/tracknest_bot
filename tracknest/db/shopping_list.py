@@ -41,17 +41,18 @@ def get_all_items():
 
 
 def remove_item(name):
-    """Remove an item from the shopping list by name.
+    """Remove an item from the shopping list by name, case-insensitively.
 
     Args:
-        name: Exact item name to remove.
+        name: Item name to remove. Matched regardless of case, since a user
+            typing "- bananas" should remove an item stored as "Bananas".
 
     Returns:
         True if the item was found and removed, False if no matching row exists.
     """
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM shopping_list_items WHERE name = ?", (name,))
+    cursor.execute("DELETE FROM shopping_list_items WHERE name = ? COLLATE NOCASE", (name,))
     affected = cursor.rowcount
     conn.commit()
     cursor.close()
