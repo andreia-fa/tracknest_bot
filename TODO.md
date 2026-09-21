@@ -1,5 +1,29 @@
 # TODO
 
+## ❓ Open decision (2026-09-21) — letting other families test without sharing data
+
+Prompted by: wanting other families to try TrackNest, without their
+shopping-list/inventory edits landing in the household's own data.
+
+**Confirmed by reading the schema:** `inventory_items`, `shopping_list_items`,
+`item_expenses`, and `bot_settings` have no `chat_id`/household column at
+all — each is one global table. Today, literally anyone who DMs the
+running bot (or is added to its group) reads and writes the *same* data as
+everyone else talking to that bot instance. Fine for one household sharing
+a bot; not fine for strangers testing it.
+
+Two ways to fix this, not yet decided between:
+- **Separate bot instance per testing family** — no code changes. New
+  bot via @BotFather + a new small deployment (own `BOT_TOKEN`, own DB
+  file/volume) per family. Can be done today, one family at a time.
+- **Real multi-tenancy in one shared bot** — add a household/`chat_id`
+  column to every table above, filter every query by it, and migrate the
+  live production schema/data. Needed only if the long-term plan is one
+  bot instance serving many households at once (a real product, not a
+  personal tool).
+
+Revisit when there's an actual second family ready to test.
+
 ## 💡 Future feature idea (2026-09-21) — household member profiles / who-did-what
 
 Prompted by: "husband can buy bananas, wife updates the list — do we need
