@@ -37,6 +37,9 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - uses: actions/checkout@v4
@@ -63,16 +66,48 @@ jobs:
           fi
           echo "======================================="
 
-      # TODO: add your deploy steps here.
-      # Common options:
-      #   - SSH into a VPS and restart the bot process
-      #   - Push to Railway / Render / Heroku via their CLI
-      #   - Build and push a Docker image
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Deploy (not configured yet)
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/andreia-fa/tracknest_bot:latest
+            ghcr.io/andreia-fa/tracknest_bot:${{ github.sha }}
+
+      # Runs on the Oracle VM. Docker itself needs no inbound port (the bot
+      # only long-polls Telegram) — see DEPLOY_STRATEGY.md for VM/firewall
+      # notes. Re-authenticates to GHCR each deploy with the run's own
+      # short-lived GITHUB_TOKEN rather than a separate registry secret.
+      - name: Deploy to Oracle VM
+        uses: appleboy/ssh-action@v1
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_ACTOR: ${{ github.actor }}
           BOT_TOKEN: ${{ secrets.TRACKNEST_TELEGRAM_BOT_TOKEN }}
-        run: echo "Deploy step not configured yet — add your steps above."
-        # Once configured, docker run needs a volume mount so the SQLite file
-        # survives redeploys, e.g.:
-        #   -v /home/ubuntu/tracknest-data:/app/data
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: GH_TOKEN,GH_ACTOR,BOT_TOKEN
+          script: |
+            set -euo pipefail
+            echo "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
+            docker pull ghcr.io/andreia-fa/tracknest_bot:latest
+            docker stop tracknest-bot 2>/dev/null || true
+            docker rm tracknest-bot 2>/dev/null || true
+            mkdir -p /home/ubuntu/tracknest-data
+            docker run -d --name tracknest-bot --restart unless-stopped \
+              -e BOT_TOKEN="$BOT_TOKEN" \
+              -v /home/ubuntu/tracknest-data:/app/data \
+              ghcr.io/andreia-fa/tracknest_bot:latest
