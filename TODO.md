@@ -1,5 +1,37 @@
 # TODO
 
+## 💡 Future feature idea (2026-09-21) — household member profiles / who-did-what
+
+Prompted by: "husband can buy bananas, wife updates the list — do we need
+profiles, can the bot go in a group chat?"
+
+**Already true today, no code needed:** nothing in the DB is scoped per
+chat or per user — `shopping_list.py`, `crud.py`, and `expenses.py` have
+zero `chat_id`/user filtering anywhere. `settings.chat_id` is a single
+household-wide value used only to know where to send proactive messages
+(shelf-life check-ins, budget/par-level alerts) — not to partition data.
+So anyone who DMs this bot instance individually already reads/writes the
+exact same shared shopping list and inventory. A spouse doesn't need to be
+added to anything to start using it today.
+
+**Group chat gotcha, if adding the bot to a family group instead of DMs:**
+Telegram bots default to "privacy mode" ON — in groups they then only see
+`/commands`, `@mentions`, or replies to the bot, never plain text. Since
+this bot's whole add/remove flow *is* plain text ("bananas", "- bananas"),
+group members' messages would silently never reach `handle_text` unless
+privacy mode is disabled first via @BotFather (`/setprivacy` → Disable),
+and the bot may need removing + re-adding to the group afterward for it to
+take effect.
+
+**Not yet built, if actually wanted later:**
+- [ ] Attribution: record who added/removed/bought an item (e.g. store
+      `update.effective_user.id`/first name alongside `shopping_list_items`
+      and `item_expenses` rows) — enables "who keeps forgetting the milk"
+      style insight, but isn't required just to share the list.
+- [ ] Note: switching which chat receives proactive alerts is already just
+      running `/start` once from the new chat — `settings.set_chat_id` is
+      overwritten unconditionally on every `/start`, not just the first.
+
 ## ✅ Done (2026-09-21) — cloud deploy is live; receipts moved to a local-worker queue
 The bot now runs on the Oracle VM (Docker + GHCR, CD pipeline filled in and
 working) as the sole Telegram long-poller. Since the VM's 956Mi RAM can't
