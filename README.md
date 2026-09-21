@@ -14,6 +14,7 @@ It helps you manage home inventory and track household expenses through a conver
   a button, no typing required); on a returning chat, shows the usage guide
 - ✅ `/setup` – Re-run the welcome questionnaire any time
 - ✅ Plain text, one item per line — `Oat Milk` or `Oat Milk 3` – add something you need to buy, anytime, mid-conversation
+- ✅ Prefix a line with `-` — `- Oat Milk` – changed your mind? Take it back off the shopping list
 - ✅ `/list` – Show your current shopping list (check it as many times as you like while out shopping)
 - ✅ Receipt photo — send a photo of your receipt, a local Ollama vision model reads it, bulk-adds items to inventory with quantity/price, logs the expenses, and clears matching items off the shopping list. The model is asked to reconcile its own item prices against the receipt's printed total before answering; if the numbers still don't add up (e.g. a multi-unit line's total mistaken for its per-unit price), the reply flags it instead of silently logging a wrong price.
 

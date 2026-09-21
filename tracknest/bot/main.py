@@ -67,6 +67,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "  Oat Milk\n"
         "  Oat Milk 3\n\n"
         "It goes straight onto your shopping list. Check it any time with /list.\n\n"
+        "Changed your mind about something? Put a - in front of it to take it "
+        "back off the list:\n"
+        "  - Oat Milk\n\n"
         "When you're done shopping, just send a photo of the receipt — it logs "
         "everything and clears matching items off your list.\n\n"
         "Other commands:\n"
@@ -285,6 +288,9 @@ async def _handle_checkin_answer(update: Update, context: ContextTypes.DEFAULT_T
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle plain-text messages: one shopping list entry per line.
 
+    A line starting with "-" (e.g. "- bananas") removes that item from the
+    shopping list instead of adding it.
+
     If onboarding, a /set_goal conversation, item-profiling, or shelf-life
     check-in question is pending for this chat, the message is treated as
     the answer to that instead of new shopping-list entries.
@@ -308,6 +314,17 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [line for line in update.message.text.splitlines() if line.strip()]
     replies = []
     for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("-"):
+            name = stripped[1:].strip()
+            if not name:
+                replies.append(f"Couldn't understand: '{line}'")
+                continue
+            if shopping_list.remove_item(name):
+                replies.append(f"Removed {name} from your shopping list.")
+            else:
+                replies.append(f"'{name}' wasn't on your list.")
+            continue
         try:
             name, qty, _unit_price = parse_line(line)
         except ValueError:
