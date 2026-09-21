@@ -1,5 +1,41 @@
 # TODO
 
+## ✅ Done (2026-09-21) — cloud deploy is live; receipts moved to a local-worker queue
+The bot now runs on the Oracle VM (Docker + GHCR, CD pipeline filled in and
+working) as the sole Telegram long-poller. Since the VM's 956Mi RAM can't
+run Ollama, receipt photos are no longer parsed inline: `handle_photo`
+queues them (`pending_receipts` table, `db/receipt_queue.py`) and replies
+immediately. `bot/receipt_worker.py` — now the *permanent* job of the local
+`systemd --user` service (not the full bot anymore, see
+`deploy/local/tracknest-bot.service`) — polls that queue whenever this
+laptop is on, runs Ollama locally, and hands results back to the cloud
+container via `db/remote_cli.py` (invoked over SSH + `docker exec`, so the
+SQLite file itself is only ever touched on the machine where it lives —
+never over a network filesystem). The item-profiling follow-up ("how long
+does this last?") moved from in-memory `context.chat_data` to a DB-derived
+query (`crud.get_pending_profile_item`) for the same reason: it has to
+survive across the two processes now.
+
+**Real gotchas hit during the actual cutover (2026-09-21), worth remembering:**
+- **Volume UID mismatch**: the container's non-root `bot` user is uid 1000,
+  but the VM's `ubuntu` user is uid 1001 — the bind-mounted
+  `/home/ubuntu/tracknest-data` needed `chown 1000:1000` before the
+  container could write to it (`sqlite3.OperationalError: unable to open
+  database file` otherwise).
+- **Data migration was missed in the original plan.** The first deploy
+  created a brand-new empty DB on the VM — the real shopping list/inventory/
+  expense history (accumulated locally in `tracknest/data/tracknest.db`)
+  had to be copied over by hand afterward (stop container → copy DB into
+  the volume with correct ownership → restart). **`tracknest/data/tracknest.db`
+  on this laptop is now stale** — the VM's copy is the live source of truth;
+  don't treat the local file as current data going forward.
+- Briefly ran both the local full bot and the cloud bot as simultaneous
+  Telegram pollers during cutover → `Conflict: terminated by other
+  getUpdates request` in both logs until the local systemd unit was
+  switched over to the worker. Harmless (just noisy logs / dropped one
+  side's polling briefly), but confirms: never run `bot/main.py` in two
+  places against the same `BOT_TOKEN` at once.
+
 ## ⏰ TODO (due 2026-11-20) — Revisit /report's shelf-life confidence gate
 `/report`'s "Cost per day you own it" line divides an item's latest price by
 its `shelf_life_days` estimate — but that estimate starts as the user's cold
@@ -39,11 +75,12 @@ since a non-interactive systemd service never sources `.bashrc`. See
 `CLAUDE.md`'s "Local autostart" section for the day-to-day commands
 (`systemctl --user status/restart`, `journalctl --user -f`).
 
-**This is explicitly temporary** — remove `deploy/local/` and the systemd
-unit once the real Oracle VM + Docker + CD pipeline below actually deploys
-the bot somewhere. It's also machine-specific (hardcoded `/home/afa/...`
-paths), so replicating this setup on another laptop needs the paths in
-`deploy/local/tracknest-bot.service` adjusted first.
+**Update 2026-09-21: no longer temporary.** The cloud deploy landed (see
+entry above), so this same systemd unit was repointed at
+`bot/receipt_worker.py` instead — it's the permanent home for local Ollama
+processing now, not a stopgap. Still machine-specific (hardcoded
+`/home/afa/...` paths), so replicating this setup on another laptop needs
+the paths in `deploy/local/tracknest-bot.service` adjusted first.
 
 ## 💡 Future features (ideas from 2026-09-19 testing session, not yet built)
 
@@ -75,18 +112,10 @@ and duplicate receipt submissions were double-counting expenses (now guarded
 by `expenses.is_duplicate_purchase()`). Added item categorization to receipt
 parsing for the future expenses dashboard.
 
-## ⚠️ TODO — GitHub Actions secret is stale
-The bot token has been rotated multiple times locally (2026-09-19, security
-incident — see git history) but the `TRACKNEST_TELEGRAM_BOT_TOKEN` GitHub
-Actions secret was only ever updated once, right after the first rotation.
-CI's "Test Telegram connection" step (deploy job, `ci_cd.yml`) is failing on
-every push to `main` as a result — expected, not a real bug, but worth fixing
-so CI goes green again:
-```
-gh secret set TRACKNEST_TELEGRAM_BOT_TOKEN --repo andreia-fa/tracknest_bot
-```
-Not urgent — the actual deploy step is still a placeholder, so this doesn't
-block anything functional yet.
+## ✅ Done (2026-09-21) — GitHub Actions secret was stale, now fixed
+`TRACKNEST_TELEGRAM_BOT_TOKEN` was updated to the current token as part of
+today's cloud deploy (see entry above) — CI's "Test Telegram connection"
+step passes again.
 
 ## ✅ Done (2026-09-15) — deploy-concepts walkthrough + secrets/DB decisions
 The `.env`/secrets, `.dockerignore`, and full Docker flow (VM → Docker engine →
@@ -97,22 +126,18 @@ production), and MySQL replaced by SQLite (removes the VM's RAM concern
 entirely, drops `DB_USER`/`DB_PASSWORD`/`DB_HOST`/`DB_NAME` down to nothing).
 Both are implemented and tested — see `DEPLOY_STRATEGY.md` for full rationale.
 
-## Deploy (decided — see DEPLOY_STRATEGY.md)
-Target: existing Oracle Cloud free-tier VM, via Docker + GHCR. See `DEPLOY_STRATEGY.md`
-for the full rationale and the checklist of unknowns.
-
-**SSH access resolved (2026-08-09):** `charmeleon` had lost access, but `Lapras`
-already has a working key (`~/ssh-key-2026-05-22.key`, config alias
-`oracle-tracknest`). VM confirmed bare (no Docker/MySQL installed), 2 OCPU /
-~956Mi RAM. See "RESOLVED" section at the top of `DEPLOY_STRATEGY.md`.
-
-**Next up:** `Dockerfile` and the SQLite migration are both done. Still needed:
-fill in the real CD steps in `.github/workflows/ci_cd.yml` (build image, push
-to GHCR, SSH to VM, `docker run` with the `/app/data` volume mount), add
-`SSH_HOST`/`SSH_USER`/`SSH_PRIVATE_KEY` GH Actions secrets.
+## Deploy (live — see DEPLOY_STRATEGY.md and the 2026-09-21 entry above)
+Target was the existing Oracle Cloud free-tier VM, via Docker + GHCR — this
+is now actually deployed and running there as of 2026-09-21, not just
+decided. `SSH_HOST`/`SSH_USER`/`SSH_PRIVATE_KEY` secrets are set, Docker is
+installed on the VM, and the CD pipeline in `.github/workflows/ci_cd.yml`
+builds/pushes/deploys on every push to `main`. See `DEPLOY_STRATEGY.md` for
+the full rationale.
 
 - [ ] Fix `charmeleon`'s SSH access to the VM (copy the key from `Lapras`, or add a
-      `charmeleon`-specific key to the VM's `authorized_keys` from `Lapras`)
+      `charmeleon`-specific key to the VM's `authorized_keys` from `Lapras`) —
+      still relevant for anyone deploying from that machine, though `Lapras`
+      remains the one actually used so far
 
 ## Local environment
 - [ ] Replicate the same venv setup on the other laptop (`python3 -m venv tracknest_bot_env && source tracknest_bot_env/bin/activate && pip install -r requirements.txt`) per `tracknest/docs/setup.md`

@@ -147,23 +147,38 @@ GHCR** rather than running the bot as a bare `python bot/main.py` process.
       on memory once both are running
 - [x] ~~MySQL: native install~~ — **superseded 2026-09-15**, replaced by SQLite
       (see RESOLVED section above). No native DB install on the VM at all now.
-- [ ] Firewall / security-list rules: SSH inbound already works (confirmed by the
-      successful connection above); still need to confirm no other rule changes are
-      needed once the bot/Docker are added (bot itself needs no inbound port — it
-      long-polls Telegram)
-- [ ] Add GitHub Actions secrets: `SSH_HOST`, `SSH_USER`, `SSH_PRIVATE_KEY`
-      (private key content is `~/ssh-key-2026-05-22.key` on `Lapras`). `BOT_TOKEN`
-      already exists per `TODO.md`. (`DB_USER`/`DB_PASSWORD`/`DB_HOST`/`DB_NAME`
-      were never actually created as secrets — non-issue, nothing to clean up.)
+- [x] Firewall / security-list rules: confirmed 2026-09-21 — no inbound port
+      needed beyond the existing SSH rule (the bot only long-polls Telegram),
+      deploy worked with no security-list changes.
+- [x] Add GitHub Actions secrets: `SSH_HOST`, `SSH_USER`, `SSH_PRIVATE_KEY`,
+      `TRACKNEST_TELEGRAM_BOT_TOKEN` (refreshed — was stale) — all set 2026-09-21.
 - [x] Write the `Dockerfile` — done 2026-08-09, updated 2026-09-15 for SQLite:
       creates `/app/data`, sets `ENV DB_PATH=/app/data/tracknest.db`, declares
       `VOLUME ["/app/data"]`. No MySQL client libs needed (never were — it's a
       pure-Python driver either way).
-- [ ] Write the actual CD steps in `.github/workflows/ci_cd.yml` (currently a
-      placeholder) — include the `-v /home/ubuntu/tracknest-data:/app/data`
-      volume mount for the SQLite file
+- [x] Write the actual CD steps in `.github/workflows/ci_cd.yml` — done
+      2026-09-21: buildx + GHCR push (auth via the run's own `GITHUB_TOKEN`),
+      SSH deploy via `appleboy/ssh-action` that re-authenticates to GHCR on
+      the VM, pulls, replaces the container, mounts
+      `/home/ubuntu/tracknest-data:/app/data`.
+- [x] Install Docker on the VM — done 2026-09-21 (`apt-get install docker.io`,
+      `ubuntu` added to the `docker` group so CD's SSH step needs no `sudo`).
 - [x] **SQLite migration (2026-09-15 decision) — implemented and tested.** See
       the "Status" note in the RESOLVED section above for the full rundown.
+
+**First real deploy (2026-09-21) — two gotchas not caught by planning:**
+- The container's non-root `bot` user is uid 1000; the VM's `ubuntu` user is
+  uid 1001. The bind-mounted volume needed `chown 1000:1000
+  /home/ubuntu/tracknest-data` before the container could open the DB file —
+  worth baking into VM setup for any future redeploy-from-scratch.
+- **Nothing in this plan covered migrating the existing local data.** The
+  first deploy created a fresh empty DB on the VM; the real shopping
+  list/inventory/expense history had to be copied over by hand afterward
+  (stop container → copy `tracknest/data/tracknest.db` into the volume with
+  the right ownership → restart). `tracknest/data/tracknest.db` on the local
+  machine is now stale/superseded — see `TODO.md`'s 2026-09-21 entry for the
+  full writeup, including the receipt-queue/worker architecture this deploy
+  shipped alongside.
 
 ## Local machine notes
 
