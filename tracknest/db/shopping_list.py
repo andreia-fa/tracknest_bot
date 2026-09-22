@@ -3,23 +3,25 @@
 from db.database import get_connection
 
 
-def add_item(name, quantity=1):
+def add_item(name, quantity=1, category=None):
     """Add an item to the shopping list, or bump its quantity if already listed.
 
     Uses an UPSERT: if an item with the same name is already on the list,
-    the given quantity is added to it rather than replacing it.
+    the given quantity is added to it rather than replacing it. The
+    category isn't touched on that conflict path — the first guess stands.
 
     Args:
         name: Item name.
         quantity: How many units are needed.
+        category: Optional category label (e.g. from bot.categorize).
     """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO shopping_list_items (name, quantity)
-        VALUES (?, ?)
+        INSERT INTO shopping_list_items (name, quantity, category)
+        VALUES (?, ?, ?)
         ON CONFLICT(name) DO UPDATE SET quantity = quantity + excluded.quantity
-    """, (name, quantity))
+    """, (name, quantity, category))
     conn.commit()
     cursor.close()
     conn.close()

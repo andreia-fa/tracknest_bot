@@ -88,6 +88,11 @@ def init_db():
             added_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # category added after the initial schema — ALTER instead of a fresh
+    # CREATE so existing databases keep their data.
+    existing_list_cols = {row[1] for row in cursor.execute("PRAGMA table_info(shopping_list_items)")}
+    if "category" not in existing_list_cols:
+        cursor.execute("ALTER TABLE shopping_list_items ADD COLUMN category TEXT")
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS item_expenses (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

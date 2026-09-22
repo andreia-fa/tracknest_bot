@@ -3,6 +3,7 @@
 import logging
 from datetime import datetime, timedelta, timezone
 
+from bot.categorize import infer_category
 from bot.parser import parse_line
 from config import BOT_TOKEN
 from db import crud, expenses, metrics, receipt_queue, settings, shopping_list
@@ -330,19 +331,25 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except ValueError:
             replies.append(f"Couldn't understand: '{line}'")
             continue
-        shopping_list.add_item(name, qty)
+        shopping_list.add_item(name, qty, category=infer_category(name))
         replies.append(f"Added {qty}x {name} to your shopping list.")
     await update.message.reply_text("\n".join(replies))
 
 
 async def show_shopping_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /list — display the current shopping list."""
+    """Handle /list — display the current shopping list, grouped by category."""
     items = shopping_list.get_all_items()
     if not items:
         await update.message.reply_text("Your shopping list is empty.")
         return
-    lines = [f"• {i['name']} ({i['quantity']}x)" for i in items]
-    await update.message.reply_text("Shopping list:\n" + "\n".join(lines))
+    by_category: dict[str, list[dict]] = {}
+    for item in items:
+        by_category.setdefault(item["category"] or "Other", []).append(item)
+    sections = []
+    for category in sorted(by_category, key=lambda c: (c == "Other", c)):
+        lines = [f"• {i['name']} ({i['quantity']}x)" for i in by_category[category]]
+        sections.append(f"{category}:\n" + "\n".join(lines))
+    await update.message.reply_text("Shopping list:\n\n" + "\n\n".join(sections))
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):

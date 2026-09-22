@@ -38,3 +38,18 @@ def test_empty_line_raises():
 
 def test_qty_without_valid_price_keeps_tokens_as_name():
     assert parse_line("Milk 3 abc") == ("Milk 3 abc", 1, None)
+
+
+def test_strips_leading_and_trailing_bullet_punctuation():
+    assert parse_line("> -- Soutien branco --") == ("Soutien branco", 1, None)
+
+
+def test_strips_leading_dash_bullet():
+    # Only reachable here if handle_text didn't already treat the raw line
+    # as a remove command (see the comment on _LEADING_BULLET_RE).
+    assert parse_line("- bananas") == ("bananas", 1, None)
+
+
+def test_strips_asterisk_and_bullet_point():
+    assert parse_line("* Milk") == ("Milk", 1, None)
+    assert parse_line("• Milk") == ("Milk", 1, None)
