@@ -395,6 +395,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     lines = [line for line in update.message.text.splitlines() if line.strip()]
     replies = []
+    logged_a_purchase = False
     for line in lines:
         stripped = line.strip()
         if stripped.startswith("-"):
@@ -417,10 +418,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 name, qty, unit_price,
                 category=infer_category(name), matched_list_item=name,
             ))
+            logged_a_purchase = True
             continue
         shopping_list.add_item(name, qty, category=infer_category(name))
         replies.append(f"Added {qty}x {name} to your shopping list.")
     await update.message.reply_text("\n".join(replies))
+    if logged_a_purchase:
+        await send_pending_profile_question(context.bot, update.effective_chat.id)
 
 
 async def show_shopping_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
