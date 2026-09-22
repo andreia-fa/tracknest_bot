@@ -27,6 +27,7 @@ jobs:
         working-directory: tracknest
         env:
           BOT_TOKEN: dummy_token_for_tests
+          DASHBOARD_PASSWORD: dummy_password_for_tests
         run: pytest tests/
 
       - name: Note
@@ -47,9 +48,12 @@ jobs:
       - name: Verify secrets are present
         env:
           BOT_TOKEN: ${{ secrets.TRACKNEST_TELEGRAM_BOT_TOKEN }}
+          DASHBOARD_PASSWORD: ${{ secrets.TRACKNEST_DASHBOARD_PASSWORD }}
         run: |
           if [ -z "${BOT_TOKEN}" ]; then echo "Missing secret: TRACKNEST_TELEGRAM_BOT_TOKEN" && exit 1; fi
+          if [ -z "${DASHBOARD_PASSWORD}" ]; then echo "Missing secret: TRACKNEST_DASHBOARD_PASSWORD" && exit 1; fi
           echo "BOT_TOKEN present."
+          echo "DASHBOARD_PASSWORD present."
 
       - name: Test Telegram connection
         env:
@@ -86,7 +90,9 @@ jobs:
             ghcr.io/andreia-fa/tracknest_bot:${{ github.sha }}
 
       # Runs on the Oracle VM. Docker itself needs no inbound port (the bot
-      # only long-polls Telegram) — see DEPLOY_STRATEGY.md for VM/firewall
+      # long-polls Telegram, and /dashboard's aiohttp server binds to
+      # 127.0.0.1 inside the container, reached only via the cloudflared
+      # subprocess it also runs) — see DEPLOY_STRATEGY.md for VM/firewall
       # notes. Re-authenticates to GHCR each deploy with the run's own
       # short-lived GITHUB_TOKEN rather than a separate registry secret.
       - name: Deploy to Oracle VM
@@ -95,11 +101,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_ACTOR: ${{ github.actor }}
           BOT_TOKEN: ${{ secrets.TRACKNEST_TELEGRAM_BOT_TOKEN }}
+          DASHBOARD_PASSWORD: ${{ secrets.TRACKNEST_DASHBOARD_PASSWORD }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: GH_TOKEN,GH_ACTOR,BOT_TOKEN
+          envs: GH_TOKEN,GH_ACTOR,BOT_TOKEN,DASHBOARD_PASSWORD
           script: |
             set -euo pipefail
             echo "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
@@ -109,5 +116,6 @@ jobs:
             mkdir -p /home/ubuntu/tracknest-data
             docker run -d --name tracknest-bot --restart unless-stopped \
               -e BOT_TOKEN="$BOT_TOKEN" \
+              -e DASHBOARD_PASSWORD="$DASHBOARD_PASSWORD" \
               -v /home/ubuntu/tracknest-data:/app/data \
               ghcr.io/andreia-fa/tracknest_bot:latest

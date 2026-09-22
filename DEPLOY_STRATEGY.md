@@ -2,6 +2,33 @@
 
 Decided 2026-08-09. This is a living doc — update it as decisions firm up or change.
 
+## ✅ RESOLVED (2026-09-23) — /dashboard reachable over HTTPS with no domain, no open port
+
+The Web App button needed for `/dashboard` to open inside Telegram requires a
+real HTTPS URL. Two blockers ruled out the obvious paths: this project owns no
+domain (Let's Encrypt needs one), and the VM's firewall situation was still an
+open item from 2026-08-09 — Oracle's cloud-level security list (separate from
+the VM's own OS, only changeable via their console, not SSH) almost certainly
+blocks inbound traffic beyond SSH by default, and was never resolved either
+way.
+
+**Chose Cloudflare Tunnel (Quick Tunnel mode, no account) over both.**
+`cloudflared` runs as a subprocess inside the same container (`bot/tunnel.py`)
+and connects *outward* to Cloudflare, which terminates the public HTTPS side —
+so neither blocker applies: no domain needed, no inbound port ever opened.
+The tradeoff is the assigned `https://*.trycloudflare.com` URL changes on
+every container restart. Accepted deliberately — nobody bookmarks this URL,
+the `/dashboard` command always hands out today's live one via a fresh button,
+so a changing URL costs nothing here. A domain (~€10/year) would buy a stable
+link instead, if that ever matters — explicitly declined for now (no budget
+for it, see `[[feedback_avoid_local_lockin]]`-adjacent "no paid APIs" rule
+elsewhere in this project).
+
+No `docker run` change was needed for this — `cloudflared` and the aiohttp
+server (`bot/dashboard.py`, bound to `127.0.0.1` only) share the container's
+network namespace, so the tunnel reaches the dashboard over localhost without
+any port being published to the host at all.
+
 ## ✅ RESOLVED (2026-09-15) — no `.env` anywhere, local or production
 
 Secrets never live in a file, in any environment:

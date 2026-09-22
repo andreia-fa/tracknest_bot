@@ -1,14 +1,20 @@
 """Telegram bot entry point and command handler registration for TrackNest."""
 
+import asyncio
 import logging
+import signal
 from datetime import datetime, timedelta, timezone
 
+from aiohttp import web
+
+from bot import dashboard
 from bot.categorize import infer_category
 from bot.parser import parse_line
+from bot.tunnel import CloudflareTunnel
 from config import BOT_TOKEN
 from db import crud, expenses, metrics, receipt_queue, settings, shopping_list
 from db.database import init_db
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -17,6 +23,8 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+
+_DASHBOARD_PORT = 8080
 
 _CHECKIN_INTERVAL = timedelta(hours=24)
 _PRICE_SPIKE_THRESHOLD_PCT = 15
@@ -829,6 +837,24 @@ async def report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines))
 
 
+async def dashboard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /dashboard — send a button that opens the web dashboard inside Telegram.
+
+    The URL comes from bot_data["tunnel"] (see main()) — it's whatever
+    Cloudflare Tunnel is currently up, fetched fresh each time rather than
+    cached anywhere, since it changes on every restart.
+    """
+    tunnel: CloudflareTunnel | None = context.bot_data.get("tunnel")
+    url = await tunnel.get_url() if tunnel else None
+    if not url:
+        await update.message.reply_text("Dashboard is still starting up — try again in a few seconds.")
+        return
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 Open Dashboard", web_app=WebAppInfo(url=f"{url}/login"))]
+    ])
+    await update.message.reply_text("Your dashboard (password-protected):", reply_markup=keyboard)
+
+
 async def list_items(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /list_items — display all inventory items with quantities."""
     items = crud.get_all_items()
@@ -903,8 +929,15 @@ async def handle_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text("Something went wrong. Please try again.")
 
 
-def main():
-    """Initialise the database schema and start the bot with long polling."""
+async def main():
+    """Initialise the database schema and run the bot, dashboard, and tunnel together.
+
+    Long polling, the /dashboard aiohttp server, and the Cloudflare Tunnel
+    subprocess all share this one process/event loop — run_polling()'s usual
+    blocking convenience method can't be combined with a second server, so
+    this manages the bot's start/stop lifecycle manually instead (same thing
+    run_polling() does internally, just alongside the other two).
+    """
     init_db()
     app = (
         Application.builder()
@@ -927,6 +960,7 @@ def main():
     app.add_handler(CommandHandler("set_goal", set_goal_cmd))
     app.add_handler(CommandHandler("report", report))
     app.add_handler(CommandHandler("setup", setup_cmd))
+    app.add_handler(CommandHandler("dashboard", dashboard_cmd))
     app.add_handler(CallbackQueryHandler(handle_goal_date_choice, pattern=r"^goal_date:"))
     app.add_handler(CallbackQueryHandler(handle_onboarding_choice, pattern=r"^onboard_"))
     app.add_handler(CallbackQueryHandler(handle_profile_type_choice, pattern=r"^profile_type:"))
@@ -949,9 +983,35 @@ def main():
         )
     else:
         logger.warning("JobQueue unavailable (missing job-queue extra) — proactive alerts disabled.")
-    logger.info("TrackNest bot starting.")
-    app.run_polling(timeout=30)
+
+    tunnel = CloudflareTunnel(local_port=_DASHBOARD_PORT)
+    app.bot_data["tunnel"] = tunnel
+
+    web_runner = web.AppRunner(dashboard.build_app())
+    await web_runner.setup()
+    # Bound to localhost only — cloudflared (same container, same network
+    # namespace) is the only thing ever allowed to reach this directly.
+    site = web.TCPSite(web_runner, "127.0.0.1", _DASHBOARD_PORT)
+
+    async with app:
+        await app.start()
+        await app.updater.start_polling(timeout=30)
+        await site.start()
+        await tunnel.start()
+        logger.info("TrackNest bot starting.")
+
+        stop_event = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, stop_event.set)
+        try:
+            await stop_event.wait()
+        finally:
+            await tunnel.stop()
+            await web_runner.cleanup()
+            await app.updater.stop()
+            await app.stop()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

@@ -14,7 +14,13 @@ tracknest/
   bot/parser.py        — parses plain-text entries (name/qty/unit_price)
   bot/receipt.py       — receipt photo parsing via local Ollama vision model
                          (only ever called by receipt_worker.py now)
-  config/__init__.py   — reads env vars (BOT_TOKEN, DB_PATH)
+  bot/dashboard.py     — password-gated aiohttp web app (relative-numbers-only
+                         dashboard), served over a Cloudflare Tunnel — see
+                         bot/tunnel.py and the /dashboard command
+  bot/auth.py          — dashboard password check + signed session cookie
+  bot/tunnel.py        — manages the cloudflared subprocess, exposes the
+                         current https://*.trycloudflare.com URL
+  config/__init__.py   — reads env vars (BOT_TOKEN, DB_PATH, DASHBOARD_PASSWORD)
   db/
     database.py        — SQLite connection + schema init (init_db)
     crud.py            — inventory CRUD operations
@@ -33,10 +39,11 @@ requirements.txt             — python-telegram-bot, pytest, ruff
 ```
 
 ## Environment Variables
-| Variable        | Required | Default            |
-|-----------------|----------|--------------------|
-| BOT_TOKEN       | yes      | —                  |
-| DB_PATH         | no       | data/tracknest.db  |
+| Variable           | Required | Default            |
+|--------------------|----------|--------------------|
+| BOT_TOKEN          | yes      | —                  |
+| DB_PATH            | no       | data/tracknest.db  |
+| DASHBOARD_PASSWORD | yes      | —                  |
 
 No `.env` file, in local dev or production. Export these as real shell
 environment variables (e.g. in `~/.bashrc`) for local dev; in production it's
@@ -58,10 +65,23 @@ independently of all this — only receipt photos wait on the worker.
 the values came from. `DB_PATH` is not a secret — it's just a file path, and
 defaults to `data/tracknest.db` (git-ignored) if unset.
 
+**`/dashboard` (2026-09-23): password-gated web view, relative numbers only**
+(budget %, month-elapsed %, essential/treats/necessity mix %, price-trend %,
+shelf-life-remaining %) — `bot/report()`'s euro figures stay Telegram-only.
+`bot/main.py`'s entrypoint runs three things in one asyncio event loop: PTB's
+long-poller, an aiohttp server (`bot/dashboard.py`, bound to `127.0.0.1` only)
+and a `cloudflared` subprocess (`bot/tunnel.py`) that tunnels it out to a
+`https://*.trycloudflare.com` URL — no domain, no inbound port opened on the
+VM. That URL changes on every restart; the `/dashboard` command always fetches
+the current one fresh (`context.bot_data["tunnel"]`) rather than caching a
+stale link. Auth is `bot/auth.py`'s signed session cookie (HMAC, stdlib only,
+no session store) checked against `DASHBOARD_PASSWORD` — not real user
+accounts, one shared household password.
+
 ## Commands to Know
 ```bash
 # Run tests (from tracknest/)
-BOT_TOKEN=dummy pytest tests/ -q
+BOT_TOKEN=dummy DASHBOARD_PASSWORD=dummy pytest tests/ -q
 
 # Lint
 ruff check tracknest/

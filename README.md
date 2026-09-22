@@ -38,19 +38,32 @@ It helps you manage home inventory and track household expenses through a conver
   (opt-in only, never asked upfront)
 - ✅ Every receipt item shows its % change vs. its own purchase history (not just
   spikes), flagged distinctly once it crosses +15%
-- ✅ `/report` – Built around what a receipt *can't* tell you, not what it already says:
-  - **Treats vs. essentials** – what share of the month went to things you flagged as
-    luxuries. Your own answers, totalled up.
-  - **Cost per day you own it** – latest price ÷ shelf life, which separates "expensive
+- ✅ `/report` – Compact, numbers-first (label + figure, no prose) view of what a
+  receipt *can't* tell you:
+  - **Budget** – spent vs. budget, plus a nudge to cut treats specifically if
+    you're on pace to go over, or a compliment if you're comfortably under
+  - **Treats / Essential / Necessity split** – what share of the month went to
+    each purchase type. Your own answers, totalled up. (Necessity = a
+    same-day-consumed item like a coffee or a pretzel — distinct from a
+    stocked "essential.")
+  - **€/day you own it** – latest price ÷ shelf life, which separates "expensive
     to buy" from "expensive to keep around" (a €10.99 box lasting 2 days costs €5.50/day;
     €6.99 peanut butter lasting 60 days costs €0.12/day).
   - **Month-end pace** – straight-line projection of where this month lands, withheld
     early in the month when there's too little to extrapolate from.
-  - **Running out soon** – essentials due within a week, so one trip replaces three.
-  - Plus price creep, goal pace, and a green light when genuinely nothing needs you.
+  - **Running low** – essentials due within a week, so one trip replaces three.
+  - Plus price creep, goal pace (a standalone anchor number — not linked to
+    the budget or treats figures, since TrackNest tracks spending, not actual
+    savings), and an all-clear line when genuinely nothing needs you.
+- ✅ `/dashboard` – Password-gated web view (opens inside Telegram via a Web
+  App button, reached over a Cloudflare Tunnel — no domain, no inbound port
+  on the server) showing the same month as **relative numbers only** (%):
+  budget used, month elapsed, the treats/essential/necessity mix, price
+  creep, and shelf-life-remaining — euro amounts stay Telegram-only in
+  `/report`.
 
-  (data layer in `db/metrics.py` is Telegram-agnostic, so a future web page can
-  reuse it directly)
+  (data layer in `db/metrics.py` is Telegram-agnostic — `/dashboard` is the
+  "future web page" this line used to foreshadow, now real)
 
 ---
 
@@ -136,7 +149,10 @@ tracknest/
 ├── bot/
 │   ├── main.py               # bot entry point and command/message/photo handlers
 │   ├── parser.py             # plain-text entry parsing (name/qty/price)
-│   └── receipt.py            # receipt photo parsing via local Ollama vision model
+│   ├── receipt.py            # receipt photo parsing via local Ollama vision model
+│   ├── dashboard.py          # password-gated web dashboard (aiohttp app)
+│   ├── auth.py                # dashboard password check + signed session cookie
+│   └── tunnel.py              # cloudflared subprocess management for /dashboard
 ├── config/
 │   └── __init__.py          # loads environment variables
 ├── db/

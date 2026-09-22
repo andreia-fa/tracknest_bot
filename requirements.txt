@@ -4,3 +4,4 @@ pytest-asyncio>=0.21
 ruff>=0.1
 anthropic>=0.40
 ollama>=0.6
+aiohttp>=3.9

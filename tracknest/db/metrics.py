@@ -160,9 +160,9 @@ def get_running_low(days_ahead=7):
         days_ahead: How far ahead to look.
 
     Returns:
-        List of dicts (name, days_left, run_out_date as an ISO date string),
-        soonest first. Items already overdue are left out; those are the
-        check-in flow's job.
+        List of dicts (name, days_left, run_out_date as an ISO date string,
+        shelf_life_days), soonest first. Items already overdue are left out;
+        those are the check-in flow's job.
     """
     conn = get_connection()
     cursor = conn.cursor()
@@ -189,6 +189,7 @@ def get_running_low(days_ahead=7):
                 "name": row["name"],
                 "days_left": days_left,
                 "run_out_date": run_out.date().isoformat(),
+                "shelf_life_days": row["shelf_life_days"],
             })
     due.sort(key=lambda item: item["days_left"])
     return due
