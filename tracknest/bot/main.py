@@ -375,6 +375,7 @@ async def process_receipt_result(parsed: dict) -> str:
         The reply text to send back to the user.
     """
     items = parsed["items"]
+    store = parsed.get("store") or None
     logger.info("Receipt parsed: %d item(s).", len(items))
     if not items:
         return "Couldn't find any items on that receipt."
@@ -389,7 +390,7 @@ async def process_receipt_result(parsed: dict) -> str:
             continue
         crud.add_item(name, qty, category=item.get("category") or None)
         delta = expenses.get_price_delta(name, price)
-        expenses.log_expense(name, qty, price)
+        expenses.log_expense(name, qty, price, store=store)
         line = f"• {qty}x {name} at €{price:.2f} each"
         matched = item["matched_shopping_list_item"]
         if matched and shopping_list.remove_item(matched):

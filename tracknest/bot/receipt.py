@@ -62,8 +62,15 @@ _RESPONSE_SCHEMA = {
                 "in the prompt."
             ),
         },
+        "store": {
+            "type": "string",
+            "description": (
+                "The store or supplier name printed on the receipt (e.g. "
+                "REWE, dm, Amazon). Empty string if illegible."
+            ),
+        },
     },
-    "required": ["items", "total_paid"],
+    "required": ["items", "total_paid", "store"],
 }
 
 
@@ -119,20 +126,32 @@ def parse_receipt(image_bytes: bytes, shopping_list_names: list[str]) -> dict:
           or two — False means a line's price is probably wrong (e.g. a
           multi-unit line's total mistaken for its per-unit price) and the
           caller should warn the user rather than log it silently.
+        - store: the store/supplier name as read by the model, empty string
+          if illegible.
     """
     _ensure_server_running()
     shopping_list_text = "\n".join(shopping_list_names) if shopping_list_names else "(empty)"
     prompt = (
         "Read this grocery receipt and record every purchased item: its "
         "name, quantity, and price per unit (not the line total). Also read "
-        "the receipt's final total paid.\n\n"
+        "the receipt's final total paid and the store or supplier name "
+        "printed on it (e.g. REWE, dm, Amazon).\n\n"
+        "A small number or letter printed immediately next to an item "
+        "(e.g. '1', '2', 'A', 'B') is very often a VAT/tax-rate category "
+        "code, not a quantity — German receipts print one of these next to "
+        "almost every line. Only treat a number as the quantity if the "
+        "line clearly shows a multiplier (e.g. '2 x', '2 Stk', 'Menge: 2') "
+        "or the same item appears as separate repeated lines. Otherwise "
+        "default quantity to 1.\n\n"
         "Before answering, check your work: multiply each item's quantity "
         "by its unit_price and add them up — this sum must equal the "
-        "receipt's total paid. If it doesn't, you have likely confused a "
-        "line's total price with its per-unit price (e.g. a line reading "
-        "'2 x €4.45' where €4.45 is the total for both units, not €4.45 "
-        "each). Find the mismatched line and correct its unit_price so the "
-        "numbers reconcile before giving your final answer.\n\n"
+        "receipt's total paid. If it doesn't, first check whether you "
+        "mistook a tax-code digit for a quantity (see above); only if that "
+        "isn't the cause have you likely confused a line's total price "
+        "with its per-unit price (e.g. a genuine '2 x €4.45' line where "
+        "€4.45 is the total for both units, not €4.45 each). Find the "
+        "mismatched line and correct it so the numbers reconcile before "
+        "giving your final answer.\n\n"
         "The shopper's current shopping list is:\n"
         f"{shopping_list_text}\n\n"
         "For each receipt item, set matched_shopping_list_item to the exact "
@@ -152,6 +171,7 @@ def parse_receipt(image_bytes: bytes, shopping_list_names: list[str]) -> dict:
     result = json.loads(response.message.content)
     items = result["items"]
     total_paid = result["total_paid"]
+    store = result.get("store") or ""
     items_total = _items_total(items)
     reconciled = abs(items_total - total_paid) <= _RECONCILE_TOLERANCE
     if not reconciled:
@@ -164,4 +184,5 @@ def parse_receipt(image_bytes: bytes, shopping_list_names: list[str]) -> dict:
         "total_paid": total_paid,
         "items_total": items_total,
         "reconciled": reconciled,
+        "store": store,
     }
