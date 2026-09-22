@@ -8,13 +8,14 @@ from db.database import get_connection
 def log_expense(item_name, quantity_purchased, unit_price, store=None):
     """Record a purchase for an existing inventory item.
 
-    For an essential (non-luxury) item with a known shelf-life estimate, if
-    this purchase comes sooner than that estimate since the last one, the
-    estimate is corrected down to the actual gap — real repurchase timing is
-    a better signal than the original guess. Luxury items are exempt (a
-    treat bought on mood/budget doesn't follow a consumption schedule). Any
-    pending check-in for this item is also cleared, since a fresh purchase
-    starts a new shelf-life cycle.
+    For an essential item with a known shelf-life estimate, if this purchase
+    comes sooner than that estimate since the last one, the estimate is
+    corrected down to the actual gap — real repurchase timing is a better
+    signal than the original guess. Luxury items are exempt (a treat bought
+    on mood/budget doesn't follow a consumption schedule); necessity items
+    are exempt too (their shelf_life_days is a fixed same-day marker, not an
+    estimate to refine). Any pending check-in for this item is also cleared,
+    since a fresh purchase starts a new shelf-life cycle.
 
     Args:
         item_name: Name of the item being purchased (must already exist).
@@ -28,7 +29,7 @@ def log_expense(item_name, quantity_purchased, unit_price, store=None):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT id, shelf_life_days, is_luxury FROM inventory_items WHERE name = ?",
+        "SELECT id, shelf_life_days, purchase_type FROM inventory_items WHERE name = ?",
         (item_name,)
     )
     item = cursor.fetchone()
@@ -38,7 +39,7 @@ def log_expense(item_name, quantity_purchased, unit_price, store=None):
         return False
     now = datetime.now(tz=timezone.utc)
 
-    if item["shelf_life_days"] and not item["is_luxury"]:
+    if item["shelf_life_days"] and item["purchase_type"] == "essential":
         cursor.execute(
             "SELECT logged_at FROM item_expenses WHERE item_id = ? ORDER BY logged_at DESC LIMIT 1",
             (item["id"],)

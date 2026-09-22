@@ -86,7 +86,7 @@ def test_update_item_quantity_not_found(mock_conn):
 def test_set_profile_found(mock_conn):
     conn, _cursor = make_mock_conn(rowcount=1)
     mock_conn.return_value = conn
-    assert crud.set_profile("Milk", shelf_life_days=7, is_luxury=0) is True
+    assert crud.set_profile("Milk", shelf_life_days=7, purchase_type="essential") is True
     conn.commit.assert_called_once()
 
 
@@ -193,20 +193,20 @@ def test_delete_item_not_found(mock_conn):
 
 
 @patch("db.crud.get_connection")
-def test_get_pending_profile_item_shelf_life_stage_first(mock_conn):
+def test_get_pending_profile_item_purchase_type_stage_first(mock_conn):
     conn, cursor = make_mock_conn()
     mock_conn.return_value = conn
     cursor.fetchone.side_effect = [{"name": "Sushi"}]
-    assert crud.get_pending_profile_item() == ("Sushi", "shelf_life")
+    assert crud.get_pending_profile_item() == ("Sushi", "purchase_type")
     assert cursor.execute.call_count == 1
 
 
 @patch("db.crud.get_connection")
-def test_get_pending_profile_item_falls_back_to_luxury_stage(mock_conn):
+def test_get_pending_profile_item_falls_back_to_shelf_life_stage(mock_conn):
     conn, cursor = make_mock_conn()
     mock_conn.return_value = conn
     cursor.fetchone.side_effect = [None, {"name": "Milk"}]
-    assert crud.get_pending_profile_item() == ("Milk", "luxury")
+    assert crud.get_pending_profile_item() == ("Milk", "shelf_life")
     assert cursor.execute.call_count == 2
 
 

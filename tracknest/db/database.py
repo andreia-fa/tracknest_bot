@@ -58,12 +58,24 @@ def init_db():
     # shelf_life_days / is_luxury added after the initial schema — ALTER
     # instead of a fresh CREATE so existing databases keep their data.
     # shelf_life_days: NULL = not yet asked, 0 = doesn't spoil / n/a.
-    # is_luxury: NULL = not yet asked, 0 = essential, 1 = luxury/treat.
     existing_inv_cols = {row[1] for row in cursor.execute("PRAGMA table_info(inventory_items)")}
     if "shelf_life_days" not in existing_inv_cols:
         cursor.execute("ALTER TABLE inventory_items ADD COLUMN shelf_life_days INTEGER")
-    if "is_luxury" not in existing_inv_cols:
-        cursor.execute("ALTER TABLE inventory_items ADD COLUMN is_luxury INTEGER")
+    # is_luxury (0/1) replaced 2026-09-22 by purchase_type ('luxury' /
+    # 'essential' / 'necessity') — a same-day-consumed item (coffee, a
+    # pretzel) isn't a "luxury" or a stocked "essential", and conflating
+    # its shelf life with "doesn't spoil" under shelf_life_days=0 was
+    # wrong in the other direction. Migrate existing values once, then
+    # drop the old column.
+    if "purchase_type" not in existing_inv_cols:
+        cursor.execute("ALTER TABLE inventory_items ADD COLUMN purchase_type TEXT")
+        if "is_luxury" in existing_inv_cols:
+            cursor.execute("""
+                UPDATE inventory_items SET purchase_type = CASE is_luxury
+                    WHEN 1 THEN 'luxury' WHEN 0 THEN 'essential' ELSE NULL END
+            """)
+    if "is_luxury" in existing_inv_cols:
+        cursor.execute("ALTER TABLE inventory_items DROP COLUMN is_luxury")
     if "checkin_pending" not in existing_inv_cols:
         cursor.execute(
             "ALTER TABLE inventory_items ADD COLUMN checkin_pending INTEGER NOT NULL DEFAULT 0"

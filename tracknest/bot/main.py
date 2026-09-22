@@ -41,6 +41,24 @@ _ONBOARD_GOAL_KEYBOARD = InlineKeyboardMarkup([
     [InlineKeyboardButton("Set one now", callback_data="onboard_goal:yes")],
     [InlineKeyboardButton("Skip for now", callback_data="onboard_goal:skip")],
 ])
+_PROFILE_SHELF_KEYBOARD = InlineKeyboardMarkup([
+    [
+        InlineKeyboardButton("1 day", callback_data="profile_shelf:1"),
+        InlineKeyboardButton("4 days", callback_data="profile_shelf:4"),
+    ],
+    [
+        InlineKeyboardButton("One week", callback_data="profile_shelf:7"),
+        InlineKeyboardButton("Two weeks", callback_data="profile_shelf:14"),
+    ],
+    [InlineKeyboardButton("Doesn't spoil", callback_data="profile_shelf:na")],
+    [InlineKeyboardButton("Other: insert", callback_data="profile_shelf:custom")],
+])
+_PROFILE_TYPE_KEYBOARD = InlineKeyboardMarkup([
+    [InlineKeyboardButton("Luxury / Treat", callback_data="profile_type:luxury")],
+    [InlineKeyboardButton("Essential", callback_data="profile_type:essential")],
+    [InlineKeyboardButton("Necessity (used up same-day)", callback_data="profile_type:necessity")],
+])
+_PROFILE_REMINDER_INTERVAL = timedelta(hours=3)
 
 logging.basicConfig(
     format="%(asctime)s %(name)s %(levelname)s %(message)s",
@@ -201,6 +219,8 @@ async def handle_onboarding_choice(update: Update, context: ContextTypes.DEFAULT
 _SHELF_LIFE_NA_WORDS = {"n/a", "na", "no", "none", "never", "doesn't spoil", "does not spoil"}
 _LUXURY_WORDS = {"luxury", "lux", "treat", "l"}
 _ESSENTIAL_WORDS = {"essential", "regular", "basic", "e"}
+_NECESSITY_WORDS = {"necessity", "necessary", "n"}
+_NECESSITY_SHELF_LIFE_DAYS = 1
 
 
 async def send_pending_profile_question(bot, chat_id: int):
@@ -221,19 +241,25 @@ async def send_pending_profile_question(bot, chat_id: int):
     if stage == "shelf_life":
         await bot.send_message(
             chat_id,
-            f"Quick one — how many days does {name} usually last before it goes bad? "
-            "Reply with a number, or 'n/a' if it doesn't really spoil (pantry items etc.).",
+            f"Quick one — how many days does {name} usually last before it goes bad?",
+            reply_markup=_PROFILE_SHELF_KEYBOARD,
         )
     else:
         await bot.send_message(
             chat_id,
-            f"Got it. Is {name} more of a luxury/treat purchase, or a regular essential? "
-            "Reply 'luxury' or 'essential'.",
+            f"Got it. What kind of purchase is {name}?",
+            reply_markup=_PROFILE_TYPE_KEYBOARD,
         )
 
 
 async def _handle_profile_answer(update: Update, context: ContextTypes.DEFAULT_TYPE, pending: tuple):
-    """Interpret a plain-text reply as the answer to a pending item-profiling question."""
+    """Interpret a plain-text reply as the answer to a pending item-profiling question.
+
+    Buttons (see handle_profile_type_choice / handle_profile_shelf_choice)
+    are the primary way to answer both questions now — this free-text path
+    stays as a forgiving fallback for whichever stage is pending, and is
+    still the only path for the shelf-life "Other: insert" follow-up.
+    """
     text = update.message.text.strip().lower()
     name, stage = pending
     if stage == "shelf_life":
@@ -248,15 +274,67 @@ async def _handle_profile_answer(update: Update, context: ContextTypes.DEFAULT_T
         crud.set_profile(name, shelf_life_days=days)
         await send_pending_profile_question(context.bot, update.effective_chat.id)
         return
-    # stage == "luxury"
+    # stage == "purchase_type"
     if text in _LUXURY_WORDS:
-        is_luxury = 1
+        purchase_type = "luxury"
     elif text in _ESSENTIAL_WORDS:
-        is_luxury = 0
+        purchase_type = "essential"
+    elif text in _NECESSITY_WORDS:
+        purchase_type = "necessity"
     else:
-        await update.message.reply_text("Reply 'luxury' or 'essential'.")
+        await update.message.reply_text(
+            "Use the buttons above, or reply 'luxury', 'essential', or 'necessity'."
+        )
         return
-    crud.set_profile(name, is_luxury=is_luxury)
+    await _set_purchase_type(context.bot, update.effective_chat.id, name, purchase_type)
+
+
+async def _set_purchase_type(bot, chat_id: int, name: str, purchase_type: str) -> None:
+    """Save purchase_type, auto-filling shelf_life_days for a necessity item.
+
+    A necessity is used up the same day it's bought — there's no shelf-life
+    estimate to meaningfully ask for, so it's set to _NECESSITY_SHELF_LIFE_DAYS
+    directly rather than prompting a question with an implied answer.
+    """
+    if purchase_type == "necessity":
+        crud.set_profile(name, purchase_type=purchase_type, shelf_life_days=_NECESSITY_SHELF_LIFE_DAYS)
+    else:
+        crud.set_profile(name, purchase_type=purchase_type)
+    await send_pending_profile_question(bot, chat_id)
+
+
+async def handle_profile_type_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle a button press on the purchase-type profiling keyboard."""
+    query = update.callback_query
+    await query.answer()
+    pending = crud.get_pending_profile_item()
+    if not pending or pending[1] != "purchase_type":
+        await query.edit_message_text("Already answered.")
+        return
+    name, _stage = pending
+    choice = query.data.split(":", 1)[1]
+    labels = {"luxury": "Luxury / Treat", "essential": "Essential", "necessity": "Necessity"}
+    await query.edit_message_text(f"{name}: {labels[choice]}.")
+    await _set_purchase_type(context.bot, update.effective_chat.id, name, choice)
+
+
+async def handle_profile_shelf_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle a button press on the shelf-life profiling keyboard."""
+    query = update.callback_query
+    await query.answer()
+    pending = crud.get_pending_profile_item()
+    if not pending or pending[1] != "shelf_life":
+        await query.edit_message_text("Already answered.")
+        return
+    name, _stage = pending
+    choice = query.data.split(":", 1)[1]
+    if choice == "custom":
+        await query.edit_message_text(f"How many days does {name} usually last? Reply with a number.")
+        return
+    days = 0 if choice == "na" else int(choice)
+    duration = "doesn't spoil" if days == 0 else f"{days} day(s)"
+    await query.edit_message_text(f"{name}: {duration}.")
+    crud.set_profile(name, shelf_life_days=days)
     await send_pending_profile_question(context.bot, update.effective_chat.id)
 
 
@@ -442,6 +520,23 @@ async def process_receipt_result(parsed: dict) -> str:
             "is probably off. Worth double-checking against the paper receipt."
         )
     return "Receipt processed:\n" + "\n".join(replies)
+
+
+async def remind_pending_profile(context: ContextTypes.DEFAULT_TYPE):
+    """Recurring job: re-send the current item-profiling question until it's answered.
+
+    A newly-bought item's profile (purchase type, and for luxury/essential
+    items, shelf life) is asked once right after logging it — but a message
+    sent once is easy to miss or dismiss, and an unanswered item silently
+    stays unprofiled forever otherwise (excluded from check-ins, "running
+    out soon", and the treats/essentials/necessities split). Re-nudging on
+    an interval, same as the other proactive jobs, means it eventually gets
+    answered without anyone having to remember to go back to it.
+    """
+    chat_id = settings.get_chat_id()
+    if not chat_id:
+        return
+    await send_pending_profile_question(context.bot, chat_id)
 
 
 async def check_expiring_items(context: ContextTypes.DEFAULT_TYPE):
@@ -655,14 +750,15 @@ async def report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if budget:
         lines.append(f"  Budget: €{budget['spent']:.2f} of €{budget['budget']:.2f} ({budget['pct']:.0f}%)")
 
-    # The split the user's own luxury/essential answers add up to — nobody
-    # totals this for themselves, and it reframes the month more than the
-    # headline number does.
-    if spending["total"] > 0 and (spending["luxury"] or spending["essential"]):
+    # The split the user's own luxury/essential/necessity answers add up
+    # to — nobody totals this for themselves, and it reframes the month
+    # more than the headline number does.
+    if spending["total"] > 0 and (spending["luxury"] or spending["essential"] or spending["necessity"]):
         luxury_pct = spending["luxury"] / spending["total"] * 100
         lines.append(
             f"  Treats: €{spending['luxury']:.2f} ({luxury_pct:.0f}%) · "
-            f"essentials: €{spending['essential']:.2f}"
+            f"essentials: €{spending['essential']:.2f} · "
+            f"necessities: €{spending['necessity']:.2f}"
         )
     if spending["unclassified"]:
         lines.append(f"  Not yet classified: €{spending['unclassified']:.2f}")
@@ -721,7 +817,7 @@ async def report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         lines.append("\n🚦 Needs you")
         for name in health["unprofiled"]:
-            lines.append(f"  🟡 {name} — still needs profiling (shelf-life/luxury)")
+            lines.append(f"  🟡 {name} — still needs profiling")
         for name in health["checkin_pending"]:
             lines.append(f"  🟡 {name} — waiting on your check-in reply")
         for name in health["spare_alert_pending"]:
@@ -830,6 +926,8 @@ def main():
     app.add_handler(CommandHandler("setup", setup_cmd))
     app.add_handler(CallbackQueryHandler(handle_goal_date_choice, pattern=r"^goal_date:"))
     app.add_handler(CallbackQueryHandler(handle_onboarding_choice, pattern=r"^onboard_"))
+    app.add_handler(CallbackQueryHandler(handle_profile_type_choice, pattern=r"^profile_type:"))
+    app.add_handler(CallbackQueryHandler(handle_profile_shelf_choice, pattern=r"^profile_shelf:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_error_handler(handle_error)
@@ -842,6 +940,9 @@ def main():
         )
         app.job_queue.run_repeating(
             check_budget_alert, interval=_CHECKIN_INTERVAL, first=timedelta(minutes=1)
+        )
+        app.job_queue.run_repeating(
+            remind_pending_profile, interval=_PROFILE_REMINDER_INTERVAL, first=_PROFILE_REMINDER_INTERVAL
         )
     else:
         logger.warning("JobQueue unavailable (missing job-queue extra) — proactive alerts disabled.")

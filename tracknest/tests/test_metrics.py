@@ -22,7 +22,11 @@ def test_get_spending_summary(mock_conn):
     conn, _cursor = make_mock_conn(
         fetchone_side_effect=[(45.5,)],
         fetchall_side_effect=[
-            [{"is_luxury": 0, "total": 25.5}, {"is_luxury": 1, "total": 20.0}],
+            [
+                {"purchase_type": "essential", "total": 25.5},
+                {"purchase_type": "luxury", "total": 15.0},
+                {"purchase_type": "necessity", "total": 5.0},
+            ],
             [{"name": "Milk", "total": 20.0}],
             [{"category": "Dairy", "total": 20.0}],
         ],
@@ -32,8 +36,9 @@ def test_get_spending_summary(mock_conn):
     assert result["total"] == 45.5
     assert result["top_items"] == [{"name": "Milk", "total": 20.0}]
     assert result["top_categories"] == [{"category": "Dairy", "total": 20.0}]
-    assert result["luxury"] == 20.0
+    assert result["luxury"] == 15.0
     assert result["essential"] == 25.5
+    assert result["necessity"] == 5.0
     assert result["unclassified"] == 0.0
 
 
@@ -41,13 +46,14 @@ def test_get_spending_summary(mock_conn):
 def test_get_spending_summary_keeps_unprofiled_out_of_essentials(mock_conn):
     conn, _cursor = make_mock_conn(
         fetchone_side_effect=[(10.0,)],
-        fetchall_side_effect=[[{"is_luxury": None, "total": 10.0}], [], []],
+        fetchall_side_effect=[[{"purchase_type": None, "total": 10.0}], [], []],
     )
     mock_conn.return_value = conn
     result = metrics.get_spending_summary(year=2026, month=4)
     assert result["unclassified"] == 10.0
     assert result["essential"] == 0.0
     assert result["luxury"] == 0.0
+    assert result["necessity"] == 0.0
 
 
 @patch("db.metrics.get_spending_summary")
@@ -120,11 +126,11 @@ def test_get_running_low_handles_date_only_last_purchase(mock_conn):
 @patch("db.metrics.get_connection")
 def test_get_daily_cost_ranks_by_cost_per_day(mock_conn):
     conn, _cursor = make_mock_conn(fetchall_side_effect=[[
-        {"name": "Peanut Butter", "shelf_life_days": 60, "is_luxury": 0,
+        {"name": "Peanut Butter", "shelf_life_days": 60, "purchase_type": "essential",
          "unit_price": 6.99, "purchase_count": 3},
-        {"name": "Sushi", "shelf_life_days": 2, "is_luxury": 1,
+        {"name": "Sushi", "shelf_life_days": 2, "purchase_type": "luxury",
          "unit_price": 10.99, "purchase_count": 2},
-        {"name": "Never Bought", "shelf_life_days": 5, "is_luxury": 0,
+        {"name": "Never Bought", "shelf_life_days": 5, "purchase_type": "essential",
          "unit_price": None, "purchase_count": 0},
     ]])
     mock_conn.return_value = conn
@@ -139,7 +145,7 @@ def test_get_daily_cost_ranks_by_cost_per_day(mock_conn):
 def test_get_daily_cost_withholds_untested_shelf_life(mock_conn):
     """A single purchase means the shelf life is still just the user's guess."""
     conn, _cursor = make_mock_conn(fetchall_side_effect=[[
-        {"name": "Sushi", "shelf_life_days": 2, "is_luxury": 1,
+        {"name": "Sushi", "shelf_life_days": 2, "purchase_type": "luxury",
          "unit_price": 10.99, "purchase_count": 1},
     ]])
     mock_conn.return_value = conn

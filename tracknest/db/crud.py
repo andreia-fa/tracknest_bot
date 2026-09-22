@@ -86,8 +86,8 @@ def update_item_quantity(name, quantity):
     return affected > 0
 
 
-def set_profile(name, shelf_life_days=None, is_luxury=None):
-    """Set shelf-life and/or luxury-tier metadata on an existing item.
+def set_profile(name, shelf_life_days=None, purchase_type=None):
+    """Set shelf-life and/or purchase-type metadata on an existing item.
 
     Each field is only overwritten when explicitly passed (via SQL COALESCE),
     so the two can be set independently across separate calls — e.g. asking
@@ -98,8 +98,9 @@ def set_profile(name, shelf_life_days=None, is_luxury=None):
         shelf_life_days: Typical days until it spoils; 0 means "doesn't
             apply / non-perishable" (distinct from NULL, meaning "not yet
             asked"). Leave unset to not touch this field.
-        is_luxury: 1 for a luxury/treat purchase, 0 for a regular essential.
-            Leave unset to not touch this field.
+        purchase_type: One of 'luxury', 'essential', 'necessity' (a
+            same-day-consumed item like a coffee or a pretzel — not stocked,
+            not tracked on a schedule). Leave unset to not touch this field.
 
     Returns:
         True if the item was found and updated, False otherwise.
@@ -109,9 +110,9 @@ def set_profile(name, shelf_life_days=None, is_luxury=None):
     cursor.execute("""
         UPDATE inventory_items
         SET shelf_life_days = COALESCE(?, shelf_life_days),
-            is_luxury = COALESCE(?, is_luxury)
+            purchase_type = COALESCE(?, purchase_type)
         WHERE name = ?
-    """, (shelf_life_days, is_luxury, name))
+    """, (shelf_life_days, purchase_type, name))
     affected = cursor.rowcount
     conn.commit()
     cursor.close()
@@ -140,11 +141,13 @@ def set_par_level(name, level):
 
 
 def get_par_alert_candidates(default_par_level):
-    """Return non-luxury, profiled items on a par=2 policy eligible for a spare-stock alert.
+    """Return essential, profiled items on a par=2 policy eligible for a spare-stock alert.
 
     Mirrors get_checkin_candidates, but only for items whose effective par
     level (per-item override, or the household default) is 2 — a par=1 item
-    just waits for the regular shelf-life check-in instead.
+    just waits for the regular shelf-life check-in instead. Excludes both
+    luxury (no consumption schedule) and necessity (same-day, never stocked)
+    purchase types.
 
     Args:
         default_par_level: The household's default par level, used for any
@@ -160,7 +163,7 @@ def get_par_alert_candidates(default_par_level):
         SELECT i.name, i.shelf_life_days,
                (SELECT MAX(e.logged_at) FROM item_expenses e WHERE e.item_id = i.id) AS last_purchase
         FROM inventory_items i
-        WHERE i.is_luxury = 0
+        WHERE i.purchase_type = 'essential'
           AND i.shelf_life_days IS NOT NULL
           AND i.shelf_life_days > 0
           AND i.spare_alert_pending = 0
@@ -197,11 +200,13 @@ def mark_spare_alert_pending(name, pending=True):
 
 
 def get_checkin_candidates():
-    """Return non-luxury, profiled items eligible for a shelf-life check-in.
+    """Return essential, profiled items eligible for a shelf-life check-in.
 
     Excludes luxury items (tracing an expiry date isn't meaningful for a
-    treat bought on mood/budget rather than a consumption schedule), items
-    with no shelf-life estimate yet, and items with one already pending.
+    treat bought on mood/budget rather than a consumption schedule) and
+    necessity items (same-day-consumed, never actually stocked, so there's
+    nothing to check in on), items with no shelf-life estimate yet, and
+    items with one already pending.
 
     Returns:
         List of dicts: name, shelf_life_days, last_purchase (ISO datetime of
@@ -213,7 +218,7 @@ def get_checkin_candidates():
         SELECT i.name, i.shelf_life_days,
                (SELECT MAX(e.logged_at) FROM item_expenses e WHERE e.item_id = i.id) AS last_purchase
         FROM inventory_items i
-        WHERE i.is_luxury = 0
+        WHERE i.purchase_type = 'essential'
           AND i.shelf_life_days IS NOT NULL
           AND i.shelf_life_days > 0
           AND i.checkin_pending = 0
@@ -227,34 +232,39 @@ def get_checkin_candidates():
 def get_pending_profile_item():
     """Return (name, stage) for the oldest item still mid item-profiling, or None.
 
-    Derived entirely from shelf_life_days/is_luxury being NULL ("not yet
+    Derived entirely from purchase_type/shelf_life_days being NULL ("not yet
     asked") rather than a separate flag — an item only ever gets these
     columns via the profiling flow, so this is a faithful, persisted
-    replacement for an in-memory queue: stage 'shelf_life' comes first for
-    any item that's never been asked at all, then 'luxury' for one that has
-    a shelf-life estimate but no luxury/essential answer yet. Works the same
+    replacement for an in-memory queue. Stage 'purchase_type' comes first
+    for any item never asked at all. Stage 'shelf_life' follows only for a
+    'luxury' or 'essential' item with no shelf-life estimate yet — a
+    'necessity' item (same-day-consumed: a coffee, a pretzel) has its
+    shelf_life_days set to 1 automatically the moment purchase_type is
+    answered, so it's never asked this question at all. Works the same
     regardless of which process (the live bot or the offline receipt worker)
     logged the item, since both just leave these columns NULL.
 
     Returns:
-        (name, stage) tuple, stage being 'shelf_life' or 'luxury', or None
-        if no item needs profiling right now.
+        (name, stage) tuple, stage being 'purchase_type' or 'shelf_life', or
+        None if no item needs profiling right now.
     """
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT name FROM inventory_items WHERE shelf_life_days IS NULL ORDER BY id LIMIT 1")
+    cursor.execute("SELECT name FROM inventory_items WHERE purchase_type IS NULL ORDER BY id LIMIT 1")
     row = cursor.fetchone()
     if row:
         cursor.close()
         conn.close()
-        return row["name"], "shelf_life"
-    cursor.execute(
-        "SELECT name FROM inventory_items WHERE shelf_life_days IS NOT NULL AND is_luxury IS NULL ORDER BY id LIMIT 1"
-    )
+        return row["name"], "purchase_type"
+    cursor.execute("""
+        SELECT name FROM inventory_items
+        WHERE purchase_type IN ('luxury', 'essential') AND shelf_life_days IS NULL
+        ORDER BY id LIMIT 1
+    """)
     row = cursor.fetchone()
     cursor.close()
     conn.close()
-    return (row["name"], "luxury") if row else None
+    return (row["name"], "shelf_life") if row else None
 
 
 def get_pending_checkin_item():

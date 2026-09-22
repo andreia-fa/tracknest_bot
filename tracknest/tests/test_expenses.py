@@ -17,7 +17,7 @@ def make_mock_conn(fetchone=None, fetchall=None):
 
 @patch("db.expenses.get_connection")
 def test_log_expense_item_exists(mock_conn):
-    conn, _cursor = make_mock_conn(fetchone={"id": 1, "shelf_life_days": None, "is_luxury": 0})
+    conn, _cursor = make_mock_conn(fetchone={"id": 1, "shelf_life_days": None, "purchase_type": "essential"})
     mock_conn.return_value = conn
     assert expenses.log_expense("Milk", 2, 1.50) is True
     conn.commit.assert_called_once()
@@ -38,7 +38,7 @@ def test_log_expense_shortens_shelf_life_on_early_repurchase(mock_conn):
     mock_conn.return_value = conn
     three_days_ago = (datetime.now(tz=timezone.utc) - timedelta(days=3)).isoformat()
     cursor.fetchone.side_effect = [
-        {"id": 1, "shelf_life_days": 10, "is_luxury": 0},
+        {"id": 1, "shelf_life_days": 10, "purchase_type": "essential"},
         {"logged_at": three_days_ago},
     ]
     expenses.log_expense("Spinach", 1, 1.11)
@@ -51,8 +51,19 @@ def test_log_expense_shortens_shelf_life_on_early_repurchase(mock_conn):
 def test_log_expense_skips_adjustment_for_luxury(mock_conn):
     conn, cursor = make_mock_conn()
     mock_conn.return_value = conn
-    cursor.fetchone.side_effect = [{"id": 1, "shelf_life_days": 2, "is_luxury": 1}]
+    cursor.fetchone.side_effect = [{"id": 1, "shelf_life_days": 2, "purchase_type": "luxury"}]
     expenses.log_expense("Sushi", 1, 10.99)
+    update_calls = [c for c in cursor.execute.call_args_list if "SET shelf_life_days = ?" in c[0][0]]
+    assert len(update_calls) == 0
+
+
+@patch("db.expenses.get_connection")
+def test_log_expense_skips_adjustment_for_necessity(mock_conn):
+    """A necessity's shelf_life_days is a fixed same-day marker, not a guess to refine."""
+    conn, cursor = make_mock_conn()
+    mock_conn.return_value = conn
+    cursor.fetchone.side_effect = [{"id": 1, "shelf_life_days": 1, "purchase_type": "necessity"}]
+    expenses.log_expense("Matcha", 1, 2.50)
     update_calls = [c for c in cursor.execute.call_args_list if "SET shelf_life_days = ?" in c[0][0]]
     assert len(update_calls) == 0
 
