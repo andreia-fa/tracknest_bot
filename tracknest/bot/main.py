@@ -287,10 +287,13 @@ async def _handle_checkin_answer(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle plain-text messages: one shopping list entry per line.
+    """Handle plain-text messages: one shopping list entry (or purchase) per line.
 
     A line starting with "-" (e.g. "- bananas") removes that item from the
-    shopping list instead of adding it.
+    shopping list instead of adding it. A line that includes a price (e.g.
+    "Matcha 2.50") is treated as a purchase you're logging right now — no
+    receipt needed — rather than a shopping-list addition; see
+    bot.parser.parse_line for exactly what counts as a price.
 
     If onboarding, a /set_goal conversation, item-profiling, or shelf-life
     check-in question is pending for this chat, the message is treated as
@@ -327,9 +330,15 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 replies.append(f"'{name}' wasn't on your list.")
             continue
         try:
-            name, qty, _unit_price = parse_line(line)
+            name, qty, unit_price = parse_line(line)
         except ValueError:
             replies.append(f"Couldn't understand: '{line}'")
+            continue
+        if unit_price is not None:
+            replies.append(_log_purchase(
+                name, qty, unit_price,
+                category=infer_category(name), matched_list_item=name,
+            ))
             continue
         shopping_list.add_item(name, qty, category=infer_category(name))
         replies.append(f"Added {qty}x {name} to your shopping list.")
@@ -367,6 +376,38 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+def _log_purchase(name, qty, price, *, store=None, category=None, matched_list_item=None) -> str:
+    """Log one purchased item (inventory + expense) and describe it for a reply.
+
+    Shared by receipt processing and a plain-text line that includes a
+    price (see handle_text) — same underlying purchase, same bookkeeping,
+    just a different source for name/qty/price/category.
+
+    Returns:
+        A single "• ..." reply line, including a duplicate-purchase notice
+        or a price-delta/spike note when applicable.
+    """
+    if expenses.is_duplicate_purchase(name, price):
+        return (
+            f"• {qty}x {name} at €{price:.2f} each — skipped, this exact item/price "
+            "was already logged in the last hour (looks like the same receipt sent twice)"
+        )
+    crud.add_item(name, qty, category=category)
+    delta = expenses.get_price_delta(name, price)
+    expenses.log_expense(name, qty, price, store=store)
+    line = f"• {qty}x {name} at €{price:.2f} each"
+    if matched_list_item and shopping_list.remove_item(matched_list_item):
+        line += " (cleared from your list)"
+    if delta is not None:
+        sign = "+" if delta["pct_change"] >= 0 else ""
+        delta_text = f"{sign}{delta['pct_change']:.0f}% vs usual €{delta['avg_price']:.2f}"
+        if delta["pct_change"] >= _PRICE_SPIKE_THRESHOLD_PCT and delta["n"] >= _PRICE_SPIKE_MIN_HISTORY:
+            line += f" — ⚠️ {delta_text}, that's a jump"
+        else:
+            line += f" ({delta_text})"
+    return line
+
+
 async def process_receipt_result(parsed: dict) -> str:
     """Log a parsed receipt's items and build the summary reply text.
 
@@ -386,30 +427,14 @@ async def process_receipt_result(parsed: dict) -> str:
     logger.info("Receipt parsed: %d item(s).", len(items))
     if not items:
         return "Couldn't find any items on that receipt."
-    replies = []
-    for item in items:
-        name, qty, price = item["name"], item["quantity"], item["unit_price"]
-        if expenses.is_duplicate_purchase(name, price):
-            replies.append(
-                f"• {qty}x {name} at €{price:.2f} each — skipped, this exact item/price "
-                "was already logged in the last hour (looks like the same receipt sent twice)"
-            )
-            continue
-        crud.add_item(name, qty, category=item.get("category") or None)
-        delta = expenses.get_price_delta(name, price)
-        expenses.log_expense(name, qty, price, store=store)
-        line = f"• {qty}x {name} at €{price:.2f} each"
-        matched = item["matched_shopping_list_item"]
-        if matched and shopping_list.remove_item(matched):
-            line += " (cleared from your list)"
-        if delta is not None:
-            sign = "+" if delta["pct_change"] >= 0 else ""
-            delta_text = f"{sign}{delta['pct_change']:.0f}% vs usual €{delta['avg_price']:.2f}"
-            if delta["pct_change"] >= _PRICE_SPIKE_THRESHOLD_PCT and delta["n"] >= _PRICE_SPIKE_MIN_HISTORY:
-                line += f" — ⚠️ {delta_text}, that's a jump"
-            else:
-                line += f" ({delta_text})"
-        replies.append(line)
+    replies = [
+        _log_purchase(
+            item["name"], item["quantity"], item["unit_price"],
+            store=store, category=item.get("category") or None,
+            matched_list_item=item["matched_shopping_list_item"],
+        )
+        for item in items
+    ]
     if not parsed["reconciled"]:
         replies.append(
             f"⚠️ Heads up: item prices add up to €{parsed['items_total']:.2f} but the "

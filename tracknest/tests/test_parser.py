@@ -53,3 +53,17 @@ def test_strips_leading_dash_bullet():
 def test_strips_asterisk_and_bullet_point():
     assert parse_line("* Milk") == ("Milk", 1, None)
     assert parse_line("• Milk") == ("Milk", 1, None)
+
+
+def test_name_and_price_with_implicit_quantity_one():
+    assert parse_line("Matcha 2.50") == ("Matcha", 1, 2.50)
+
+
+def test_name_and_price_accepts_comma_decimal():
+    assert parse_line("Matcha 2,50") == ("Matcha", 1, 2.50)
+
+
+def test_bare_integer_is_still_quantity_not_price():
+    # No decimal separator -> always quantity, never a price, even though
+    # "2" alone would also parse fine as a price.
+    assert parse_line("Bananas 2") == ("Bananas", 2, None)

@@ -14,12 +14,21 @@ _TRAILING_BULLET_RE = re.compile(r"[\s\-*•]+$")
 def parse_line(line: str) -> tuple[str, int, float | None]:
     """Parse one line of free text into an item name, quantity, and optional unit price.
 
-    Accepts "<name>", "<name> <qty>", or "<name> <qty> <unit_price>", where qty is
-    a whole number and unit_price accepts either '.' or ',' as the decimal separator
-    (e.g. "Oat Milk 3 2,50"). Trailing tokens that don't match these shapes are
-    treated as part of the name. Leading/trailing list-bullet punctuation (">",
-    "*", "•", "--") is stripped first, so pasting a formatted list doesn't leak
-    stray symbols into the stored item name.
+    Accepts "<name>", "<name> <qty>", "<name> <price>", or "<name> <qty>
+    <price>", where qty is a whole number and price accepts either '.' or
+    ',' as the decimal separator (e.g. "Oat Milk 3 2,50" or "Matcha 2.50").
+    A price is only recognized when its token contains a decimal separator
+    — a bare integer is always read as quantity, never price, so "Bananas
+    2" still means two bananas, not €2. Trailing tokens that don't match
+    these shapes are treated as part of the name. Leading/trailing
+    list-bullet punctuation (">", "*", "•", "--") is stripped first, so
+    pasting a formatted list doesn't leak stray symbols into the stored
+    item name.
+
+    Callers use whether unit_price came back non-None to decide what a
+    line means: a price present means "I just bought this, log it now"
+    (handle_text logs an expense directly); no price means "put this on
+    the shopping list" (the previous, still-default behaviour).
 
     Args:
         line: One line of user-typed text.
@@ -46,9 +55,16 @@ def parse_line(line: str) -> tuple[str, int, float | None]:
             unit_price = price
             tokens = tokens[:-2]
 
-    if unit_price is None and len(tokens) >= 2 and tokens[-1].isdigit():
-        quantity = int(tokens[-1])
-        tokens = tokens[:-1]
+    if unit_price is None and len(tokens) >= 2:
+        last = tokens[-1]
+        if last.isdigit():
+            quantity = int(last)
+            tokens = tokens[:-1]
+        elif "." in last or "," in last:
+            price = _parse_price(last)
+            if price is not None:
+                unit_price = price
+                tokens = tokens[:-1]
 
     name = " ".join(tokens)
     if not name:
