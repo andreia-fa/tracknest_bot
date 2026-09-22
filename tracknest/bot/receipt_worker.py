@@ -27,13 +27,19 @@ _SSH_TIMEOUT_SECONDS = 30
 def _remote_call(op: str, args: dict | None = None):
     """Run a db.remote_cli operation inside the cloud container over SSH.
 
+    Args are sent on stdin, not as a trailing argv string — ssh joins
+    trailing arguments into one string for the remote shell to re-parse,
+    which would word-split a JSON payload on its spaces and strip its
+    quotes before db.remote_cli ever saw it (`docker exec -i` is required
+    for the container to receive that stdin at all).
+
     Raises:
         subprocess.CalledProcessError: If the SSH/docker exec call fails.
     """
     try:
         result = subprocess.run(
-            ["ssh", _SSH_HOST, "docker", "exec", _CONTAINER, "python", "-m", "db.remote_cli",
-             op, json.dumps(args or {})],
+            ["ssh", _SSH_HOST, "docker", "exec", "-i", _CONTAINER, "python", "-m", "db.remote_cli", op],
+            input=json.dumps(args or {}),
             capture_output=True, text=True, check=True, timeout=_SSH_TIMEOUT_SECONDS,
         )
     except subprocess.CalledProcessError as e:

@@ -48,12 +48,23 @@ async def test_fail_receipt_resolves_failed_and_apologizes(mock_queue, mock_bot_
 @patch("db.remote_cli.receipt_queue")
 def test_main_dispatches_sync_op(mock_queue, capsys):
     mock_queue.get_pending_receipts.return_value = [{"id": 1}]
-    with patch("sys.argv", ["remote_cli.py", "get_pending_receipts"]):
+    with patch("sys.argv", ["remote_cli.py", "get_pending_receipts"]), patch("sys.stdin.read", return_value=""):
         remote_cli.main()
     assert json.loads(capsys.readouterr().out) == [{"id": 1}]
 
 
+def test_main_reads_args_from_stdin_not_argv():
+    """Args must come from stdin: an ssh-invoked `docker exec` re-parses its
+    trailing argv through the remote shell, which would mangle a JSON string
+    passed as a plain argument (word-splits on spaces, strips quotes)."""
+    with patch("db.remote_cli.shopping_list") as mock_shopping_list:
+        mock_shopping_list.get_all_items.return_value = [{"name": "Milk"}, {"name": "Bretzel"}]
+        with patch("sys.argv", ["remote_cli.py", "get_shopping_list_names"]), \
+             patch("sys.stdin.read", return_value='{"unused": "value with spaces"}'):
+            remote_cli.main()
+
+
 def test_main_rejects_unknown_op():
-    with patch("sys.argv", ["remote_cli.py", "not_a_real_op"]):
+    with patch("sys.argv", ["remote_cli.py", "not_a_real_op"]), patch("sys.stdin.read", return_value=""):
         with pytest.raises(SystemExit):
             remote_cli.main()

@@ -50,9 +50,18 @@ _ASYNC_OPS = {
 
 
 def main():
-    """Dispatch: `python -m db.remote_cli <op> [json-args]`, prints JSON to stdout."""
+    """Dispatch: `python -m db.remote_cli <op>`, JSON args on stdin, prints JSON to stdout.
+
+    Args arrive on stdin rather than argv: when this is invoked through
+    `ssh host docker exec ... python -m db.remote_cli <op> <json>`, ssh joins
+    its trailing arguments into one string for the remote shell to
+    re-parse, which word-splits on spaces and strips the JSON's quotes
+    before it ever reaches this process. Stdin isn't touched by that
+    re-parsing, so it's the only way a JSON payload arrives intact.
+    """
     op = sys.argv[1]
-    args = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
+    raw_args = sys.stdin.read()
+    args = json.loads(raw_args) if raw_args.strip() else {}
     if op in _SYNC_OPS:
         result = _SYNC_OPS[op](args)
     elif op in _ASYNC_OPS:

@@ -1,3 +1,4 @@
+import json
 import subprocess
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -112,3 +113,20 @@ def test_remote_call_logs_stderr_and_reraises_on_failure():
                 receipt_worker._remote_call("finish_receipt", {"receipt_id": 1})
             mock_logger.error.assert_called_once()
             assert "remote traceback here" in mock_logger.error.call_args[0][3]
+
+
+def test_remote_call_sends_args_over_stdin_not_argv():
+    """Args must never ride along in the ssh argv — ssh joins trailing
+    arguments into one string for the remote shell to re-parse, which
+    word-splits a JSON payload on spaces and strips its quotes."""
+    with patch("bot.receipt_worker.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(stdout='{"ok": true}')
+
+        receipt_worker._remote_call("finish_receipt", {"receipt_id": 1, "chat_id": 42})
+
+        called_argv, called_kwargs = mock_run.call_args[0][0], mock_run.call_args[1]
+        assert called_argv == [
+            "ssh", "oracle-tracknest", "docker", "exec", "-i", "tracknest-bot",
+            "python", "-m", "db.remote_cli", "finish_receipt",
+        ]
+        assert called_kwargs["input"] == json.dumps({"receipt_id": 1, "chat_id": 42})
