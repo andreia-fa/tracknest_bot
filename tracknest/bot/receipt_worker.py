@@ -30,27 +30,36 @@ def _remote_call(op: str, args: dict | None = None):
     Raises:
         subprocess.CalledProcessError: If the SSH/docker exec call fails.
     """
-    result = subprocess.run(
-        ["ssh", _SSH_HOST, "docker", "exec", _CONTAINER, "python", "-m", "db.remote_cli",
-         op, json.dumps(args or {})],
-        capture_output=True, text=True, check=True, timeout=_SSH_TIMEOUT_SECONDS,
-    )
+    try:
+        result = subprocess.run(
+            ["ssh", _SSH_HOST, "docker", "exec", _CONTAINER, "python", "-m", "db.remote_cli",
+             op, json.dumps(args or {})],
+            capture_output=True, text=True, check=True, timeout=_SSH_TIMEOUT_SECONDS,
+        )
+    except subprocess.CalledProcessError as e:
+        logger.error("Remote call %r failed (exit %s): %s", op, e.returncode, e.stderr.strip())
+        raise
     return json.loads(result.stdout)
 
 
 async def _process_one(bot: Bot, receipt: dict):
-    """Download, parse, and hand off a single queued receipt."""
+    """Download, parse, and hand off a single queued receipt.
+
+    Any failure here — parsing or the remote write — is contained to this
+    one receipt (marked failed via fail_receipt) so a single bad receipt
+    can't block every receipt queued behind it.
+    """
     receipt_id, chat_id, file_id = receipt["id"], receipt["chat_id"], receipt["telegram_file_id"]
     try:
         telegram_file = await bot.get_file(file_id)
         image_bytes = bytes(await telegram_file.download_as_bytearray())
         shopping_list_names = _remote_call("get_shopping_list_names")
         parsed = await asyncio.to_thread(parse_receipt, image_bytes, shopping_list_names)
+        _remote_call("finish_receipt", {"receipt_id": receipt_id, "chat_id": chat_id, "parsed": parsed})
     except Exception:
         logger.exception("Failed to process queued receipt %s", receipt_id)
         _remote_call("fail_receipt", {"receipt_id": receipt_id, "chat_id": chat_id})
         return
-    _remote_call("finish_receipt", {"receipt_id": receipt_id, "chat_id": chat_id, "parsed": parsed})
     logger.info("Receipt %s processed and logged.", receipt_id)
 
 
@@ -76,4 +85,7 @@ if __name__ == "__main__":
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
         level=logging.INFO,
     )
+    # httpx logs the full request URL at INFO, which for Telegram's API
+    # embeds the bot token — keep it out of the journal.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     asyncio.run(main())
