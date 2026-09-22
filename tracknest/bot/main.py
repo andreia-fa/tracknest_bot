@@ -754,7 +754,21 @@ async def report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         spent_line += f" → ~€{pace['projected']:.0f} proj."
     lines.append(spent_line)
     if budget:
-        lines.append(f"Budget: €{budget['spent']:.2f} / €{budget['budget']:.2f} ({budget['pct']:.0f}%)")
+        budget_line = f"💰 Budget: €{budget['spent']:.2f} / €{budget['budget']:.2f} ({budget['pct']:.0f}%)"
+        # Only once there's a real month-end projection to compare against —
+        # same gate get_month_pace uses, so a nudge/compliment never fires
+        # off 2 days of data. Treats are named as the lever because it's
+        # the one category actually optional to cut, not because it's the
+        # only cause of an overage.
+        if pace["projected"] is not None:
+            if pace["projected"] > budget["budget"]:
+                budget_line += (
+                    f" — on pace for €{pace['projected']:.0f}, cut treats "
+                    f"(€{spending['luxury']:.2f} so far) to land under."
+                )
+            else:
+                budget_line += " — well under pace, nice work 🎉"
+        lines.append(budget_line)
 
     # The split the user's own luxury/essential/necessity answers add up
     # to — nobody totals this for themselves, and it reframes the month
