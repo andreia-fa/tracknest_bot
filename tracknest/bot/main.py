@@ -737,22 +737,24 @@ async def handle_goal_date_choice(update: Update, context: ContextTypes.DEFAULT_
 async def report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /report — what the receipts add up to that a receipt can't tell you.
 
-    Ordered so the surprising things come first (where the money actually
-    went, what each habit costs per day, what's about to run out) and the
-    reassuring "nothing needs you" line comes last.
+    Numbers-first, compact format (2026-09-22): label + figure per line, no
+    connecting sentences — the underlying insights are unchanged from the
+    earlier prose version, only the density. Ordered so the surprising
+    things come first (where the money went, what each habit costs per day,
+    what's about to run out) and the reassuring "all clear" line comes last.
     """
     spending = metrics.get_spending_summary()
     pace = metrics.get_month_pace()
     budget = metrics.get_budget_status()
 
-    month_name = datetime.now(tz=timezone.utc).strftime("%B")
-    lines = [f"📊 {month_name} so far ({pace['days_elapsed']} of {pace['days_in_month']} days)"]
-    spent_line = f"  €{spending['total']:.2f} spent"
+    month_abbr = datetime.now(tz=timezone.utc).strftime("%b").upper()
+    lines = [f"📊 {month_abbr} · day {pace['days_elapsed']}/{pace['days_in_month']}"]
+    spent_line = f"€{spending['total']:.2f} spent"
     if pace["projected"] is not None:
-        spent_line += f" · on pace for ~€{pace['projected']:.0f} by month end"
+        spent_line += f" → ~€{pace['projected']:.0f} proj."
     lines.append(spent_line)
     if budget:
-        lines.append(f"  Budget: €{budget['spent']:.2f} of €{budget['budget']:.2f} ({budget['pct']:.0f}%)")
+        lines.append(f"Budget: €{budget['spent']:.2f} / €{budget['budget']:.2f} ({budget['pct']:.0f}%)")
 
     # The split the user's own luxury/essential/necessity answers add up
     # to — nobody totals this for themselves, and it reframes the month
@@ -760,72 +762,55 @@ async def report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if spending["total"] > 0 and (spending["luxury"] or spending["essential"] or spending["necessity"]):
         luxury_pct = spending["luxury"] / spending["total"] * 100
         lines.append(
-            f"  Treats: €{spending['luxury']:.2f} ({luxury_pct:.0f}%) · "
-            f"essentials: €{spending['essential']:.2f} · "
-            f"necessities: €{spending['necessity']:.2f}"
+            f"Treats €{spending['luxury']:.2f} ({luxury_pct:.0f}%) · "
+            f"Essential €{spending['essential']:.2f} · "
+            f"Necessity €{spending['necessity']:.2f}"
         )
     if spending["unclassified"]:
-        lines.append(f"  Not yet classified: €{spending['unclassified']:.2f}")
+        lines.append(f"Unclassified: €{spending['unclassified']:.2f}")
     if spending["top_categories"]:
-        lines.append("  Biggest: " + ", ".join(
-            f"{c['category']} (€{c['total']:.2f})" for c in spending["top_categories"]
+        lines.append("Top: " + ", ".join(
+            f"{c['category']} €{c['total']:.2f}" for c in spending["top_categories"]
         ))
 
     # Held back until a repurchase has tested each item's shelf life — see
     # get_daily_cost. Says what it's waiting for rather than going quiet, so
     # the number doesn't look like it was dropped.
     daily = metrics.get_daily_cost()
-    lines.append("\n💸 Cost per day you own it")
+    lines.append("\n💸 €/day")
     if daily["items"]:
-        lines.extend(
-            f"  {d['name']} — €{d['cost_per_day']:.2f}/day "
-            f"(€{d['unit_price']:.2f}, lasts {d['shelf_life_days']}d)"
-            for d in daily["items"]
-        )
+        lines.append(" · ".join(f"{d['name']} €{d['cost_per_day']:.2f}" for d in daily["items"]))
     else:
-        lines.append(
-            f"  Waiting on repeat purchases — an item needs buying twice before its "
-            f"shelf life is worth dividing by (0 of {daily['tracked']} ready)."
-        )
+        lines.append(f"Waiting on repeat purchases (0/{daily['tracked']} ready)")
 
     running_low = metrics.get_running_low()
     if running_low:
-        lines.append("\n⏳ Running out soon (based on your own estimates)")
-        lines.extend(
-            f"  {item['name']} — in ~{item['days_left']} day{'s' if item['days_left'] != 1 else ''}"
-            for item in running_low
-        )
+        lines.append("\n⏳ Running low")
+        lines.append(" · ".join(f"{item['name']} {item['days_left']}d" for item in running_low))
 
     trends = metrics.get_price_trends()
     if trends:
-        lines.append("\n📈 Creeping up")
-        lines.extend(
-            f"  {t['name']}: +{t['pct_change']:.0f}% (now €{t['latest_price']:.2f}, was ~€{t['avg_price']:.2f})"
-            for t in trends
-        )
+        lines.append("\n📈 Rising")
+        lines.append(" · ".join(f"{t['name']} +{t['pct_change']:.0f}%" for t in trends))
 
     goal = metrics.get_goal_status()
     if goal:
-        lines.append("\n🎯 Goal")
         if goal["pace_per_month"] is not None:
-            lines.append(
-                f"  {goal['name']}: €{goal['amount']:.2f} by {goal['target_date']} "
-                f"({goal['days_left']} days) — about €{goal['pace_per_month']:.2f}/month to hit it"
-            )
+            lines.append(f"\n🎯 Goal: €{goal['pace_per_month']:.0f}/mo → {goal['name']} ({goal['days_left']}d left)")
         else:
-            lines.append(f"  {goal['name']}: target date ({goal['target_date']}) has passed")
+            lines.append(f"\n🎯 Goal: {goal['name']} target passed ({goal['target_date']})")
 
     health = metrics.get_inventory_health()
     if not any(health.values()):
-        lines.append("\n🟢 Nothing needs your attention.")
+        lines.append("\n🟢 All clear")
     else:
         lines.append("\n🚦 Needs you")
         for name in health["unprofiled"]:
-            lines.append(f"  🟡 {name} — still needs profiling")
+            lines.append(f"{name}: needs profiling")
         for name in health["checkin_pending"]:
-            lines.append(f"  🟡 {name} — waiting on your check-in reply")
+            lines.append(f"{name}: check-in pending")
         for name in health["spare_alert_pending"]:
-            lines.append(f"  🟡 {name} — spare-stock alert sent, add it to your list if you haven't")
+            lines.append(f"{name}: spare-stock alert")
 
     await update.message.reply_text("\n".join(lines))
 
