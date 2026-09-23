@@ -59,3 +59,26 @@ def test_parse_receipt_missing_store_defaults_to_empty_string(mock_client, _mock
     mock_client.chat.return_value = mock_response
     result = receipt.parse_receipt(b"fake-image", [])
     assert result["store"] == ""
+
+
+@patch("bot.receipt._ensure_server_running")
+@patch("bot.receipt._client")
+def test_parse_receipt_net_total_misread_is_not_a_mismatch(mock_client, _mock_ensure):
+    # Real case: items €4.50, model read the VAT table's Netto €3.78 (= 4.50 / 1.19).
+    mock_response = MagicMock()
+    mock_response.message.content = (
+        '{"items": [{"name": "Bread", "quantity": 1, "unit_price": 4.50, '
+        '"category": "Bakery", "matched_shopping_list_item": ""}], "total_paid": 3.78, '
+        '"store": "REWE"}'
+    )
+    mock_client.chat.return_value = mock_response
+    result = receipt.parse_receipt(b"fake-image", [])
+    assert result["reconciled"] is True
+    assert result["total_paid"] == 4.50
+
+
+def test_net_total_misread_only_matches_exact_vat_rates():
+    assert receipt._is_net_total_misread(4.50, 3.78)       # 19%
+    assert receipt._is_net_total_misread(10.70, 10.00)     # 7%
+    assert not receipt._is_net_total_misread(8.90, 5.90)   # a real error
+    assert not receipt._is_net_total_misread(11.20, 10.00)  # 12%: neither rate

@@ -12,6 +12,10 @@ logger = logging.getLogger(__name__)
 _MODEL = "minicpm-v4.5"
 _client = ollama.Client()
 _RECONCILE_TOLERANCE = 0.02
+# German VAT rates. A receipt's VAT breakdown (Netto / MwSt / Brutto) prints
+# the pre-tax amount right next to the real total, and the model sometimes
+# reads that instead — items then sum to exactly total_paid × (1 + rate).
+_VAT_RATES = (0.07, 0.19)
 
 _RESPONSE_SCHEMA = {
     "type": "object",
@@ -57,7 +61,9 @@ _RESPONSE_SCHEMA = {
             "type": "number",
             "description": (
                 "The final total amount paid, as printed on the receipt (e.g. "
-                "'TOTAL', 'SUMME', 'TOTAL DUE'). Used to sanity-check the "
+                "'TOTAL', 'SUMME', 'TOTAL DUE', 'Brutto'), VAT included. Never "
+                "the 'Netto'/net figure from the VAT breakdown table. Used to "
+                "sanity-check the "
                 "extracted item prices — see the reconciliation instruction "
                 "in the prompt."
             ),
@@ -100,6 +106,18 @@ def _ensure_server_running():
         except Exception:
             continue
     raise RuntimeError("Ollama server did not start in time")
+
+
+def _is_net_total_misread(items_total: float, total_paid: float) -> bool:
+    """Tell whether total_paid is the receipt's pre-VAT net rather than what was paid.
+
+    Only an exact single-rate match counts: a gap anywhere in the 7-19%
+    range would also swallow genuine extraction errors.
+    """
+    return any(
+        abs(total_paid * (1 + rate) - items_total) <= _RECONCILE_TOLERANCE
+        for rate in _VAT_RATES
+    )
 
 
 def _items_total(items: list[dict]) -> float:
@@ -174,6 +192,12 @@ def parse_receipt(image_bytes: bytes, shopping_list_names: list[str]) -> dict:
     store = result.get("store") or ""
     items_total = _items_total(items)
     reconciled = abs(items_total - total_paid) <= _RECONCILE_TOLERANCE
+    if not reconciled and _is_net_total_misread(items_total, total_paid):
+        logger.info(
+            "Receipt total_paid %.2f is the pre-VAT net of %.2f — using the gross figure.",
+            total_paid, items_total,
+        )
+        total_paid, reconciled = items_total, True
     if not reconciled:
         logger.warning(
             "Receipt reconciliation mismatch: items summed to %.2f but total_paid was %.2f",
