@@ -17,7 +17,7 @@ _CATEGORIES: list[tuple[str, list[str]]] = [
     # Before Fruits/Veg so a flavoured treat ("schoko. Himbeeren") counts
     # as a snack, not fruit.
     ("Snacks", [
-        "chocolate", "schokolade", "chocolate", "candy", "süßigkeiten",
+        "chocolate", "schokolade", "schoko", "candy", "süßigkeiten",
         "susigkeiten", "doces", "chips", "biscuit", "keks", "biscoito",
         "pudding", "snack",
     ]),
