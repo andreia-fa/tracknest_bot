@@ -9,6 +9,7 @@ from aiohttp import web
 
 from bot import dashboard
 from bot.categorize import CATEGORY_NAMES, infer_category
+from bot.list_match import choose_list_match
 from bot.parser import parse_line
 from bot.tunnel import CloudflareTunnel
 from config import BOT_TOKEN
@@ -642,15 +643,17 @@ async def process_receipt_result(parsed: dict) -> str:
     logger.info("Receipt parsed: %d item(s).", len(items))
     if not items:
         return "Couldn't find any items on that receipt."
-    replies = [
-        _log_purchase(
+    list_names = [entry["name"] for entry in shopping_list.get_all_items()]
+    replies = []
+    for item in items:
+        name, category, ask_name = _resolve_receipt_name(item)
+        list_match = choose_list_match(item["name"], name, item["matched_shopping_list_item"], list_names)
+        if list_match:
+            list_names.remove(list_match)
+        replies.append(_log_purchase(
             name, item["quantity"], item["unit_price"],
-            store=store, category=category,
-            matched_list_item=item["matched_shopping_list_item"], ask_name=ask_name,
-        )
-        for item in items
-        for name, category, ask_name in [_resolve_receipt_name(item)]
-    ]
+            store=store, category=category, matched_list_item=list_match, ask_name=ask_name,
+        ))
     if not parsed["reconciled"]:
         replies.append(
             f"⚠️ Heads up: item prices add up to €{parsed['items_total']:.2f} but the "

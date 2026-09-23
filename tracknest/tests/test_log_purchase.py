@@ -49,3 +49,22 @@ def test_models_category_is_the_fallback(_alias):
 def test_vat_code_is_never_taken_as_a_category(_alias):
     item = {"name": "VOLVIC NATURELLE", "category": "A"}
     assert main._resolve_receipt_name(item) == ("VOLVIC NATURELLE", None, True)
+
+
+@patch("bot.main._log_purchase", return_value="• line")
+@patch("bot.main.crud.get_alias", return_value=None)
+@patch("bot.main.shopping_list.get_all_items", return_value=[{"name": "Salmon"}, {"name": "morangos"}])
+def test_receipt_uses_the_synonym_matcher_not_the_model_alone(_list, _alias, mock_log):
+    import asyncio
+    parsed = {
+        "items": [
+            {"name": "RAEUCHERLACHS", "quantity": 1, "unit_price": 4.29,
+             "category": "Other", "matched_shopping_list_item": ""},
+            {"name": "dmBio schoko. Himbeeren", "quantity": 1, "unit_price": 2.23,
+             "category": "Snacks", "matched_shopping_list_item": "morangos"},
+        ],
+        "reconciled": True, "store": "REWE",
+    }
+    asyncio.run(main.process_receipt_result(parsed))
+    matches = [call.kwargs["matched_list_item"] for call in mock_log.call_args_list]
+    assert matches == ["Salmon", None]
