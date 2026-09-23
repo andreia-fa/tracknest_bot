@@ -8,9 +8,14 @@ pulling in a library for something this small.
 
 import hashlib
 import hmac
+import os
 import time
 
-from config import DASHBOARD_PASSWORD
+# Required (raises KeyError on import if missing). Gates /dashboard's web
+# login — never logged, never in a URL. The session cookie's signing key is
+# derived from it rather than being a separate secret to manage. Read here,
+# not in config, so the local receipt worker never needs it.
+DASHBOARD_PASSWORD = os.environ["DASHBOARD_PASSWORD"]
 
 SESSION_TTL_SECONDS = 7 * 24 * 60 * 60  # 1 week — re-login is rare, not never
 _SIGNING_KEY = hashlib.sha256(f"tracknest-dashboard-session:{DASHBOARD_PASSWORD}".encode()).digest()

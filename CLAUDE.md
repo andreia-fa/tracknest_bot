@@ -20,7 +20,9 @@ tracknest/
   bot/auth.py          — dashboard password check + signed session cookie
   bot/tunnel.py        — manages the cloudflared subprocess, exposes the
                          current https://*.trycloudflare.com URL
-  config/__init__.py   — reads env vars (BOT_TOKEN, DB_PATH, DASHBOARD_PASSWORD)
+  config/__init__.py   — reads env vars (BOT_TOKEN, DB_PATH); DASHBOARD_PASSWORD
+                         is read in bot/auth.py instead, so the local worker
+                         never needs it
   db/
     database.py        — SQLite connection + schema init (init_db)
     crud.py            — inventory CRUD operations
@@ -81,7 +83,7 @@ accounts, one shared household password.
 ## Commands to Know
 ```bash
 # Run tests (from tracknest/)
-BOT_TOKEN=dummy DASHBOARD_PASSWORD=dummy pytest tests/ -q
+BOT_TOKEN=dummy DASHBOARD_PASSWORD=dummy_password_for_tests pytest tests/ -q
 
 # Lint
 ruff check tracknest/
