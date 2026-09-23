@@ -1,27 +1,9 @@
 # TODO
 
-## 🔜 FIRST THING TOMORROW (2026-09-23) — add TRACKNEST_DASHBOARD_PASSWORD GitHub secret
-
-The `/dashboard` feature (password-gated web dashboard, relative-numbers-only,
-opens inside Telegram via a Web App button over a Cloudflare Tunnel — see
-`DEPLOY_STRATEGY.md`'s 2026-09-23 entry and `CLAUDE.md`) is fully built,
-committed, and pushed (`fd55f79`), but the deploy is currently **failing** —
-confirmed via the Actions API — because it needs a new secret that doesn't
-exist yet.
-
-**What to do:** GitHub → this repo → Settings → Secrets and variables →
-Actions → New repository secret → name it exactly `TRACKNEST_DASHBOARD_PASSWORD`
-→ value = whatever password should gate the dashboard login page. Then either
-push again or re-run the failed workflow from the Actions tab.
-
-**Nothing else is broken in the meantime** — the bot itself (shopping list,
-receipts, `/report`, etc.) is completely unaffected; only `/dashboard` is
-unpublished until this secret is added and the deploy succeeds.
-
-Once the secret's added, I should poll the CD deploy the same way as every
-other change this session (`docker inspect tracknest-bot --format
-"{{.State.StartedAt}}"` until it changes) and then confirm `/dashboard` works
-end to end in Telegram.
+## ✅ Done (2026-09-23) — TRACKNEST_DASHBOARD_PASSWORD GitHub secret added
+Secret added by the user; CD re-run of `060b09e` succeeded. That commit also
+fixed the local receipt worker crash-looping since `fd55f79` (config required
+DASHBOARD_PASSWORD, which the worker never needs — now read in `bot/auth.py`).
 
 ## ❓ Open decision (2026-09-21) — letting other families test without sharing data
 
