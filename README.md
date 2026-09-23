@@ -55,6 +55,9 @@ It helps you manage home inventory and track household expenses through a conver
   - Plus price creep, goal pace (a standalone anchor number — not linked to
     the budget or treats figures, since TrackNest tracks spending, not actual
     savings), and an all-clear line when genuinely nothing needs you.
+- ✅ `/cleared` – What recently came off the shopping list (by receipt, typed
+  purchase, or by hand), each with a ↩️ Put back button. Receipt replies carry
+  the same buttons for whatever that receipt cleared.
 - ✅ `/dashboard` – Password-gated web view (opens inside Telegram via a Web
   App button, reached over a Cloudflare Tunnel — no domain, no inbound port
   on the server) showing the month at a glance: spend + month-end forecast,

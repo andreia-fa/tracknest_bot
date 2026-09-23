@@ -117,6 +117,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "When you're done shopping, just send a photo of the receipt — it logs "
         "everything and clears matching items off your list.\n\n"
         "Other commands:\n"
+        "  /cleared — What recently came off your list, with a button to put it back\n"
         "  /list_items — Show current inventory\n"
         "  /update_item <name> <qty> — Set item quantity\n"
         "  /remove_item <name> — Remove an item\n"
@@ -501,7 +502,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not name:
                 replies.append(f"Couldn't understand: '{line}'")
                 continue
-            if shopping_list.remove_item(name):
+            if shopping_list.remove_item(name, reason="manual"):
                 replies.append(f"Removed {name} from your shopping list.")
             else:
                 replies.append(f"'{name}' wasn't on your list.")
@@ -512,10 +513,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             replies.append(f"Couldn't understand: '{line}'")
             continue
         if unit_price is not None:
-            replies.append(_log_purchase(
+            line, _cleared_id = _log_purchase(
                 name, qty, unit_price,
                 category=infer_category(name), matched_list_item=name,
-            ))
+            )
+            replies.append(line)
             logged_a_purchase = True
             continue
         shopping_list.add_item(name, qty, category=infer_category(name))
@@ -563,7 +565,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def _log_purchase(
     name, qty, price, *, store=None, category=None, matched_list_item=None, ask_name=False,
-) -> str:
+    clear_reason="purchase", source=None,
+) -> tuple[str, int | None]:
     """Log one purchased item (inventory + expense) and describe it for a reply.
 
     Shared by receipt processing and a plain-text line that includes a
@@ -571,14 +574,17 @@ def _log_purchase(
     just a different source for name/qty/price/category.
 
     Returns:
-        A single "• ..." reply line, including a duplicate-purchase notice
-        or a price-delta/spike note when applicable.
+        (line, cleared_id): a single "• ..." reply line, including a
+        duplicate-purchase notice or a price-delta/spike note when
+        applicable, and the shopping-list history id of the entry this
+        purchase cleared (None if it cleared nothing) — so a caller can
+        offer to put it back.
     """
     if expenses.is_duplicate_purchase(name, price):
         return (
             f"• {qty}x {name} at €{price:.2f} each — skipped, this exact item/price "
             "was already logged in the last hour (looks like the same receipt sent twice)"
-        )
+        ), None
     is_new = ask_name and crud.get_item(name) is None
     crud.add_item(name, qty, category=category)
     if is_new:
@@ -586,7 +592,11 @@ def _log_purchase(
     delta = expenses.get_price_delta(name, price)
     expenses.log_expense(name, qty, price, store=store)
     line = f"• {qty}x {name} at €{price:.2f} each"
-    if matched_list_item and shopping_list.remove_item(matched_list_item):
+    cleared_id = (
+        shopping_list.remove_item(matched_list_item, reason=clear_reason, source=source or name)
+        if matched_list_item else None
+    )
+    if cleared_id:
         # Name the list entry when it differs from the receipt's wording —
         # the vision model matches across languages ("PUSH UP" → "Soutien"),
         # and a bare "cleared" left no way to tell what actually came off.
@@ -601,7 +611,7 @@ def _log_purchase(
             line += f" — ⚠️ {delta_text}, that's a jump"
         else:
             line += f" ({delta_text})"
-    return line
+    return line, cleared_id
 
 
 def _resolve_receipt_name(item: dict) -> tuple[str, str | None, bool]:
@@ -624,7 +634,17 @@ def _resolve_receipt_name(item: dict) -> tuple[str, str | None, bool]:
     return item["name"], guess if guess in CATEGORY_NAMES and guess != "Other" else None, True
 
 
-async def process_receipt_result(parsed: dict) -> str:
+def _put_back_keyboard(cleared: list[tuple[int, str]]) -> InlineKeyboardMarkup | None:
+    """One "↩️ Put back" button per list entry a receipt cleared, or None if it cleared none."""
+    if not cleared:
+        return None
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"↩️ Put back {name}", callback_data=f"restore:{history_id}")]
+        for history_id, name in cleared
+    ])
+
+
+async def process_receipt_result(parsed: dict) -> tuple[str, InlineKeyboardMarkup | None]:
     """Log a parsed receipt's items and build the summary reply text.
 
     Used by the local receipt worker after it runs parse_receipt. Newly
@@ -642,25 +662,64 @@ async def process_receipt_result(parsed: dict) -> str:
     store = parsed.get("store") or None
     logger.info("Receipt parsed: %d item(s).", len(items))
     if not items:
-        return "Couldn't find any items on that receipt."
+        return "Couldn't find any items on that receipt.", None
     list_names = [entry["name"] for entry in shopping_list.get_all_items()]
     replies = []
+    cleared = []
     for item in items:
         name, category, ask_name = _resolve_receipt_name(item)
         list_match = choose_list_match(item["name"], name, item["matched_shopping_list_item"], list_names)
         if list_match:
             list_names.remove(list_match)
-        replies.append(_log_purchase(
+        line, cleared_id = _log_purchase(
             name, item["quantity"], item["unit_price"],
             store=store, category=category, matched_list_item=list_match, ask_name=ask_name,
-        ))
+            clear_reason="receipt", source=item["name"],
+        )
+        replies.append(line)
+        if cleared_id:
+            cleared.append((cleared_id, list_match))
     if not parsed["reconciled"]:
         replies.append(
             f"⚠️ Heads up: item prices add up to €{parsed['items_total']:.2f} but the "
             f"receipt's total was €{parsed['total_paid']:.2f} — one of the amounts above "
             "is probably off. Worth double-checking against the paper receipt."
         )
-    return "Receipt processed:\n" + "\n".join(replies)
+    if cleared:
+        replies.append("\nWrongly cleared something? Tap to put it back:")
+    return "Receipt processed:\n" + "\n".join(replies), _put_back_keyboard(cleared)
+
+
+async def handle_restore(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle "↩️ Put back": restore a cleared shopping-list entry and drop its button."""
+    query = update.callback_query
+    name = shopping_list.restore_item(int(query.data.split(":", 1)[1]))
+    await query.answer(f"{name} is back on your list." if name else "Already back on your list.")
+    remaining = [
+        row for row in (query.message.reply_markup.inline_keyboard if query.message.reply_markup else [])
+        if row[0].callback_data != query.data
+    ]
+    await query.edit_message_reply_markup(InlineKeyboardMarkup(remaining) if remaining else None)
+
+
+_REASON_LABELS = {"manual": "you removed it", "receipt": "receipt", "purchase": "typed purchase"}
+
+
+async def cleared_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /cleared — the last shopping-list removals, each with a put-back button."""
+    history = shopping_list.get_history(limit=10)
+    if not history:
+        await update.message.reply_text("Nothing has been cleared from your list yet.")
+        return
+    lines = []
+    for entry in history:
+        why = _REASON_LABELS.get(entry["reason"], entry["reason"])
+        if entry["reason"] != "manual" and entry["source"]:
+            why += f": {entry['source']}"
+        back = " (put back)" if entry["restored"] else ""
+        lines.append(f"• {entry['name']} — {entry['removed_at'][:16]} UTC, {why}{back}")
+    keyboard = _put_back_keyboard([(e["id"], e["name"]) for e in history if not e["restored"]])
+    await update.message.reply_text("Recently cleared from your list:\n" + "\n".join(lines), reply_markup=keyboard)
 
 
 async def remind_pending_profile(context: ContextTypes.DEFAULT_TYPE):
@@ -1079,6 +1138,7 @@ async def main():
     )
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("list", show_shopping_list))
+    app.add_handler(CommandHandler("cleared", cleared_cmd))
     app.add_handler(CommandHandler("list_items", list_items))
     app.add_handler(CommandHandler("update_item", update_item))
     app.add_handler(CommandHandler("remove_item", remove_item))
@@ -1094,6 +1154,7 @@ async def main():
     app.add_handler(CallbackQueryHandler(handle_onboarding_choice, pattern=r"^onboard_"))
     app.add_handler(CallbackQueryHandler(handle_profile_type_choice, pattern=r"^profile_type:"))
     app.add_handler(CallbackQueryHandler(handle_name_keep, pattern=r"^name_keep$"))
+    app.add_handler(CallbackQueryHandler(handle_restore, pattern=r"^restore:"))
     app.add_handler(CallbackQueryHandler(handle_name_category, pattern=r"^name_cat:"))
     app.add_handler(CallbackQueryHandler(handle_profile_shelf_choice, pattern=r"^profile_shelf:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))

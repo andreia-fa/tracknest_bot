@@ -10,7 +10,7 @@ def test_names_the_list_entry_when_receipt_wording_differs(_remove, _crud, mock_
     mock_expenses.is_duplicate_purchase.return_value = False
     mock_expenses.get_price_delta.return_value = None
 
-    line = main._log_purchase("PUSH UP", 1, 35.90, matched_list_item="Soutien")
+    line, _ = main._log_purchase("PUSH UP", 1, 35.90, matched_list_item="Soutien")
 
     assert "(cleared 'Soutien' from your list)" in line
 
@@ -22,7 +22,7 @@ def test_plain_note_when_names_match(_remove, _crud, mock_expenses):
     mock_expenses.is_duplicate_purchase.return_value = False
     mock_expenses.get_price_delta.return_value = None
 
-    line = main._log_purchase("Milk", 1, 1.09, matched_list_item="milk")
+    line, _ = main._log_purchase("Milk", 1, 1.09, matched_list_item="milk")
 
     assert line.endswith("(cleared from your list)")
 
@@ -51,7 +51,7 @@ def test_vat_code_is_never_taken_as_a_category(_alias):
     assert main._resolve_receipt_name(item) == ("VOLVIC NATURELLE", None, True)
 
 
-@patch("bot.main._log_purchase", return_value="• line")
+@patch("bot.main._log_purchase", return_value=("• line", None))
 @patch("bot.main.crud.get_alias", return_value=None)
 @patch("bot.main.shopping_list.get_all_items", return_value=[{"name": "Salmon"}, {"name": "morangos"}])
 def test_receipt_uses_the_synonym_matcher_not_the_model_alone(_list, _alias, mock_log):

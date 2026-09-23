@@ -47,3 +47,12 @@ aliases = conn.execute(
 ).fetchall()
 table("RECEIPT NAMES YOU TAUGHT ME", ["on receipt", "is really", "category"], [tuple(r) for r in aliases])
 conn.close()
+
+conn = get_connection()
+history = conn.execute("""
+    SELECT name, removed_at, reason, source, CASE restored WHEN 1 THEN 'yes' ELSE '' END
+    FROM shopping_list_history ORDER BY id DESC LIMIT 20
+""").fetchall()
+table("RECENTLY CLEARED FROM THE LIST", ["name", "removed (UTC)", "why", "by receipt line", "put back"],
+      [tuple(r) for r in history])
+conn.close()

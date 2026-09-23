@@ -133,6 +133,22 @@ def init_db():
             value TEXT
         )
     """)
+    # Every shopping-list removal, so a wrong receipt match (the model once
+    # cleared "Tuna" for a smoked-salmon purchase) can be seen and undone
+    # instead of the entry being lost for good.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS shopping_list_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            quantity INTEGER NOT NULL,
+            category TEXT,
+            added_at TEXT,
+            removed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            reason TEXT NOT NULL,
+            source TEXT,
+            restored INTEGER NOT NULL DEFAULT 0
+        )
+    """)
     # What the user said a receipt's wording really is — consulted on every
     # later receipt, so each abbreviation is only ever asked about once.
     cursor.execute("""

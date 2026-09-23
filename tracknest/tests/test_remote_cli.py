@@ -14,7 +14,8 @@ from db import remote_cli
 async def test_finish_receipt_logs_resolves_and_replies(
     mock_process, mock_send_profile, mock_queue, mock_bot_cls
 ):
-    mock_process.return_value = "Receipt processed:\n• 1x Milk at €1.50 each"
+    keyboard = MagicMock()
+    mock_process.return_value = ("Receipt processed:\n• 1x Milk at €1.50 each", keyboard)
     mock_bot = MagicMock()
     mock_bot.send_message = AsyncMock()
     mock_bot_cls.return_value = mock_bot
@@ -24,7 +25,9 @@ async def test_finish_receipt_logs_resolves_and_replies(
 
     mock_process.assert_awaited_once_with(parsed)
     mock_queue.resolve_receipt.assert_called_once_with(5, status="done")
-    mock_bot.send_message.assert_awaited_once_with(123, mock_process.return_value)
+    mock_bot.send_message.assert_awaited_once_with(
+        123, "Receipt processed:\n• 1x Milk at €1.50 each", reply_markup=keyboard
+    )
     mock_send_profile.assert_awaited_once_with(mock_bot, 123)
     assert result == {"ok": True}
 

@@ -105,7 +105,7 @@ tracknest/
 
 Nothing to do manually — `init_db()` in `db/database.py` creates the SQLite
 file and its tables (`inventory_items`, `item_expenses`, `shopping_list_items`,
-`bot_settings`, `pending_receipts`, `item_aliases`) automatically the first time the bot runs. The full current
+`bot_settings`, `pending_receipts`, `item_aliases`, `shopping_list_history`) automatically the first time the bot runs. The full current
 schema lives in that function; treat it as the source of truth rather than
 duplicating the DDL here. `item_aliases` maps a receipt's wording (e.g. "BIO aln.pfanne") to the
 name and category the user gave it, so each abbreviation is asked about
