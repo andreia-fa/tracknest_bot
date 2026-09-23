@@ -5,6 +5,18 @@ Secret added by the user; CD re-run of `060b09e` succeeded. That commit also
 fixed the local receipt worker crash-looping since `fd55f79` (config required
 DASHBOARD_PASSWORD, which the worker never needs — now read in `bot/auth.py`).
 
+## ⏸️ On hold (2026-09-23) — stronger receipt model? WAIT for the user's go-ahead
+
+`minicpm-v4.5` (8B) misreads receipts often (Normalpreis logged as an item,
+Pfand asked about as a product, Netto read as the total). Fixed today
+without touching the model: non-item line filter (`bot/receipt_lines.py`),
+keyword categories first, ask-once naming + `item_aliases`. The idea still
+open: A/B a stronger free local model (e.g. Qwen2.5-VL) on real receipts —
+processing is already queued/offline, so slower-but-better costs only
+waiting time. **User explicitly said to wait on this decision — don't start
+it until they say so.** Revisit once the three fixes have seen a few real
+receipts, to judge what's still going wrong.
+
 ## ❓ Open decision (2026-09-21) — letting other families test without sharing data
 
 Prompted by: wanting other families to try TrackNest, without their
