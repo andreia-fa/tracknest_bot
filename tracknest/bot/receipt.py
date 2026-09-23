@@ -7,6 +7,8 @@ import time
 
 import ollama
 
+from bot.receipt_lines import classify_line
+
 logger = logging.getLogger(__name__)
 
 _MODEL = "minicpm-v4.5"
@@ -187,10 +189,14 @@ def parse_receipt(image_bytes: bytes, shopping_list_names: list[str]) -> dict:
         format=_RESPONSE_SCHEMA,
     )
     result = json.loads(response.message.content)
-    items = result["items"]
+    lines = result["items"]
     total_paid = result["total_paid"]
     store = result.get("store") or ""
-    items_total = _items_total(items)
+    # Deposits/discounts still count toward what was paid; info lines
+    # (Normalpreis, Summe, MwSt...) carry no money of their own.
+    counted = [line for line in lines if classify_line(line["name"]) != "info"]
+    items = [line for line in lines if classify_line(line["name"]) == "item"]
+    items_total = _items_total(counted)
     reconciled = abs(items_total - total_paid) <= _RECONCILE_TOLERANCE
     if not reconciled and _is_net_total_misread(items_total, total_paid):
         logger.info(

@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from aiohttp import web
 
 from bot import dashboard
-from bot.categorize import infer_category
+from bot.categorize import CATEGORY_NAMES, infer_category
 from bot.parser import parse_line
 from bot.tunnel import CloudflareTunnel
 from config import BOT_TOKEN
@@ -49,6 +49,22 @@ _ONBOARD_GOAL_KEYBOARD = InlineKeyboardMarkup([
     [InlineKeyboardButton("Set one now", callback_data="onboard_goal:yes")],
     [InlineKeyboardButton("Skip for now", callback_data="onboard_goal:skip")],
 ])
+_NAME_KEEP_KEYBOARD = InlineKeyboardMarkup([
+    [InlineKeyboardButton("Keep this name", callback_data="name_keep")],
+])
+
+
+def _category_keyboard(suggested: str | None) -> InlineKeyboardMarkup:
+    """Every category as a button, two per row; the suggested one is ticked."""
+    buttons = [
+        InlineKeyboardButton(
+            f"✓ {name}" if name == suggested else name, callback_data=f"name_cat:{i}"
+        )
+        for i, name in enumerate(CATEGORY_NAMES)
+    ]
+    return InlineKeyboardMarkup([buttons[i:i + 2] for i in range(0, len(buttons), 2)])
+
+
 _PROFILE_SHELF_KEYBOARD = InlineKeyboardMarkup([
     [
         InlineKeyboardButton("1 day", callback_data="profile_shelf:1"),
@@ -246,7 +262,21 @@ async def send_pending_profile_question(bot, chat_id: int):
     if not pending:
         return
     name, stage = pending
-    if stage == "shelf_life":
+    if stage == "name":
+        await bot.send_message(
+            chat_id,
+            f"🧾 New on a receipt: \"{name}\". What is it? Reply with a short name "
+            "(e.g. Frozen mixed veg) — I'll remember it for next time.",
+            reply_markup=_NAME_KEEP_KEYBOARD,
+        )
+    elif stage == "category":
+        item = crud.get_item(name)
+        await bot.send_message(
+            chat_id,
+            f"Which category is {name}?",
+            reply_markup=_category_keyboard(item["category"] if item else None),
+        )
+    elif stage == "shelf_life":
         await bot.send_message(
             chat_id,
             f"Quick one — how many days does {name} usually last before it goes bad?",
@@ -268,8 +298,14 @@ async def _handle_profile_answer(update: Update, context: ContextTypes.DEFAULT_T
     stays as a forgiving fallback for whichever stage is pending, and is
     still the only path for the shelf-life "Other: insert" follow-up.
     """
-    text = update.message.text.strip().lower()
     name, stage = pending
+    if stage == "name":
+        await _rename_receipt_item(context.bot, update.effective_chat.id, name, update.message.text.strip())
+        return
+    if stage == "category":
+        await update.message.reply_text("Pick a category with the buttons above.")
+        return
+    text = update.message.text.strip().lower()
     if stage == "shelf_life":
         if text in _SHELF_LIFE_NA_WORDS:
             days = 0
@@ -295,6 +331,59 @@ async def _handle_profile_answer(update: Update, context: ContextTypes.DEFAULT_T
         )
         return
     await _set_purchase_type(context.bot, update.effective_chat.id, name, purchase_type)
+
+
+async def _rename_receipt_item(bot, chat_id: int, receipt_name: str, new_name: str) -> None:
+    """Apply the user's real name for a receipt item and remember it as an alias.
+
+    If the name already exists, the purchase merges into that item — its
+    category and profile are already known, so nothing more is asked about it.
+    """
+    final_name, merged = crud.rename_item(receipt_name, new_name)
+    item = crud.get_item(final_name)
+    crud.save_alias(receipt_name, final_name, item["category"] if item else None)
+    if merged:
+        await bot.send_message(chat_id, f"Got it — added to your existing {final_name}.")
+    else:
+        # Re-guess from the real name ("Frozen mixed veg" says far more than
+        # "BIO aln.pfanne" did) so the category question below arrives with
+        # that guess pre-ticked — one tap to confirm.
+        guess = infer_category(final_name)
+        if guess != "Other":
+            crud.set_item_category(final_name, guess)
+            crud.keep_item_name(final_name)  # set_item_category finished naming; reopen it for the tap
+    await send_pending_profile_question(bot, chat_id)
+
+
+async def handle_name_keep(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle "Keep this name" on a new receipt item's naming question."""
+    query = update.callback_query
+    await query.answer()
+    pending = crud.get_pending_profile_item()
+    if not pending or pending[1] != "name":
+        await query.edit_message_text("Already answered.")
+        return
+    name, _stage = pending
+    await query.edit_message_text(f"Keeping \"{name}\".")
+    crud.keep_item_name(name)
+    item = crud.get_item(name)
+    crud.save_alias(name, name, item["category"] if item else None)
+    await send_pending_profile_question(context.bot, update.effective_chat.id)
+
+
+async def handle_name_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle a category button on a new receipt item's naming question."""
+    query = update.callback_query
+    await query.answer()
+    pending = crud.get_pending_profile_item()
+    if not pending or pending[1] != "category":
+        await query.edit_message_text("Already answered.")
+        return
+    name, _stage = pending
+    category = CATEGORY_NAMES[int(query.data.split(":", 1)[1])]
+    await query.edit_message_text(f"{name}: {category}.")
+    crud.set_item_category(name, category)
+    await send_pending_profile_question(context.bot, update.effective_chat.id)
 
 
 async def _set_purchase_type(bot, chat_id: int, name: str, purchase_type: str) -> None:
@@ -471,7 +560,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-def _log_purchase(name, qty, price, *, store=None, category=None, matched_list_item=None) -> str:
+def _log_purchase(
+    name, qty, price, *, store=None, category=None, matched_list_item=None, ask_name=False,
+) -> str:
     """Log one purchased item (inventory + expense) and describe it for a reply.
 
     Shared by receipt processing and a plain-text line that includes a
@@ -487,7 +578,10 @@ def _log_purchase(name, qty, price, *, store=None, category=None, matched_list_i
             f"• {qty}x {name} at €{price:.2f} each — skipped, this exact item/price "
             "was already logged in the last hour (looks like the same receipt sent twice)"
         )
+    is_new = ask_name and crud.get_item(name) is None
     crud.add_item(name, qty, category=category)
+    if is_new:
+        crud.mark_name_pending(name)
     delta = expenses.get_price_delta(name, price)
     expenses.log_expense(name, qty, price, store=store)
     line = f"• {qty}x {name} at €{price:.2f} each"
@@ -507,6 +601,22 @@ def _log_purchase(name, qty, price, *, store=None, category=None, matched_list_i
         else:
             line += f" ({delta_text})"
     return line
+
+
+def _resolve_receipt_name(item: dict) -> tuple[str, str | None, bool]:
+    """Turn a receipt line's wording into (name, category, ask_name).
+
+    A wording the user already named maps straight to their name and
+    category. Otherwise the keyword list beats the model's category guess
+    (deterministic, and it knows "Käse" is cheese), and the user gets asked
+    what the item really is.
+    """
+    alias = crud.get_alias(item["name"])
+    if alias:
+        return alias["canonical_name"], alias["category"], False
+    keyword = infer_category(item["name"])
+    category = keyword if keyword != "Other" else (item.get("category") or None)
+    return item["name"], category, True
 
 
 async def process_receipt_result(parsed: dict) -> str:
@@ -530,11 +640,12 @@ async def process_receipt_result(parsed: dict) -> str:
         return "Couldn't find any items on that receipt."
     replies = [
         _log_purchase(
-            item["name"], item["quantity"], item["unit_price"],
-            store=store, category=item.get("category") or None,
-            matched_list_item=item["matched_shopping_list_item"],
+            name, item["quantity"], item["unit_price"],
+            store=store, category=category,
+            matched_list_item=item["matched_shopping_list_item"], ask_name=ask_name,
         )
         for item in items
+        for name, category, ask_name in [_resolve_receipt_name(item)]
     ]
     if not parsed["reconciled"]:
         replies.append(
@@ -975,6 +1086,8 @@ async def main():
     app.add_handler(CallbackQueryHandler(handle_goal_date_choice, pattern=r"^goal_date:"))
     app.add_handler(CallbackQueryHandler(handle_onboarding_choice, pattern=r"^onboard_"))
     app.add_handler(CallbackQueryHandler(handle_profile_type_choice, pattern=r"^profile_type:"))
+    app.add_handler(CallbackQueryHandler(handle_name_keep, pattern=r"^name_keep$"))
+    app.add_handler(CallbackQueryHandler(handle_name_category, pattern=r"^name_cat:"))
     app.add_handler(CallbackQueryHandler(handle_profile_shelf_choice, pattern=r"^profile_shelf:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))

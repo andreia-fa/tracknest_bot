@@ -88,6 +88,12 @@ def init_db():
         cursor.execute(
             "ALTER TABLE inventory_items ADD COLUMN spare_alert_pending INTEGER NOT NULL DEFAULT 0"
         )
+    # name_status: NULL = name settled; 'name' / 'category' = an item first
+    # seen on a receipt, still waiting for the user to say what it really is
+    # (receipt names are abbreviations like "BIO aln.pfanne"). Asked before
+    # purchase type, so the profiling questions use the real name.
+    if "name_status" not in existing_inv_cols:
+        cursor.execute("ALTER TABLE inventory_items ADD COLUMN name_status TEXT")
     # shelf_life_corrected tracked whether log_expense had auto-corrected an
     # estimate, but nothing ever read it — dropped 2026-09-20.
     if "shelf_life_corrected" in existing_inv_cols:
@@ -125,6 +131,15 @@ def init_db():
         CREATE TABLE IF NOT EXISTS bot_settings (
             key TEXT PRIMARY KEY,
             value TEXT
+        )
+    """)
+    # What the user said a receipt's wording really is — consulted on every
+    # later receipt, so each abbreviation is only ever asked about once.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS item_aliases (
+            receipt_name TEXT PRIMARY KEY COLLATE NOCASE,
+            canonical_name TEXT NOT NULL,
+            category TEXT
         )
     """)
     # Receipt photos are queued here by the (cloud) bot and processed later by

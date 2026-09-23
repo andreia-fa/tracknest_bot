@@ -12,6 +12,8 @@ tracknest/
                          receipt queue over SSH, runs Ollama, hands results
                          back via db/remote_cli.py
   bot/parser.py        — parses plain-text entries (name/qty/unit_price)
+  bot/receipt_lines.py — recognises receipt lines that aren't products (Pfand,
+                         Normalpreis, Summe...) — pure regex, no model
   bot/receipt.py       — receipt photo parsing via local Ollama vision model
                          (only ever called by receipt_worker.py now)
   bot/dashboard.py     — password-gated aiohttp web app (month-at-a-glance

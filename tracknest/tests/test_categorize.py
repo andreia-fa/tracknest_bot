@@ -44,3 +44,14 @@ def test_common_fish_and_meat():
     assert infer_category("Thunfisch in Öl") == "Meat/Fish"
     assert infer_category("atum") == "Meat/Fish"
     assert infer_category("Schinken") == "Meat/Fish"
+
+
+def test_german_compounds_match_a_known_word_inside():
+    assert infer_category("Käsescheiben") == "Dairy"
+    assert infer_category("Käseaufschnitt") == "Dairy"
+    assert infer_category("Salatgurke") == "Fruits/Veg"
+    assert infer_category("Milchschokolade") == "Snacks"
+
+
+def test_whole_word_match_beats_a_compound_match():
+    assert infer_category("Zahnpasta") == "Hygiene/Personal Care"

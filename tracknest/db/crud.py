@@ -245,11 +245,22 @@ def get_pending_profile_item():
     logged the item, since both just leave these columns NULL.
 
     Returns:
-        (name, stage) tuple, stage being 'purchase_type' or 'shelf_life', or
-        None if no item needs profiling right now.
+        (name, stage) tuple, stage being 'name' or 'category' (a receipt item
+        not yet named by the user — see name_status), 'purchase_type' or
+        'shelf_life', or None if no item needs profiling right now.
     """
     conn = get_connection()
     cursor = conn.cursor()
+    # Naming comes first: an item fresh off a receipt is asked what it really
+    # is before any profiling question, so those use the real name.
+    cursor.execute(
+        "SELECT name, name_status FROM inventory_items WHERE name_status IS NOT NULL ORDER BY id LIMIT 1"
+    )
+    row = cursor.fetchone()
+    if row:
+        cursor.close()
+        conn.close()
+        return row["name"], row["name_status"]
     cursor.execute("SELECT name FROM inventory_items WHERE purchase_type IS NULL ORDER BY id LIMIT 1")
     row = cursor.fetchone()
     if row:
@@ -347,3 +358,114 @@ def delete_item(name):
     cursor.close()
     conn.close()
     return affected > 0
+
+
+def get_alias(receipt_name):
+    """Look up what the user said a receipt's wording really is.
+
+    Returns:
+        Dict with canonical_name and category, or None if never asked.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT canonical_name, category FROM item_aliases WHERE receipt_name = ?",
+        (receipt_name,),
+    )
+    row = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    return dict(row) if row else None
+
+
+def save_alias(receipt_name, canonical_name, category=None):
+    """Remember (or update) the real name and category behind a receipt's wording."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO item_aliases (receipt_name, canonical_name, category) VALUES (?, ?, ?)
+        ON CONFLICT(receipt_name) DO UPDATE SET
+            canonical_name = excluded.canonical_name, category = excluded.category
+    """, (receipt_name, canonical_name, category))
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+
+def mark_name_pending(name):
+    """Flag an item first seen on a receipt, so the user gets asked what it really is."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE inventory_items SET name_status = 'name' WHERE name = ?", (name,))
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+
+def rename_item(old_name, new_name):
+    """Give an item its real name, merging into an existing item of that name.
+
+    Merging (moving the purchases over, adding up stock) keeps one item's
+    price history whole instead of splitting it across a receipt spelling
+    and the name the user types.
+
+    Returns:
+        (final_name, merged) — merged is True when new_name already existed,
+        in which case that item's category and profile carry over and there
+        is nothing left to ask.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, quantity FROM inventory_items WHERE name = ?", (old_name,))
+    old = cursor.fetchone()
+    cursor.execute(
+        "SELECT id, name FROM inventory_items WHERE name = ? COLLATE NOCASE AND id != ?",
+        (new_name, old["id"]),
+    )
+    existing = cursor.fetchone()
+    if existing:
+        cursor.execute("UPDATE item_expenses SET item_id = ? WHERE item_id = ?", (existing["id"], old["id"]))
+        cursor.execute(
+            "UPDATE inventory_items SET quantity = quantity + ? WHERE id = ?",
+            (old["quantity"], existing["id"]),
+        )
+        cursor.execute("DELETE FROM inventory_items WHERE id = ?", (old["id"],))
+        final_name, merged = existing["name"], True
+    else:
+        cursor.execute(
+            "UPDATE inventory_items SET name = ?, name_status = 'category' WHERE id = ?",
+            (new_name, old["id"]),
+        )
+        final_name, merged = new_name, False
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return final_name, merged
+
+
+def keep_item_name(name):
+    """Accept the receipt's wording as the item's name; the category is asked next."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE inventory_items SET name_status = 'category' WHERE name = ?", (name,))
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+
+def set_item_category(name, category):
+    """Set an item's category and finish its naming step.
+
+    Also updates any alias pointing at this item, so the next receipt with
+    the same wording lands in the same category.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE inventory_items SET category = ?, name_status = NULL WHERE name = ?",
+        (category, name),
+    )
+    cursor.execute("UPDATE item_aliases SET category = ? WHERE canonical_name = ?", (category, name))
+    conn.commit()
+    cursor.close()
+    conn.close()

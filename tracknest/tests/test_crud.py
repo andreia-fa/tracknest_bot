@@ -196,23 +196,56 @@ def test_delete_item_not_found(mock_conn):
 def test_get_pending_profile_item_purchase_type_stage_first(mock_conn):
     conn, cursor = make_mock_conn()
     mock_conn.return_value = conn
-    cursor.fetchone.side_effect = [{"name": "Sushi"}]
+    cursor.fetchone.side_effect = [None, {"name": "Sushi"}]
     assert crud.get_pending_profile_item() == ("Sushi", "purchase_type")
-    assert cursor.execute.call_count == 1
+    assert cursor.execute.call_count == 2
 
 
 @patch("db.crud.get_connection")
 def test_get_pending_profile_item_falls_back_to_shelf_life_stage(mock_conn):
     conn, cursor = make_mock_conn()
     mock_conn.return_value = conn
-    cursor.fetchone.side_effect = [None, {"name": "Milk"}]
+    cursor.fetchone.side_effect = [None, None, {"name": "Milk"}]
     assert crud.get_pending_profile_item() == ("Milk", "shelf_life")
-    assert cursor.execute.call_count == 2
+    assert cursor.execute.call_count == 3
 
 
 @patch("db.crud.get_connection")
 def test_get_pending_profile_item_none_when_nothing_pending(mock_conn):
     conn, cursor = make_mock_conn()
     mock_conn.return_value = conn
-    cursor.fetchone.side_effect = [None, None]
+    cursor.fetchone.side_effect = [None, None, None]
     assert crud.get_pending_profile_item() is None
+
+
+@patch("db.crud.get_connection")
+def test_pending_profile_asks_naming_first(mock_conn):
+    conn, cursor = make_mock_conn(fetchone={"name": "BIO aln.pfanne", "name_status": "name"})
+    mock_conn.return_value = conn
+    assert crud.get_pending_profile_item() == ("BIO aln.pfanne", "name")
+
+
+@patch("db.crud.get_connection")
+def test_get_alias_not_found(mock_conn):
+    conn, _cursor = make_mock_conn(fetchone=None)
+    mock_conn.return_value = conn
+    assert crud.get_alias("BIO aln.pfanne") is None
+
+
+@patch("db.crud.get_connection")
+def test_rename_item_merges_into_existing(mock_conn):
+    conn, cursor = make_mock_conn()
+    cursor.fetchone.side_effect = [{"id": 2, "quantity": 1}, {"id": 1, "name": "Frozen mixed veg"}]
+    mock_conn.return_value = conn
+    assert crud.rename_item("BIO aln.pfanne", "frozen mixed veg") == ("Frozen mixed veg", True)
+    sql = " ".join(call[0][0] for call in cursor.execute.call_args_list)
+    assert "UPDATE item_expenses SET item_id" in sql and "DELETE FROM inventory_items" in sql
+
+
+@patch("db.crud.get_connection")
+def test_rename_item_plain_rename_asks_category_next(mock_conn):
+    conn, cursor = make_mock_conn()
+    cursor.fetchone.side_effect = [{"id": 2, "quantity": 1}, None]
+    mock_conn.return_value = conn
+    assert crud.rename_item("BIO aln.pfanne", "Frozen mixed veg") == ("Frozen mixed veg", False)
+    assert "name_status = 'category'" in cursor.execute.call_args_list[-1][0][0]

@@ -10,6 +10,7 @@ guessing.
 import re
 
 _OTHER = "Other"
+_MIN_COMPOUND_KEYWORD_LEN = 4
 
 # Checked in this order — first matching keyword wins. Order only matters
 # for words that could plausibly belong to more than one bucket.
@@ -29,6 +30,7 @@ _CATEGORIES: list[tuple[str, list[str]]] = [
         "garlic", "knoblauch", "alho", "lemon", "zitrone", "limão", "limao",
         "orange", "laranja", "ginger", "ingwer", "gengibre", "salad", "obst",
         "gemüse", "gemuse", "fruta", "legume", "avocado", "abacate",
+        "veg", "veggie", "veggies", "vegetable", "vegetables", "fruit",
         "broccoli", "brokkoli", "brócolos", "brocolos", "brócolis", "brocolis",
         "cauliflower", "blumenkohl", "couve", "cabbage", "kohl", "zucchini",
         "courgette", "curgete", "abobrinha", "eggplant", "aubergine", "beringela",
@@ -102,6 +104,11 @@ _CATEGORIES: list[tuple[str, list[str]]] = [
 ]
 
 
+# Every label infer_category can return, in display order — also the choices
+# offered when the user names a new receipt item.
+CATEGORY_NAMES = [category for category, _ in _CATEGORIES] + [_OTHER]
+
+
 def infer_category(name: str) -> str:
     """Guess a shopping-list category from an item name via keyword matching.
 
@@ -117,5 +124,13 @@ def infer_category(name: str) -> str:
             # Trailing "s?" so an English plural (bananas, apples) matches
             # a singular keyword without listing every plural by hand.
             if re.search(rf"\b{re.escape(keyword)}s?\b", normalized):
+                return category
+    # Second pass for German compounds ("Käsescheiben", "Thunfischsalat"):
+    # a known word inside a longer one. Only after no whole word matched, so
+    # "Zahnpasta" stays toothpaste rather than pasta, and only for keywords
+    # long enough not to hide in unrelated words ("ol", "bh", "tee").
+    for category, keywords in _CATEGORIES:
+        for keyword in keywords:
+            if len(keyword) >= _MIN_COMPOUND_KEYWORD_LEN and keyword in normalized:
                 return category
     return _OTHER

@@ -82,3 +82,20 @@ def test_net_total_misread_only_matches_exact_vat_rates():
     assert receipt._is_net_total_misread(10.70, 10.00)     # 7%
     assert not receipt._is_net_total_misread(8.90, 5.90)   # a real error
     assert not receipt._is_net_total_misread(11.20, 10.00)  # 12%: neither rate
+
+
+@patch("bot.receipt._ensure_server_running")
+@patch("bot.receipt._client")
+def test_parse_receipt_drops_non_items_but_counts_deposits(mock_client, _mock_ensure):
+    mock_response = MagicMock()
+    mock_response.message.content = (
+        '{"items": ['
+        '{"name": "Water", "quantity": 1, "unit_price": 0.50, "category": "Beverages", "matched_shopping_list_item": ""},'
+        '{"name": "PFAND 0,25 EURO", "quantity": 1, "unit_price": 0.25, "category": "", "matched_shopping_list_item": ""},'
+        '{"name": "Normalpreis", "quantity": 1, "unit_price": 0.79, "category": "", "matched_shopping_list_item": ""}'
+        '], "total_paid": 0.75, "store": "REWE"}'
+    )
+    mock_client.chat.return_value = mock_response
+    result = receipt.parse_receipt(b"fake-image", [])
+    assert [i["name"] for i in result["items"]] == ["Water"]
+    assert result["reconciled"] is True
