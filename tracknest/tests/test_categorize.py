@@ -55,3 +55,11 @@ def test_german_compounds_match_a_known_word_inside():
 
 def test_whole_word_match_beats_a_compound_match():
     assert infer_category("Zahnpasta") == "Hygiene/Personal Care"
+
+
+def test_real_receipt_names_from_2026_09_23():
+    assert infer_category("Naturgut Broccol") == "Fruits/Veg"   # cut off
+    assert infer_category("Berida Garnele") == "Meat/Fish"
+    assert infer_category("RAEUCHERLACHS") == "Meat/Fish"
+    assert infer_category("Greenl. Erdbeere") == "Fruits/Veg"
+    assert infer_category("Greenl. Gemüse") == "Fruits/Veg"

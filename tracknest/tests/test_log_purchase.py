@@ -41,5 +41,11 @@ def test_keyword_category_beats_the_models_guess(_alias):
 
 @patch("bot.main.crud.get_alias", return_value=None)
 def test_models_category_is_the_fallback(_alias):
-    item = {"name": "BIO aln.pfanne", "category": "Frozen"}
-    assert main._resolve_receipt_name(item) == ("BIO aln.pfanne", "Frozen", True)
+    item = {"name": "BIO aln.pfanne", "category": "Fruits/Veg"}
+    assert main._resolve_receipt_name(item) == ("BIO aln.pfanne", "Fruits/Veg", True)
+
+
+@patch("bot.main.crud.get_alias", return_value=None)
+def test_vat_code_is_never_taken_as_a_category(_alias):
+    item = {"name": "VOLVIC NATURELLE", "category": "A"}
+    assert main._resolve_receipt_name(item) == ("VOLVIC NATURELLE", None, True)

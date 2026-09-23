@@ -615,8 +615,12 @@ def _resolve_receipt_name(item: dict) -> tuple[str, str | None, bool]:
     if alias:
         return alias["canonical_name"], alias["category"], False
     keyword = infer_category(item["name"])
-    category = keyword if keyword != "Other" else (item.get("category") or None)
-    return item["name"], category, True
+    if keyword != "Other":
+        return item["name"], keyword, True
+    # The model's guess only counts if it's one of our own labels — it has
+    # filled this field with VAT codes ("A", "B") before.
+    guess = item.get("category")
+    return item["name"], guess if guess in CATEGORY_NAMES and guess != "Other" else None, True
 
 
 async def process_receipt_result(parsed: dict) -> str:

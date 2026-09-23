@@ -11,6 +11,7 @@ import re
 
 _OTHER = "Other"
 _MIN_COMPOUND_KEYWORD_LEN = 4
+_MIN_TRUNCATED_WORD_LEN = 5
 
 # Checked in this order — first matching keyword wins. Order only matters
 # for words that could plausibly belong to more than one bucket.
@@ -65,7 +66,7 @@ _CATEGORIES: list[tuple[str, list[str]]] = [
     ("Meat/Fish", [
         "meat", "fleisch", "carne", "chicken", "hähnchen", "haehnchen", "frango",
         "fish", "fisch", "peixe", "beef", "rind", "sausage", "wurst", "salsicha",
-        "salmon", "lachs", "salmão", "salmao", "shrimp", "camarão", "camarao",
+        "salmon", "lachs", "salmão", "salmao", "shrimp", "camarão", "camarao", "garnele",
         "tuna", "thunfisch", "atum", "cod", "kabeljau", "bacalhau", "sardine",
         "sardinen", "sardinha", "trout", "forelle", "truta", "prawn", "garnelen",
         "gambas", "mackerel", "makrele", "cavala", "octopus", "polvo", "squid",
@@ -132,5 +133,12 @@ def infer_category(name: str) -> str:
     for category, keywords in _CATEGORIES:
         for keyword in keywords:
             if len(keyword) >= _MIN_COMPOUND_KEYWORD_LEN and keyword in normalized:
+                return category
+    # Third pass: receipts cut long names off at a fixed width ("Naturgut
+    # Broccol"), so a word that is the start of a keyword counts too.
+    words = [w for w in normalized.split() if len(w) >= _MIN_TRUNCATED_WORD_LEN]
+    for category, keywords in _CATEGORIES:
+        for keyword in keywords:
+            if any(keyword.startswith(word) for word in words):
                 return category
     return _OTHER

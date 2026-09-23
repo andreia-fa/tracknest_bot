@@ -7,6 +7,7 @@ import time
 
 import ollama
 
+from bot.categorize import CATEGORY_NAMES
 from bot.receipt_lines import classify_line
 
 logger = logging.getLogger(__name__)
@@ -35,15 +36,17 @@ _RESPONSE_SCHEMA = {
                     "unit_price": {"type": "number", "description": "Price per single unit, not the line total"},
                     "category": {
                         "type": "string",
+                        # Constrained to the bot's own labels: left free-form, the
+                        # model copied the VAT code printed beside each price ("A",
+                        # "B") into this field.
+                        "enum": CATEGORY_NAMES,
                         "description": (
                             "Grocery category this item belongs to, inferred from its "
                             "name even if abbreviated or written in another language "
                             "(e.g. 'Proteinbrötchen' is German for a protein bread "
-                            "roll -> Bread; 'Happy Calif.' is a California-roll-style "
-                            "sushi product name -> Sushi/Prepared Food). Use a short "
-                            "common category such as Bread, Dairy, Produce, Meat, "
-                            "Sushi/Prepared Food, Snacks, Beverages, Household, or "
-                            "Other."
+                            "roll -> Bread/Bakery). Never the single letter or digit "
+                            "printed next to the price — that is a VAT code. Use "
+                            "Other if unsure."
                         ),
                     },
                     "matched_shopping_list_item": {
