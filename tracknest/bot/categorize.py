@@ -14,6 +14,13 @@ _OTHER = "Other"
 # Checked in this order — first matching keyword wins. Order only matters
 # for words that could plausibly belong to more than one bucket.
 _CATEGORIES: list[tuple[str, list[str]]] = [
+    # Before Fruits/Veg so a flavoured treat ("schoko. Himbeeren") counts
+    # as a snack, not fruit.
+    ("Snacks", [
+        "chocolate", "schokolade", "chocolate", "candy", "süßigkeiten",
+        "susigkeiten", "doces", "chips", "biscuit", "keks", "biscoito",
+        "pudding", "snack",
+    ]),
     ("Fruits/Veg", [
         "banana", "banane", "apple", "apfel", "maçã", "maca", "tomato", "tomate",
         "potato", "kartoffel", "batata", "onion", "zwiebel", "cebola", "carrot",
@@ -22,6 +29,27 @@ _CATEGORIES: list[tuple[str, list[str]]] = [
         "garlic", "knoblauch", "alho", "lemon", "zitrone", "limão", "limao",
         "orange", "laranja", "ginger", "ingwer", "gengibre", "salad", "obst",
         "gemüse", "gemuse", "fruta", "legume", "avocado", "abacate",
+        "broccoli", "brokkoli", "brócolos", "brocolos", "brócolis", "brocolis",
+        "cauliflower", "blumenkohl", "couve", "cabbage", "kohl", "zucchini",
+        "courgette", "curgete", "abobrinha", "eggplant", "aubergine", "beringela",
+        "pumpkin", "kürbis", "kurbis", "abóbora", "abobora", "mushroom", "pilz",
+        "champignon", "cogumelo", "leek", "lauch", "alho francês", "alho frances",
+        "celery", "sellerie", "aipo", "peas", "erbsen", "ervilhas", "beans",
+        "bohnen", "feijão", "feijao", "corn", "milho", "asparagus",
+        "spargel", "espargos", "radish", "radieschen", "rabanete", "beetroot",
+        "rote bete", "beterraba", "sweet potato", "süßkartoffel", "batata doce",
+        "strawberry", "strawberries", "erdbeere", "erdbeeren", "morango",
+        "raspberry", "raspberries", "himbeere", "himbeeren", "framboesa",
+        "blueberry", "blueberries", "heidelbeere", "heidelbeeren", "mirtilo",
+        "grape", "traube", "trauben", "uva", "pear", "birne", "pêra", "pera",
+        "peach", "pfirsich", "pêssego", "pessego", "plum", "pflaume", "ameixa",
+        "cherry", "cherries", "kirsche", "kirschen", "cereja", "melon", "melone",
+        "melão", "melao", "watermelon", "wassermelone", "melancia", "pineapple",
+        "ananas", "abacaxi", "mango", "manga", "kiwi", "lime", "limette",
+        "tangerine", "mandarine", "tangerina", "clementine", "clementina",
+        "herbs", "kräuter", "krauter", "parsley", "petersilie",
+        "coriander", "koriander", "coentros", "basil", "basilikum", "manjericão",
+        "manjericao",
     ]),
     ("Dairy", [
         "milk", "milch", "leite", "cheese", "käse", "kase", "queijo", "yogurt",
@@ -47,11 +75,6 @@ _CATEGORIES: list[tuple[str, list[str]]] = [
         "water", "wasser", "água", "agua", "juice", "saft", "sumo", "coffee",
         "kaffee", "café", "cafe", "tea", "tee", "chá", "cha", "beer", "bier",
         "cerveja", "wine", "wein", "vinho",
-    ]),
-    ("Snacks", [
-        "chocolate", "schokolade", "chocolate", "candy", "süßigkeiten",
-        "susigkeiten", "doces", "chips", "biscuit", "keks", "biscoito",
-        "pudding", "snack",
     ]),
     ("Hygiene/Personal Care", [
         "soap", "seife", "sabonete", "shampoo", "toothpaste", "zahnpasta",

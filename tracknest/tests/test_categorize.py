@@ -27,3 +27,13 @@ def test_matching_is_case_insensitive_and_whole_word():
     # "bra" must not match inside an unrelated word like "bracket"
     assert infer_category("Bracket") == "Other"
     assert infer_category("BRA") == "Clothing"
+
+
+def test_common_vegetables_and_berries():
+    assert infer_category("Broccoli") == "Fruits/Veg"
+    assert infer_category("Brokkoli") == "Fruits/Veg"
+    assert infer_category("morangos") == "Fruits/Veg"
+
+
+def test_flavoured_treat_is_a_snack_not_fruit():
+    assert infer_category("dmBio schoko. Himbeeren 150g*") == "Snacks"

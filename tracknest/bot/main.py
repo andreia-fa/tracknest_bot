@@ -443,7 +443,12 @@ async def show_shopping_list(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     by_category: dict[str, list[dict]] = {}
     for item in items:
-        by_category.setdefault(item["category"] or "Other", []).append(item)
+        category = item["category"]
+        if not category or category == "Other":
+            # Re-guess at display time so keyword-list additions also fix
+            # items that were stored as "Other" before them.
+            category = infer_category(item["name"])
+        by_category.setdefault(category, []).append(item)
     sections = []
     for category in sorted(by_category, key=lambda c: (c == "Other", c)):
         lines = [f"• {i['name']} ({i['quantity']}x)" for i in by_category[category]]
