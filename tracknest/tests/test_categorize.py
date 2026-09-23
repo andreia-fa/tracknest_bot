@@ -37,3 +37,10 @@ def test_common_vegetables_and_berries():
 
 def test_flavoured_treat_is_a_snack_not_fruit():
     assert infer_category("dmBio schoko. Himbeeren 150g*") == "Snacks"
+
+
+def test_common_fish_and_meat():
+    assert infer_category("tuna") == "Meat/Fish"
+    assert infer_category("Thunfisch in Öl") == "Meat/Fish"
+    assert infer_category("atum") == "Meat/Fish"
+    assert infer_category("Schinken") == "Meat/Fish"

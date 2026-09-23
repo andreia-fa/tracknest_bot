@@ -64,6 +64,13 @@ _CATEGORIES: list[tuple[str, list[str]]] = [
         "meat", "fleisch", "carne", "chicken", "hähnchen", "haehnchen", "frango",
         "fish", "fisch", "peixe", "beef", "rind", "sausage", "wurst", "salsicha",
         "salmon", "lachs", "salmão", "salmao", "shrimp", "camarão", "camarao",
+        "tuna", "thunfisch", "atum", "cod", "kabeljau", "bacalhau", "sardine",
+        "sardinen", "sardinha", "trout", "forelle", "truta", "prawn", "garnelen",
+        "gambas", "mackerel", "makrele", "cavala", "octopus", "polvo", "squid",
+        "tintenfisch", "lula", "turkey", "pute", "peru", "pork", "schwein",
+        "porco", "ham", "schinken", "fiambre", "presunto", "bacon", "speck",
+        "mince", "hackfleisch", "carne picada", "lamb", "lamm", "borrego",
+        "steak", "bife", "chouriço", "chourico", "salami",
     ]),
     ("Pantry", [
         "rice", "reis", "arroz", "pasta", "nudeln", "massa", "flour", "mehl",
