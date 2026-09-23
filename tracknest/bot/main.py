@@ -492,7 +492,13 @@ def _log_purchase(name, qty, price, *, store=None, category=None, matched_list_i
     expenses.log_expense(name, qty, price, store=store)
     line = f"• {qty}x {name} at €{price:.2f} each"
     if matched_list_item and shopping_list.remove_item(matched_list_item):
-        line += " (cleared from your list)"
+        # Name the list entry when it differs from the receipt's wording —
+        # the vision model matches across languages ("PUSH UP" → "Soutien"),
+        # and a bare "cleared" left no way to tell what actually came off.
+        if matched_list_item.casefold() == name.casefold():
+            line += " (cleared from your list)"
+        else:
+            line += f" (cleared '{matched_list_item}' from your list)"
     if delta is not None:
         sign = "+" if delta["pct_change"] >= 0 else ""
         delta_text = f"{sign}{delta['pct_change']:.0f}% vs usual €{delta['avg_price']:.2f}"
