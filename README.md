@@ -57,10 +57,10 @@ It helps you manage home inventory and track household expenses through a conver
     savings), and an all-clear line when genuinely nothing needs you.
 - ✅ `/dashboard` – Password-gated web view (opens inside Telegram via a Web
   App button, reached over a Cloudflare Tunnel — no domain, no inbound port
-  on the server) showing the same month as **relative numbers only** (%):
-  budget used, month elapsed, the treats/essential/necessity mix, price
-  creep, and shelf-life-remaining — euro amounts stay Telegram-only in
-  `/report`.
+  on the server) showing the month at a glance: spend + month-end forecast,
+  shopping trips and average basket, budget vs. calendar pace, treats share,
+  spend by day, spending mix, categories, stores, price watch, what to buy,
+  what needs your answer, and cost per day once it's trustworthy.
 
   (data layer in `db/metrics.py` is Telegram-agnostic — `/dashboard` is the
   "future web page" this line used to foreshadow, now real)

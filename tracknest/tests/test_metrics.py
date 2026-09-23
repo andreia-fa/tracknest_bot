@@ -228,3 +228,41 @@ def test_get_inventory_health_all_clear(mock_conn):
     mock_conn.return_value = conn
     result = metrics.get_inventory_health()
     assert result == {"checkin_pending": [], "spare_alert_pending": [], "unprofiled": []}
+
+
+@patch("db.metrics.get_connection")
+def test_get_shopping_trips_groups_by_day_and_store(mock_conn):
+    conn, _cursor = make_mock_conn(fetchall_side_effect=[[
+        {"day": "2026-09-20", "store": "REWE", "total": 12.0},
+        {"day": "2026-09-22", "store": "REWE", "total": 8.0},
+        {"day": "2026-09-22", "store": "dm", "total": 4.0},
+    ]])
+    mock_conn.return_value = conn
+
+    trips = metrics.get_shopping_trips(2026, 9)
+
+    assert trips["count"] == 3
+    assert trips["avg_basket"] == 8.0
+    assert trips["by_store"][0] == {"store": "REWE", "trips": 2, "total": 20.0}
+
+
+@patch("db.metrics.get_connection")
+def test_get_shopping_trips_empty_month(mock_conn):
+    conn, _cursor = make_mock_conn(fetchall_side_effect=[[]])
+    mock_conn.return_value = conn
+
+    assert metrics.get_shopping_trips(2026, 9) == {"count": 0, "avg_basket": None, "by_store": []}
+
+
+@patch("db.metrics.get_connection")
+def test_get_daily_spend_zero_fills_the_month(mock_conn):
+    conn, _cursor = make_mock_conn(fetchall_side_effect=[[
+        {"day": "2026-09-03", "total": 5.5},
+    ]])
+    mock_conn.return_value = conn
+
+    days = metrics.get_daily_spend(2026, 9)
+
+    assert len(days) == 30
+    assert days[2] == 5.5
+    assert sum(days) == 5.5

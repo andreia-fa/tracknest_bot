@@ -4,6 +4,7 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 from bot import dashboard
+from tests.test_dashboard import sample_data
 
 
 @pytest.mark.asyncio
@@ -26,10 +27,7 @@ async def test_login_wrong_password_shows_error_and_no_cookie():
 @pytest.mark.asyncio
 @patch("bot.dashboard.build_dashboard_data")
 async def test_login_correct_password_grants_dashboard_access(mock_build_data):
-    mock_build_data.return_value = {
-        "month_abbr": "SEP", "budget_pct": None, "month_pct": 10.0,
-        "mix": [], "unclassified_pct": None, "rising": [], "running_low": [],
-    }
+    mock_build_data.return_value = sample_data()
     async with TestClient(TestServer(dashboard.build_app())) as client:
         login_resp = await client.post(
             "/login", data={"password": "dummy_password_for_tests"}, allow_redirects=False

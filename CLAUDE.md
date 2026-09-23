@@ -14,7 +14,7 @@ tracknest/
   bot/parser.py        — parses plain-text entries (name/qty/unit_price)
   bot/receipt.py       — receipt photo parsing via local Ollama vision model
                          (only ever called by receipt_worker.py now)
-  bot/dashboard.py     — password-gated aiohttp web app (relative-numbers-only
+  bot/dashboard.py     — password-gated aiohttp web app (month-at-a-glance
                          dashboard), served over a Cloudflare Tunnel — see
                          bot/tunnel.py and the /dashboard command
   bot/auth.py          — dashboard password check + signed session cookie
@@ -67,9 +67,12 @@ independently of all this — only receipt photos wait on the worker.
 the values came from. `DB_PATH` is not a secret — it's just a file path, and
 defaults to `data/tracknest.db` (git-ignored) if unset.
 
-**`/dashboard` (2026-09-23): password-gated web view, relative numbers only**
-(budget %, month-elapsed %, essential/treats/necessity mix %, price-trend %,
-shelf-life-remaining %) — `bot/report()`'s euro figures stay Telegram-only.
+**`/dashboard` (2026-09-23, redesigned same day): password-gated web view of
+the month** — hero spend + forecast, trips/avg basket, budget vs. pace, spend
+by day, mix, categories, stores, price watch, what to buy, needs-attention.
+Euro amounts are shown (the percentages-only first version was rejected as
+uninformative). All numbers come from `db/metrics.py`; the dashboard only
+renders them, and escapes every name (receipt text is untrusted input).
 `bot/main.py`'s entrypoint runs three things in one asyncio event loop: PTB's
 long-poller, an aiohttp server (`bot/dashboard.py`, bound to `127.0.0.1` only)
 and a `cloudflared` subprocess (`bot/tunnel.py`) that tunnels it out to a

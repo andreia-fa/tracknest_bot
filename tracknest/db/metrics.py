@@ -379,3 +379,76 @@ def get_inventory_health():
         "spare_alert_pending": spare_alert_pending,
         "unprofiled": unprofiled,
     }
+
+
+def get_shopping_trips(year=None, month=None):
+    """Return a month's shopping trips — one per distinct (day, store) — and where they happened.
+
+    A receipt carries no trip id, so a trip is approximated as every
+    purchase logged on the same day at the same store. Purchases with no
+    store (typed in by hand) count as one trip per day.
+
+    Args:
+        year: Calendar year. Defaults to the current month.
+        month: Calendar month (1-12). Defaults to the current month.
+
+    Returns:
+        Dict with keys count, avg_basket (float, or None with no trips), and
+        by_store (list of {store, trips, total}, biggest spend first; store
+        is None for hand-typed purchases).
+    """
+    now = datetime.now(tz=timezone.utc)
+    prefix = f"{year or now.year:04d}-{month or now.month:02d}"
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT purchase_date AS day, store AS store,
+               SUM(quantity_purchased * unit_price) AS total
+        FROM item_expenses
+        WHERE purchase_date LIKE ?
+        GROUP BY purchase_date, store
+    """, (f"{prefix}%",))
+    trips = cursor.fetchall()
+    cursor.close()
+    conn.close()
+
+    by_store = {}
+    for trip in trips:
+        entry = by_store.setdefault(trip["store"], {"store": trip["store"], "trips": 0, "total": 0.0})
+        entry["trips"] += 1
+        entry["total"] += float(trip["total"])
+    grand_total = sum(float(t["total"]) for t in trips)
+    return {
+        "count": len(trips),
+        "avg_basket": grand_total / len(trips) if trips else None,
+        "by_store": sorted(by_store.values(), key=lambda s: s["total"], reverse=True),
+    }
+
+
+def get_daily_spend(year=None, month=None):
+    """Return spend per calendar day of a month, zero-filled.
+
+    Args:
+        year: Calendar year. Defaults to the current month.
+        month: Calendar month (1-12). Defaults to the current month.
+
+    Returns:
+        List of floats, index 0 = day 1, one entry per day in the month.
+    """
+    now = datetime.now(tz=timezone.utc)
+    year = year or now.year
+    month = month or now.month
+    days = [0.0] * calendar.monthrange(year, month)[1]
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT purchase_date AS day, SUM(quantity_purchased * unit_price) AS total
+        FROM item_expenses
+        WHERE purchase_date LIKE ?
+        GROUP BY purchase_date
+    """, (f"{year:04d}-{month:02d}%",))
+    for row in cursor.fetchall():
+        days[int(row["day"][8:10]) - 1] = float(row["total"])
+    cursor.close()
+    conn.close()
+    return days
