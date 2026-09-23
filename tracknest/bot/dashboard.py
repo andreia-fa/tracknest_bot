@@ -252,12 +252,17 @@ async def handle_login_post(request: web.Request) -> web.Response:
     form = await request.post()
     if not auth.check_password(str(form.get("password", ""))):
         return web.Response(text=_login_page("Wrong password."), content_type="text/html", status=401)
-    response = web.HTTPFound("/dashboard")
+    # Render the dashboard right here instead of redirecting to /dashboard:
+    # inside Telegram (web/desktop) the page is often embedded cross-site,
+    # where browsers drop the session cookie, so the redirect bounced
+    # straight back to /login. The cookie still spares a re-login wherever
+    # the browser does keep it.
+    response = web.Response(text=render_dashboard_html(build_dashboard_data()), content_type="text/html")
     response.set_cookie(
         _SESSION_COOKIE, auth.create_session_token(),
         max_age=auth.SESSION_TTL_SECONDS, httponly=True, samesite="Lax",
     )
-    raise response
+    return response
 
 
 async def handle_dashboard(request: web.Request) -> web.Response:

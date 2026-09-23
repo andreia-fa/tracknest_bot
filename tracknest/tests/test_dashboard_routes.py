@@ -34,7 +34,10 @@ async def test_login_correct_password_grants_dashboard_access(mock_build_data):
         login_resp = await client.post(
             "/login", data={"password": "dummy_password_for_tests"}, allow_redirects=False
         )
-        assert login_resp.status == 302
+        # Dashboard is served in the login response itself — no redirect
+        # that depends on the cookie surviving an embedded (cross-site) view.
+        assert login_resp.status == 200
+        assert "TrackNest" in await login_resp.text()
         assert dashboard._SESSION_COOKIE in login_resp.cookies
 
         dashboard_resp = await client.get("/dashboard")
