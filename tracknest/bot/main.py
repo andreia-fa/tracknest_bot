@@ -51,7 +51,7 @@ _ONBOARD_GOAL_KEYBOARD = InlineKeyboardMarkup([
     [InlineKeyboardButton("Skip for now", callback_data="onboard_goal:skip")],
 ])
 _NAME_KEEP_KEYBOARD = InlineKeyboardMarkup([
-    [InlineKeyboardButton("Keep this name", callback_data="name_keep")],
+    [InlineKeyboardButton("✓ Name is fine, keep it", callback_data="name_keep")],
 ])
 
 
@@ -267,8 +267,10 @@ async def send_pending_profile_question(bot, chat_id: int):
     if stage == "name":
         await bot.send_message(
             chat_id,
-            f"🧾 New on a receipt: \"{name}\". What is it? Reply with a short name "
-            "(e.g. Frozen mixed veg) — I'll remember it for next time.",
+            f"🧾 New on a receipt: \"{name}\". What is it?\n\n"
+            "✏️ Type its real name as a message (e.g. Frozen mixed veg) — "
+            "I'll remember it for next time.\n"
+            "Or tap the button if the receipt's name is already fine.",
             reply_markup=_NAME_KEEP_KEYBOARD,
         )
     elif stage == "category":
