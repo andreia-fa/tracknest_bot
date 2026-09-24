@@ -63,3 +63,11 @@ def test_real_receipt_names_from_2026_09_23():
     assert infer_category("RAEUCHERLACHS") == "Meat/Fish"
     assert infer_category("Greenl. Erdbeere") == "Fruits/Veg"
     assert infer_category("Greenl. Gemüse") == "Fruits/Veg"
+
+
+def test_eggs_are_dairy_even_when_labelled_bh():
+    # "BH" on a German egg carton is Bodenhaltung (barn eggs), not a bra.
+    assert infer_category("EIER BH M-L") == "Dairy"
+    assert infer_category("EIER MARM.") == "Dairy"
+    assert infer_category("eggs") == "Dairy"
+    assert infer_category("BH schwarz") == "Clothing"

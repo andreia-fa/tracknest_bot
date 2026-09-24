@@ -58,6 +58,9 @@ _CATEGORIES: list[tuple[str, list[str]]] = [
         "milk", "milch", "leite", "cheese", "käse", "kase", "queijo", "yogurt",
         "joghurt", "iogurte", "butter", "manteiga", "cream", "sahne", "nata",
         "quark",
+        # Eggs share the dairy shelf. Matched here, before Clothing, because
+        # German receipts print barn eggs as "EIER BH" (Bodenhaltung).
+        "egg", "eier", "ovo",
     ]),
     ("Bread/Bakery", [
         "bread", "brot", "pão", "pao", "brötchen", "broetchen", "roll",
