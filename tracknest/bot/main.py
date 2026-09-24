@@ -66,18 +66,29 @@ def _category_keyboard(suggested: str | None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([buttons[i:i + 2] for i in range(0, len(buttons), 2)])
 
 
-_PROFILE_SHELF_KEYBOARD = InlineKeyboardMarkup([
-    [
-        InlineKeyboardButton("1 day", callback_data="profile_shelf:1"),
-        InlineKeyboardButton("4 days", callback_data="profile_shelf:4"),
-    ],
-    [
-        InlineKeyboardButton("One week", callback_data="profile_shelf:7"),
-        InlineKeyboardButton("Two weeks", callback_data="profile_shelf:14"),
-    ],
-    [InlineKeyboardButton("Doesn't spoil", callback_data="profile_shelf:na")],
-    [InlineKeyboardButton("Other: insert", callback_data="profile_shelf:custom")],
-])
+def _shelf_keyboard(prefix: str) -> InlineKeyboardMarkup:
+    """The shelf-life choices, each button's callback data being prefix + its value."""
+    def button(label: str, value: str) -> InlineKeyboardButton:
+        return InlineKeyboardButton(label, callback_data=f"{prefix}{value}")
+    return InlineKeyboardMarkup([
+        [button("1 day", "1"), button("4 days", "4")],
+        [button("One week", "7"), button("Two weeks", "14")],
+        [button("One month", "30"), button("Frozen (~3 months)", "90")],
+        [button("Doesn't spoil", "na")],
+        [button("Other: insert", "custom")],
+    ])
+
+
+def _shelf_change_keyboard(item_id: int) -> InlineKeyboardMarkup:
+    """A single button to correct an item's shelf-life answer after the fact."""
+    return InlineKeyboardMarkup([[InlineKeyboardButton("✏️ Change", callback_data=f"shelf_edit:{item_id}")]])
+
+
+def _describe_shelf_life(days: int) -> str:
+    return "doesn't spoil" if days == 0 else f"{days} day(s)"
+
+
+_PROFILE_SHELF_KEYBOARD = _shelf_keyboard("profile_shelf:")
 _PROFILE_TYPE_KEYBOARD = InlineKeyboardMarkup([
     [InlineKeyboardButton("Luxury / Treat", callback_data="profile_type:luxury")],
     [InlineKeyboardButton("Essential", callback_data="profile_type:essential")],
@@ -320,6 +331,7 @@ async def _handle_profile_answer(update: Update, context: ContextTypes.DEFAULT_T
                 await update.message.reply_text("Reply with a number of days, or 'n/a'.")
                 return
         crud.set_profile(name, shelf_life_days=days)
+        await _confirm_shelf_life(context.bot, update.effective_chat.id, name, days)
         await send_pending_profile_question(context.bot, update.effective_chat.id)
         return
     # stage == "purchase_type"
@@ -433,10 +445,83 @@ async def handle_profile_shelf_choice(update: Update, context: ContextTypes.DEFA
         await query.edit_message_text(f"How many days does {name} usually last? Reply with a number.")
         return
     days = 0 if choice == "na" else int(choice)
-    duration = "doesn't spoil" if days == 0 else f"{days} day(s)"
-    await query.edit_message_text(f"{name}: {duration}.")
     crud.set_profile(name, shelf_life_days=days)
+    item = crud.get_item(name)
+    await query.edit_message_text(
+        f"{name}: {_describe_shelf_life(days)}.", reply_markup=_shelf_change_keyboard(item["id"])
+    )
     await send_pending_profile_question(context.bot, update.effective_chat.id)
+
+
+async def _confirm_shelf_life(bot, chat_id: int, name: str, days: int) -> None:
+    """Echo a typed shelf-life answer back with a button to change it."""
+    item = crud.get_item(name)
+    await bot.send_message(
+        chat_id, f"{name}: {_describe_shelf_life(days)}.", reply_markup=_shelf_change_keyboard(item["id"])
+    )
+
+
+def _apply_shelf_edit(name: str, days: int) -> None:
+    """Save a corrected shelf life and restart that item's alerts from the new estimate."""
+    crud.set_profile(name, shelf_life_days=days)
+    crud.mark_spare_alert_pending(name, pending=False)
+    crud.mark_checkin_pending(name, pending=False)
+
+
+async def handle_shelf_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle "✏️ Change" under a shelf-life answer: offer the choices again."""
+    query = update.callback_query
+    await query.answer()
+    item_id = int(query.data.split(":", 1)[1])
+    item = crud.get_item_by_id(item_id)
+    if not item:
+        await query.edit_message_text("That item no longer exists.")
+        return
+    await query.edit_message_text(
+        f"How long does {item['name']} usually last?", reply_markup=_shelf_keyboard(f"shelf_set:{item_id}:")
+    )
+
+
+async def handle_shelf_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle a choice on the "✏️ Change" shelf-life keyboard."""
+    query = update.callback_query
+    await query.answer()
+    _prefix, item_id, choice = query.data.split(":", 2)
+    item = crud.get_item_by_id(int(item_id))
+    if not item:
+        await query.edit_message_text("That item no longer exists.")
+        return
+    if choice == "custom":
+        context.chat_data["shelf_edit_item"] = item["id"]
+        await query.edit_message_text(f"How many days does {item['name']} usually last? Reply with a number.")
+        return
+    days = 0 if choice == "na" else int(choice)
+    _apply_shelf_edit(item["name"], days)
+    await query.edit_message_text(
+        f"{item['name']}: {_describe_shelf_life(days)}.", reply_markup=_shelf_change_keyboard(item["id"])
+    )
+
+
+async def _handle_shelf_edit_answer(update: Update, context: ContextTypes.DEFAULT_TYPE, item_id: int):
+    """Interpret a typed number of days after "✏️ Change" → "Other: insert"."""
+    item = crud.get_item_by_id(item_id)
+    if not item:
+        await update.message.reply_text("That item no longer exists.")
+        return
+    text = update.message.text.strip().lower()
+    if text in _SHELF_LIFE_NA_WORDS:
+        days = 0
+    else:
+        try:
+            days = int(text)
+        except ValueError:
+            context.chat_data["shelf_edit_item"] = item_id
+            await update.message.reply_text("Reply with a number of days, or 'n/a'.")
+            return
+    _apply_shelf_edit(item["name"], days)
+    await update.message.reply_text(
+        f"{item['name']}: {_describe_shelf_life(days)}.", reply_markup=_shelf_change_keyboard(item_id)
+    )
 
 
 _CHECKIN_NO_WORDS = {"no", "n", "ran out", "gone", "finished", "empty"}
@@ -485,6 +570,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pending_goal = context.chat_data.get("awaiting_goal")
     if pending_goal:
         await _handle_goal_answer(update, context, pending_goal)
+        return
+    shelf_edit_item = context.chat_data.pop("shelf_edit_item", None)
+    if shelf_edit_item:
+        await _handle_shelf_edit_answer(update, context, shelf_edit_item)
         return
     pending_profile = crud.get_pending_profile_item()
     if pending_profile:
@@ -1159,6 +1248,8 @@ async def main():
     app.add_handler(CallbackQueryHandler(handle_restore, pattern=r"^restore:"))
     app.add_handler(CallbackQueryHandler(handle_name_category, pattern=r"^name_cat:"))
     app.add_handler(CallbackQueryHandler(handle_profile_shelf_choice, pattern=r"^profile_shelf:"))
+    app.add_handler(CallbackQueryHandler(handle_shelf_edit, pattern=r"^shelf_edit:"))
+    app.add_handler(CallbackQueryHandler(handle_shelf_set, pattern=r"^shelf_set:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_error_handler(handle_error)

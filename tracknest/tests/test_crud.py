@@ -43,6 +43,14 @@ def test_get_item_found(mock_conn):
 
 
 @patch("db.crud.get_connection")
+def test_get_item_by_id(mock_conn):
+    conn, cursor = make_mock_conn(fetchone={"id": 7, "name": "Berida Garnele"})
+    mock_conn.return_value = conn
+    assert crud.get_item_by_id(7)["name"] == "Berida Garnele"
+    assert cursor.execute.call_args[0][1] == (7,)
+
+
+@patch("db.crud.get_connection")
 def test_get_item_not_found(mock_conn):
     conn, _cursor = make_mock_conn(fetchone=None)
     mock_conn.return_value = conn

@@ -46,6 +46,17 @@ def get_item(name):
     return dict(item) if item else None
 
 
+def get_item_by_id(item_id):
+    """Return a single inventory item by id, or None if not found."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM inventory_items WHERE id = ?", (item_id,))
+    item = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    return dict(item) if item else None
+
+
 def get_all_items():
     """Return all inventory items ordered alphabetically by name.
 
