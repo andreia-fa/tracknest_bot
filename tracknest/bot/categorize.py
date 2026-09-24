@@ -23,6 +23,13 @@ _CATEGORIES: list[tuple[str, list[str]]] = [
         "susigkeiten", "doces", "chips", "biscuit", "keks", "biscoito",
         "pudding", "snack",
     ]),
+    # Before Fruits/Veg so a sushi box named after its filling ("HAPPY
+    # CALIF. VEG") counts as a ready meal, not vegetables.
+    ("Ready Meals", [
+        "ready meal", "fertiggericht", "refeição pronta", "refeicao pronta",
+        "prato pronto", "sushi", "maki", "nigiri", "california", "calif",
+        "pizza", "lasagne", "lasagna", "sandwich",
+    ]),
     ("Fruits/Veg", [
         "banana", "banane", "apple", "apfel", "maçã", "maca", "tomato", "tomate",
         "potato", "kartoffel", "batata", "onion", "zwiebel", "cebola", "carrot",

@@ -21,7 +21,7 @@ FIXES = {
     "HP PUDD. CHOCO V": "Snacks",
     "Jessa SE Cotton Normal": "Hygiene/Personal Care",
     "Haarprodukt": "Hygiene/Personal Care",
-    "HAPPY CALIF. VEG": "Other",
+    "HAPPY CALIF. VEG": "Ready Meals",
 }
 
 for name, category in FIXES.items():

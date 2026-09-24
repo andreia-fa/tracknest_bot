@@ -71,3 +71,10 @@ def test_eggs_are_dairy_even_when_labelled_bh():
     assert infer_category("EIER MARM.") == "Dairy"
     assert infer_category("eggs") == "Dairy"
     assert infer_category("BH schwarz") == "Clothing"
+
+
+def test_ready_meals():
+    assert infer_category("HAPPY CALIF. VEG") == "Ready Meals"
+    assert infer_category("Sushi box") == "Ready Meals"
+    assert infer_category("Tiefkühlpizza") == "Ready Meals"
+    assert infer_category("Fertiggericht Lasagne") == "Ready Meals"
