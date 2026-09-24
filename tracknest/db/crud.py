@@ -147,7 +147,8 @@ def get_par_alert_candidates(default_par_level):
     level (per-item override, or the household default) is 2 — a par=1 item
     just waits for the regular shelf-life check-in instead. Excludes both
     luxury (no consumption schedule) and necessity (same-day, never stocked)
-    purchase types.
+    purchase types, and any item that lasts a day or less — its "run out
+    soon" point is the moment it's bought, so the alert would only be noise.
 
     Args:
         default_par_level: The household's default par level, used for any
@@ -165,7 +166,7 @@ def get_par_alert_candidates(default_par_level):
         FROM inventory_items i
         WHERE i.purchase_type = 'essential'
           AND i.shelf_life_days IS NOT NULL
-          AND i.shelf_life_days > 0
+          AND i.shelf_life_days > 1
           AND i.spare_alert_pending = 0
           AND COALESCE(i.par_level, ?) >= 2
     """, (default_par_level,))

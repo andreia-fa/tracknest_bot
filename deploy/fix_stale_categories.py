@@ -1,4 +1,4 @@
-"""One-off (2026-09-24): move items logged before the current category list onto it.
+"""One-off (2026-09-24): move old items onto the current categories; fix Water Bottle's type.
 
 Run inside the bot container, e.g.:
     ssh oracle-tracknest docker exec -i tracknest-bot python - < deploy/fix_stale_categories.py
@@ -31,3 +31,8 @@ for name, category in FIXES.items():
         continue
     crud.set_item_category(name, category)
     print(f"  {name}: {item['category']} -> {category}")
+
+# Water Bottle is drunk the day it's bought: a necessity, never a spare to stock.
+crud.set_profile("Water Bottle", purchase_type="necessity", shelf_life_days=1)
+crud.mark_spare_alert_pending("Water Bottle", pending=False)
+print("  Water Bottle: essential -> necessity")

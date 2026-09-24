@@ -168,6 +168,7 @@ def test_get_par_alert_candidates(mock_conn):
     result = crud.get_par_alert_candidates(default_par_level=1)
     assert result == rows
     assert cursor.execute.call_args[0][1] == (1,)
+    assert "shelf_life_days > 1" in cursor.execute.call_args[0][0]  # same-day items never alert
 
 
 @patch("db.crud.get_connection")
