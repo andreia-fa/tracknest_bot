@@ -358,6 +358,7 @@ async def _rename_receipt_item(bot, chat_id: int, receipt_name: str, new_name: s
     final_name, merged = crud.rename_item(receipt_name, new_name)
     item = crud.get_item(final_name)
     crud.save_alias(receipt_name, final_name, item["category"] if item else None)
+    await _clear_list_entry_for_named_item(bot, chat_id, receipt_name, final_name)
     if merged:
         await bot.send_message(chat_id, f"Got it — added to your existing {final_name}.")
     else:
@@ -369,6 +370,25 @@ async def _rename_receipt_item(bot, chat_id: int, receipt_name: str, new_name: s
             crud.set_item_category(final_name, guess)
             crud.keep_item_name(final_name)  # set_item_category finished naming; reopen it for the tap
     await send_pending_profile_question(bot, chat_id)
+
+
+async def _clear_list_entry_for_named_item(bot, chat_id: int, receipt_name: str, name: str) -> None:
+    """Clear the shopping-list entry a just-named receipt item turns out to be.
+
+    The receipt was matched against the list before the user said what the
+    item is, so "PUSH UP" could miss "Soutien branco" then — the real name
+    gives it a second chance.
+    """
+    list_names = [entry["name"] for entry in shopping_list.get_all_items()]
+    match = choose_list_match(receipt_name, name, "", list_names)
+    if not match:
+        return
+    history_id = shopping_list.remove_item(match, reason="receipt", source=receipt_name)
+    if history_id:
+        await bot.send_message(
+            chat_id, f"Cleared '{match}' from your shopping list.",
+            reply_markup=_put_back_keyboard([(history_id, match)]),
+        )
 
 
 async def handle_name_keep(update: Update, context: ContextTypes.DEFAULT_TYPE):

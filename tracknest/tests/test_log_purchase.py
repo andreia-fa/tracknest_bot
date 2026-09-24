@@ -1,4 +1,6 @@
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from bot import main
 
@@ -68,3 +70,39 @@ def test_receipt_uses_the_synonym_matcher_not_the_model_alone(_list, _alias, moc
     asyncio.run(main.process_receipt_result(parsed))
     matches = [call.kwargs["matched_list_item"] for call in mock_log.call_args_list]
     assert matches == ["Salmon", None]
+
+
+@pytest.mark.asyncio
+@patch("bot.main.send_pending_profile_question", new_callable=AsyncMock)
+@patch("bot.main.shopping_list")
+@patch("bot.main.crud")
+async def test_naming_a_receipt_item_clears_its_list_entry(mock_crud, mock_list, _next_question):
+    # "PUSH UP" can't be matched to "Soutien branco" until the user says it's a bra.
+    mock_crud.rename_item.return_value = ("Push Up Bra", False)
+    mock_crud.get_item.return_value = {"category": "Clothing"}
+    mock_list.get_all_items.return_value = [{"name": "Soutien branco"}, {"name": "Salmon"}]
+    mock_list.remove_item.return_value = 42
+    bot = MagicMock()
+    bot.send_message = AsyncMock()
+
+    await main._rename_receipt_item(bot, 1, "PUSH UP", "Push Up Bra")
+
+    mock_list.remove_item.assert_called_once_with("Soutien branco", reason="receipt", source="PUSH UP")
+    texts = [c.args[1] for c in bot.send_message.call_args_list]
+    assert "Cleared 'Soutien branco' from your shopping list." in texts
+
+
+@pytest.mark.asyncio
+@patch("bot.main.send_pending_profile_question", new_callable=AsyncMock)
+@patch("bot.main.shopping_list")
+@patch("bot.main.crud")
+async def test_naming_leaves_unrelated_list_entries_alone(mock_crud, mock_list, _next_question):
+    mock_crud.rename_item.return_value = ("Frozen mixed veg", False)
+    mock_crud.get_item.return_value = {"category": "Fruits/Veg"}
+    mock_list.get_all_items.return_value = [{"name": "Salmon"}]
+    bot = MagicMock()
+    bot.send_message = AsyncMock()
+
+    await main._rename_receipt_item(bot, 1, "BIO aln.pfanne", "Frozen mixed veg")
+
+    mock_list.remove_item.assert_not_called()
