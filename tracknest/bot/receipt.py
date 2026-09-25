@@ -8,7 +8,7 @@ import time
 import ollama
 
 from bot.categorize import CATEGORY_NAMES
-from bot.receipt_lines import classify_line
+from bot.receipt_lines import classify_line, clean_name
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,12 @@ _RESPONSE_SCHEMA = {
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": "Item name as printed on the receipt, cleaned up into a readable product name",
+                        "description": (
+                            "Item name as printed on the receipt, cleaned up into a "
+                            "readable product name. Only the product itself — never "
+                            "the quantity, price, or tax-code digit/letter printed "
+                            "beside it."
+                        ),
                     },
                     "quantity": {"type": "integer", "description": "Units purchased"},
                     "unit_price": {"type": "number", "description": "Price per single unit, not the line total"},
@@ -193,6 +198,8 @@ def parse_receipt(image_bytes: bytes, shopping_list_names: list[str]) -> dict:
     )
     result = json.loads(response.message.content)
     lines = result["items"]
+    for line in lines:
+        line["name"] = clean_name(line["name"])
     total_paid = result["total_paid"]
     store = result.get("store") or ""
     # Deposits/discounts still count toward what was paid; info lines

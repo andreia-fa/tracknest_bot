@@ -19,6 +19,17 @@ _INFO = re.compile(
     re.IGNORECASE,
 )
 
+# A bare count in front of the name ("1 Weleda...", "2x Milch", "3 Stk
+# Eier") — the model copies the receipt's quantity/tax-code column into the
+# name. Leading only: a trailing digit or letter is too often real ("Pampers
+# 4", "Vitamin C", "150g").
+_LEADING_COUNT = re.compile(r"^\s*\d+\s*(x|stk\.?)?\s+(?=\S)", re.IGNORECASE)
+
+
+def clean_name(name: str) -> str:
+    """Strip a stray leading quantity from an item name the model read off a receipt."""
+    return _LEADING_COUNT.sub("", name).strip()
+
 
 def classify_line(name: str) -> str:
     """Classify a receipt line by its name.
