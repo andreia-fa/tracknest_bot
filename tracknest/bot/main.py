@@ -877,12 +877,47 @@ def _spare_alert_lead_days(shelf_life_days: int) -> int:
     return min(shelf_life_days, max(1, round(shelf_life_days * 0.15)))
 
 
+def _spare_alert_at(last_purchase: datetime, shelf_life_days: int, quantity: int | None) -> datetime:
+    """When a par=2 item's spare needs buying: shortly before the pack in use is the last one.
+
+    Buying 3 packs means two spares already sit in the cupboard, so the
+    alert waits until the second-to-last one is used up; buying 1 or 2 alerts
+    near the end of the first pack. shelf_life_days is per unit.
+    """
+    packs_before_last = max(1, (quantity or 1) - 1)
+    return last_purchase + timedelta(
+        days=packs_before_last * shelf_life_days - _spare_alert_lead_days(shelf_life_days)
+    )
+
+
+def _spare_alert_text(item: dict, now: datetime) -> str:
+    days_ago = (now - datetime.fromisoformat(item["last_purchase"])).days
+    bought = "today" if days_ago == 0 else f"{days_ago} day{'s' if days_ago != 1 else ''} ago"
+    what = f"{item['name']} ({item['category']})" if item.get("category") else item["name"]
+    qty = item.get("last_quantity") or 1
+    return (
+        f"{what} — you bought {qty}x {bought}, and one usually lasts about "
+        f"{item['shelf_life_days']} days, so you're about to be down to your last one.\n"
+        "You keep a spare of this. Add one to the shopping list?"
+    )
+
+
+def _spare_alert_keyboard(item_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🛒 Add to list", callback_data=f"spare_add:{item_id}")],
+        [InlineKeyboardButton("👍 Still have plenty", callback_data=f"spare_plenty:{item_id}")],
+        [InlineKeyboardButton("✏️ It lasts longer than that", callback_data=f"shelf_edit:{item_id}")],
+        [InlineKeyboardButton("🔕 Stop spare alerts for this", callback_data=f"spare_stop:{item_id}")],
+    ])
+
+
 async def check_spare_stock_alerts(context: ContextTypes.DEFAULT_TYPE):
     """Daily job: for par=2 items, alert ahead of the estimated run-out date so a spare gets bought in time.
 
     Unlike the par=1 check-in (which waits until the estimate says it's
     already out), a par=2 household wants the spare on hand before that
-    point.
+    point. The message shows the reasoning (when it was bought, how long one
+    lasts) so a bad estimate is obvious, with buttons to act on it.
     """
     chat_id = settings.get_chat_id()
     if not chat_id:
@@ -893,15 +928,52 @@ async def check_spare_stock_alerts(context: ContextTypes.DEFAULT_TYPE):
         if not item["last_purchase"]:
             continue
         last = datetime.fromisoformat(item["last_purchase"])
-        lead_days = _spare_alert_lead_days(item["shelf_life_days"])
-        alert_at = last + timedelta(days=item["shelf_life_days"] - lead_days)
-        if now >= alert_at:
+        if now >= _spare_alert_at(last, item["shelf_life_days"], item["last_quantity"]):
             crud.mark_spare_alert_pending(item["name"])
             await context.bot.send_message(
                 chat_id=chat_id,
-                text=f"You're on a keep-a-spare policy for {item['name']} — might be time to "
-                     "add it to your shopping list before the current one runs out.",
+                text=_spare_alert_text(item, now),
+                reply_markup=_spare_alert_keyboard(item["id"]),
             )
+
+
+_SPARE_PLENTY_MIN_EXTEND_DAYS = 3
+
+
+async def handle_spare_alert_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the buttons under a keep-a-spare alert.
+
+    "Add to list" leaves the alert pending — the next purchase clears it.
+    "Still have plenty" means the estimate was too short: stretch it by a
+    quarter (at least a few days) and restart the cycle from the new
+    estimate. "Stop" switches just this item to replace-when-low.
+    """
+    query = update.callback_query
+    await query.answer()
+    action, item_id = query.data.split(":", 1)
+    item = crud.get_item_by_id(int(item_id))
+    if not item:
+        await query.edit_message_text("That item no longer exists.")
+        return
+    name = item["name"]
+    if action == "spare_add":
+        shopping_list.add_item(name, 1, category=item.get("category") or infer_category(name))
+        await query.edit_message_text(f"Added {name} to your shopping list.")
+    elif action == "spare_plenty":
+        extend = max(_SPARE_PLENTY_MIN_EXTEND_DAYS, round(item["shelf_life_days"] * 0.25))
+        crud.bump_shelf_life(name, extend)
+        crud.mark_spare_alert_pending(name, pending=False)
+        await query.edit_message_text(
+            f"Got it — {name} now counts as lasting about {item['shelf_life_days'] + extend} days "
+            "each. I'll check again later.",
+            reply_markup=_shelf_change_keyboard(item["id"]),
+        )
+    elif action == "spare_stop":
+        crud.set_par_level(name, 1)
+        crud.mark_spare_alert_pending(name, pending=False)
+        await query.edit_message_text(
+            f"No more spare alerts for {name} — you'll just get a check-in once it's probably run out."
+        )
 
 
 _BUDGET_ALERT_THRESHOLDS = (100, 80)
@@ -1270,6 +1342,7 @@ async def main():
     app.add_handler(CallbackQueryHandler(handle_profile_shelf_choice, pattern=r"^profile_shelf:"))
     app.add_handler(CallbackQueryHandler(handle_shelf_edit, pattern=r"^shelf_edit:"))
     app.add_handler(CallbackQueryHandler(handle_shelf_set, pattern=r"^shelf_set:"))
+    app.add_handler(CallbackQueryHandler(handle_spare_alert_choice, pattern=r"^spare_(add|plenty|stop):"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_error_handler(handle_error)
