@@ -38,13 +38,41 @@ def test_log_expense_shortens_shelf_life_on_early_repurchase(mock_conn):
     mock_conn.return_value = conn
     three_days_ago = (datetime.now(tz=timezone.utc) - timedelta(days=3)).isoformat()
     cursor.fetchone.side_effect = [
-        {"id": 1, "shelf_life_days": 10, "purchase_type": "essential"},
-        {"logged_at": three_days_ago},
+        {"id": 1, "shelf_life_days": 10, "purchase_type": "essential", "par_level": 1},
+        {"logged_at": three_days_ago, "quantity_purchased": 1},
     ]
     expenses.log_expense("Spinach", 1, 1.11)
     update_calls = [c for c in cursor.execute.call_args_list if "SET shelf_life_days = ?" in c[0][0]]
     assert len(update_calls) == 1
-    assert update_calls[0][0][1][0] == 3
+    assert update_calls[0][0][1][0] == 6  # halfway from 10 towards 3, not a jump to 3
+
+
+@patch("db.expenses.get_connection")
+def test_log_expense_counts_quantity_of_prior_purchase(mock_conn):
+    """Two packs gone in 8 days is 4 days a pack."""
+    conn, cursor = make_mock_conn()
+    mock_conn.return_value = conn
+    eight_days_ago = (datetime.now(tz=timezone.utc) - timedelta(days=8)).isoformat()
+    cursor.fetchone.side_effect = [
+        {"id": 1, "shelf_life_days": 10, "purchase_type": "essential", "par_level": 1},
+        {"logged_at": eight_days_ago, "quantity_purchased": 2},
+    ]
+    expenses.log_expense("Spinach", 1, 1.11)
+    update_calls = [c for c in cursor.execute.call_args_list if "SET shelf_life_days = ?" in c[0][0]]
+    assert update_calls[0][0][1][0] == 7
+
+
+@patch("db.expenses.get_connection")
+def test_log_expense_keeps_shelf_life_for_keep_a_spare_items(mock_conn):
+    """Buying the spare early is the par-2 policy working, not a sign the item runs out faster."""
+    conn, cursor = make_mock_conn()
+    mock_conn.return_value = conn
+    cursor.fetchone.side_effect = [
+        {"id": 1, "shelf_life_days": 30, "purchase_type": "essential", "par_level": 2},
+    ]
+    expenses.log_expense("Leerdammer", 1, 2.99)
+    update_calls = [c for c in cursor.execute.call_args_list if "SET shelf_life_days = ?" in c[0][0]]
+    assert len(update_calls) == 0
 
 
 @patch("db.expenses.get_connection")
