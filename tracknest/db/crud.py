@@ -155,8 +155,26 @@ def set_par_level(name, level):
     return affected > 0
 
 
+# The most recent purchase of anything that is the same product as item i —
+# a need is covered by any brand of it, so Gouda bought yesterday means the
+# household has cheese even if Leerdammer ran out. Items without a known
+# product stand alone (keyed by their name).
+_LATEST_PRODUCT_PURCHASE_JOIN = """
+    LEFT JOIN item_expenses e ON e.id = (
+        SELECT e2.id FROM item_expenses e2
+        JOIN inventory_items i2 ON i2.id = e2.item_id
+        WHERE COALESCE(i2.product, i2.name) = COALESCE(i.product, i.name)
+        ORDER BY e2.logged_at DESC, e2.id DESC LIMIT 1
+    )
+"""
+
+
 def get_par_alert_candidates(default_par_level):
     """Return essential, profiled items on a par=2 policy eligible for a spare-stock alert.
+
+    Reasoned per product: only the most recently bought item of each product
+    is a candidate, timed from that purchase, so one product never alerts
+    twice and a fresh purchase of another brand quiets the alert.
 
     Mirrors get_checkin_candidates, but only for items whose effective par
     level (per-item override, or the household default) is 2 — a par=1 item
@@ -164,33 +182,37 @@ def get_par_alert_candidates(default_par_level):
     luxury (no consumption schedule) and necessity (same-day, never stocked)
     purchase types, any item that lasts a day or less — its "run out
     soon" point is the moment it's bought, so the alert would only be noise —
-    and anything already on the shopping list, since that's what the alert
-    would ask for.
+    and anything already on the shopping list (by name or product), since
+    that's what the alert would ask for.
 
     Args:
         default_par_level: The household's default par level, used for any
             item without a per-item override.
 
     Returns:
-        List of dicts: id, name, category, shelf_life_days, last_purchase (ISO
-        datetime of the most recent expense's logged_at, or None if never
-        purchased) and last_quantity (units bought that time, or None).
+        List of dicts: id, name, product, category, shelf_life_days,
+        last_purchase (ISO datetime of the product's most recent expense, or
+        None if never purchased) and last_quantity (units bought that time).
     """
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("""
-        SELECT i.id, i.name, i.category, i.shelf_life_days,
+    cursor.execute(f"""
+        SELECT i.id, i.name, i.product, i.category, i.shelf_life_days,
                e.logged_at AS last_purchase, e.quantity_purchased AS last_quantity
         FROM inventory_items i
-        LEFT JOIN item_expenses e ON e.id = (
-            SELECT id FROM item_expenses WHERE item_id = i.id ORDER BY logged_at DESC, id DESC LIMIT 1
-        )
+        {_LATEST_PRODUCT_PURCHASE_JOIN}
         WHERE i.purchase_type = 'essential'
           AND i.shelf_life_days IS NOT NULL
           AND i.shelf_life_days > 1
           AND i.spare_alert_pending = 0
           AND COALESCE(i.par_level, ?) >= 2
-          AND NOT EXISTS (SELECT 1 FROM shopping_list_items s WHERE s.name = i.name COLLATE NOCASE)
+          AND (e.id IS NULL OR e.item_id = i.id)
+          AND NOT EXISTS (
+              -- Not "s.name = ... COLLATE NOCASE OR ...": SQLite 3.45 answers that
+              -- wrongly against the unique index on s.name.
+              SELECT 1 FROM shopping_list_items s
+              WHERE lower(s.name) IN (lower(i.name), lower(COALESCE(i.product, i.name)))
+          )
     """, (default_par_level,))
     rows = cursor.fetchall()
     cursor.close()
@@ -229,22 +251,26 @@ def get_checkin_candidates():
     treat bought on mood/budget rather than a consumption schedule) and
     necessity items (same-day-consumed, never actually stocked, so there's
     nothing to check in on), items with no shelf-life estimate yet, and
-    items with one already pending.
+    items with one already pending. Like the spare alert, it's reasoned per
+    product: only the most recently bought item of each product is asked
+    about, timed from that purchase.
 
     Returns:
-        List of dicts: name, shelf_life_days, last_purchase (ISO datetime of
-        the most recent expense's logged_at, or None if never purchased).
+        List of dicts: name, product, shelf_life_days, last_purchase (ISO
+        datetime of the product's most recent expense, or None if never
+        purchased).
     """
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("""
-        SELECT i.name, i.shelf_life_days,
-               (SELECT MAX(e.logged_at) FROM item_expenses e WHERE e.item_id = i.id) AS last_purchase
+    cursor.execute(f"""
+        SELECT i.name, i.product, i.shelf_life_days, e.logged_at AS last_purchase
         FROM inventory_items i
+        {_LATEST_PRODUCT_PURCHASE_JOIN}
         WHERE i.purchase_type = 'essential'
           AND i.shelf_life_days IS NOT NULL
           AND i.shelf_life_days > 0
           AND i.checkin_pending = 0
+          AND (e.id IS NULL OR e.item_id = i.id)
     """)
     rows = cursor.fetchall()
     cursor.close()
@@ -507,3 +533,35 @@ def set_item_product(name, product):
     conn.commit()
     cursor.close()
     conn.close()
+
+
+def copy_product_profile(name, product):
+    """Give an item the profile its product already has from another brand.
+
+    A new cheese needs no questions if another cheese was already profiled:
+    purchase type, shelf life and keep-a-spare policy are properties of the
+    need, not the brand. Only fields the item doesn't have yet are filled.
+
+    Returns:
+        True if another item of that product had a profile to copy.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT purchase_type, shelf_life_days, par_level FROM inventory_items
+        WHERE product = ? AND name != ? AND purchase_type IS NOT NULL
+        ORDER BY (shelf_life_days IS NULL), id DESC LIMIT 1
+    """, (product, name))
+    source = cursor.fetchone()
+    if source:
+        cursor.execute("""
+            UPDATE inventory_items
+            SET purchase_type = COALESCE(purchase_type, ?),
+                shelf_life_days = COALESCE(shelf_life_days, ?),
+                par_level = COALESCE(par_level, ?)
+            WHERE name = ?
+        """, (source["purchase_type"], source["shelf_life_days"], source["par_level"], name))
+        conn.commit()
+    cursor.close()
+    conn.close()
+    return source is not None

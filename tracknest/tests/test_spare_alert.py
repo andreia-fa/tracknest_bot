@@ -6,12 +6,13 @@ import pytest
 from bot import main
 
 NOW = datetime(2026, 9, 25, 12, tzinfo=timezone.utc)
-CHEESE = {"id": 4, "name": "Leerdammer", "category": "Dairy", "shelf_life_days": 20}
+CHEESE = {"id": 4, "name": "LEERDAMMER CAR", "product": "cheese", "category": "Dairy", "shelf_life_days": 20}
 
 
 def _candidate(days_ago, quantity=1, shelf_life_days=20):
     return {
-        "id": 4, "name": "Leerdammer", "category": "Dairy", "shelf_life_days": shelf_life_days,
+        "id": 4, "name": "LEERDAMMER CAR", "product": "cheese", "category": "Dairy",
+        "shelf_life_days": shelf_life_days,
         "last_purchase": (NOW - timedelta(days=days_ago)).isoformat(), "last_quantity": quantity,
     }
 
@@ -37,8 +38,8 @@ def test_alert_waits_for_spares_already_bought():
 
 def test_alert_text_shows_its_reasoning():
     text = main._spare_alert_text(_candidate(days_ago=18), NOW)
-    assert "Leerdammer (Dairy)" in text
-    assert "18 days ago" in text
+    assert text.startswith("Cheese — you last bought 1x LEERDAMMER CAR 18 days ago")
+    assert "spare of cheese" in text
     assert "20 days" in text
 
 
@@ -73,7 +74,7 @@ async def test_alert_near_run_out_comes_with_buttons(mock_crud, mock_settings, m
 
     await main.check_spare_stock_alerts(context)
 
-    mock_crud.mark_spare_alert_pending.assert_called_once_with("Leerdammer")
+    mock_crud.mark_spare_alert_pending.assert_called_once_with("LEERDAMMER CAR")
     markup = context.bot.send_message.call_args.kwargs["reply_markup"]
     assert _buttons(markup) == ["spare_add:4", "spare_plenty:4", "shelf_edit:4", "spare_stop:4"]
 
@@ -84,7 +85,7 @@ async def test_alert_near_run_out_comes_with_buttons(mock_crud, mock_settings, m
 async def test_add_to_list(mock_crud, mock_list):
     mock_crud.get_item_by_id.return_value = CHEESE
     await main.handle_spare_alert_choice(_callback_update("spare_add:4"), MagicMock())
-    mock_list.add_item.assert_called_once_with("Leerdammer", 1, category="Dairy")
+    mock_list.add_item.assert_called_once_with("cheese", 1, category="Dairy")
 
 
 @pytest.mark.asyncio
@@ -92,8 +93,8 @@ async def test_add_to_list(mock_crud, mock_list):
 async def test_still_have_plenty_stretches_the_estimate(mock_crud):
     mock_crud.get_item_by_id.return_value = CHEESE
     await main.handle_spare_alert_choice(_callback_update("spare_plenty:4"), MagicMock())
-    mock_crud.bump_shelf_life.assert_called_once_with("Leerdammer", 5)
-    mock_crud.mark_spare_alert_pending.assert_called_once_with("Leerdammer", pending=False)
+    mock_crud.bump_shelf_life.assert_called_once_with("LEERDAMMER CAR", 5)
+    mock_crud.mark_spare_alert_pending.assert_called_once_with("LEERDAMMER CAR", pending=False)
 
 
 @pytest.mark.asyncio
@@ -101,4 +102,4 @@ async def test_still_have_plenty_stretches_the_estimate(mock_crud):
 async def test_stop_switches_item_to_replace_when_low(mock_crud):
     mock_crud.get_item_by_id.return_value = CHEESE
     await main.handle_spare_alert_choice(_callback_update("spare_stop:4"), MagicMock())
-    mock_crud.set_par_level.assert_called_once_with("Leerdammer", 1)
+    mock_crud.set_par_level.assert_called_once_with("LEERDAMMER CAR", 1)

@@ -38,7 +38,7 @@ def test_log_expense_shortens_shelf_life_on_early_repurchase(mock_conn):
     mock_conn.return_value = conn
     three_days_ago = (datetime.now(tz=timezone.utc) - timedelta(days=3)).isoformat()
     cursor.fetchone.side_effect = [
-        {"id": 1, "shelf_life_days": 10, "purchase_type": "essential", "par_level": 1},
+        {"id": 1, "shelf_life_days": 10, "purchase_type": "essential", "par_level": 1, "product_key": "spinach"},
         {"logged_at": three_days_ago, "quantity_purchased": 1},
     ]
     expenses.log_expense("Spinach", 1, 1.11)
@@ -54,7 +54,7 @@ def test_log_expense_counts_quantity_of_prior_purchase(mock_conn):
     mock_conn.return_value = conn
     eight_days_ago = (datetime.now(tz=timezone.utc) - timedelta(days=8)).isoformat()
     cursor.fetchone.side_effect = [
-        {"id": 1, "shelf_life_days": 10, "purchase_type": "essential", "par_level": 1},
+        {"id": 1, "shelf_life_days": 10, "purchase_type": "essential", "par_level": 1, "product_key": "spinach"},
         {"logged_at": eight_days_ago, "quantity_purchased": 2},
     ]
     expenses.log_expense("Spinach", 1, 1.11)

@@ -260,3 +260,19 @@ def test_rename_item_plain_rename_asks_category_next(mock_conn):
     statements = [c[0][0] for c in cursor.execute.call_args_list]
     assert any("name_status = 'category'" in sql for sql in statements)
     assert any("UPDATE item_aliases SET canonical_name" in sql for sql in statements)
+
+
+@patch("db.crud.get_connection")
+def test_copy_product_profile_fills_gaps_from_another_brand(mock_conn):
+    conn, cursor = make_mock_conn(fetchone={"purchase_type": "essential", "shelf_life_days": 20, "par_level": 2})
+    mock_conn.return_value = conn
+    assert crud.copy_product_profile("K-Classic Gouda jung", "cheese") is True
+    assert cursor.execute.call_args[0][1] == ("essential", 20, 2, "K-Classic Gouda jung")
+
+
+@patch("db.crud.get_connection")
+def test_copy_product_profile_nothing_to_copy(mock_conn):
+    conn, cursor = make_mock_conn(fetchone=None)
+    mock_conn.return_value = conn
+    assert crud.copy_product_profile("PUSH UP", "bra") is False
+    assert cursor.execute.call_count == 1

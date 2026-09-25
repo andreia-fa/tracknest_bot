@@ -364,10 +364,14 @@ async def _handle_profile_answer(update: Update, context: ContextTypes.DEFAULT_T
 async def _confirm_product(bot, chat_id: int, receipt_name: str, product: str) -> None:
     """Save what a new receipt item generically is, and remember it for that wording.
 
-    Then re-guess the category from the product ("bra" says far more than
-    "PUSH UP" did) so the category question arrives pre-ticked — one tap.
+    A product the household already buys under another brand lends this
+    item its profile (purchase type, shelf life, spare policy), so those
+    questions are skipped. Then re-guess the category from the product
+    ("bra" says far more than "PUSH UP" did) so the category question
+    arrives pre-ticked — one tap.
     """
     crud.set_item_product(receipt_name, product)
+    crud.copy_product_profile(receipt_name, product)
     crud.keep_item_name(receipt_name)
     item = crud.get_item(receipt_name)
     guess = infer_category(product)
@@ -884,7 +888,8 @@ async def check_expiring_items(context: ContextTypes.DEFAULT_TYPE):
             crud.mark_checkin_pending(item["name"])
             await context.bot.send_message(
                 chat_id=chat_id,
-                text=f"Quick check — does {item['name']} still last, or did it run out? Reply 'yes' or 'no'.",
+                text=f"Quick check — do you still have {_need_name(item)} ({item['name']}), or did it "
+                     "run out? Reply 'yes' or 'no'.",
             )
 
 
@@ -906,15 +911,21 @@ def _spare_alert_at(last_purchase: datetime, shelf_life_days: int, quantity: int
     )
 
 
+def _need_name(item: dict) -> str:
+    """What the household needs, brand aside: the product if known, else the item's own name."""
+    return item.get("product") or item["name"]
+
+
 def _spare_alert_text(item: dict, now: datetime) -> str:
     days_ago = (now - datetime.fromisoformat(item["last_purchase"])).days
     bought = "today" if days_ago == 0 else f"{days_ago} day{'s' if days_ago != 1 else ''} ago"
-    what = f"{item['name']} ({item['category']})" if item.get("category") else item["name"]
     qty = item.get("last_quantity") or 1
+    need = _need_name(item)
     return (
-        f"{what} — you bought {qty}x {bought}, and one usually lasts about "
-        f"{item['shelf_life_days']} days, so you're about to be down to your last one.\n"
-        "You keep a spare of this. Add one to the shopping list?"
+        f"{need.capitalize()} — you last bought {qty}x {item['name']} {bought}, and one "
+        f"usually lasts about {item['shelf_life_days']} days, so you're about to be down to "
+        "your last one.\n"
+        f"You keep a spare of {need}. Add it to the shopping list?"
     )
 
 
@@ -973,8 +984,9 @@ async def handle_spare_alert_choice(update: Update, context: ContextTypes.DEFAUL
         return
     name = item["name"]
     if action == "spare_add":
-        shopping_list.add_item(name, 1, category=item.get("category") or infer_category(name))
-        await query.edit_message_text(f"Added {name} to your shopping list.")
+        need = _need_name(item)
+        shopping_list.add_item(need, 1, category=item.get("category") or infer_category(need))
+        await query.edit_message_text(f"Added {need} to your shopping list.")
     elif action == "spare_plenty":
         extend = max(_SPARE_PLENTY_MIN_EXTEND_DAYS, round(item["shelf_life_days"] * 0.25))
         crud.bump_shelf_life(name, extend)

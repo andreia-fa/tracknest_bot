@@ -9,7 +9,8 @@ def log_expense(item_name, quantity_purchased, unit_price, store=None):
     """Record a purchase for an existing inventory item.
 
     For an essential item with a known shelf-life estimate, if this purchase
-    comes sooner than the last one should have lasted (per unit bought), the
+    comes sooner than the last one of the same product (any brand) should
+    have lasted (per unit bought), the
     estimate is nudged halfway towards the actual gap — one early trip
     shouldn't collapse it. Items on a keep-a-spare policy (par 2) are exempt:
     buying before running out is exactly what that policy asks for, so an
@@ -33,7 +34,7 @@ def log_expense(item_name, quantity_purchased, unit_price, store=None):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT id, shelf_life_days, purchase_type,
+        SELECT id, shelf_life_days, purchase_type, COALESCE(product, name) AS product_key,
                COALESCE(par_level,
                         (SELECT CAST(value AS INTEGER) FROM bot_settings WHERE key = 'default_par_level'),
                         1) AS par_level
@@ -47,11 +48,13 @@ def log_expense(item_name, quantity_purchased, unit_price, store=None):
     now = datetime.now(tz=timezone.utc)
 
     if item["shelf_life_days"] and item["purchase_type"] == "essential" and item["par_level"] < 2:
-        cursor.execute(
-            "SELECT logged_at, quantity_purchased FROM item_expenses "
-            "WHERE item_id = ? ORDER BY logged_at DESC LIMIT 1",
-            (item["id"],)
-        )
+        # Any brand of the same product counts as the previous purchase.
+        cursor.execute("""
+            SELECT e.logged_at, e.quantity_purchased FROM item_expenses e
+            JOIN inventory_items i ON i.id = e.item_id
+            WHERE COALESCE(i.product, i.name) = ?
+            ORDER BY e.logged_at DESC LIMIT 1
+        """, (item["product_key"],))
         prior = cursor.fetchone()
         if prior and prior["logged_at"]:
             gap_days = (now - datetime.fromisoformat(prior["logged_at"])).days
