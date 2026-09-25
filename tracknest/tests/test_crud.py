@@ -257,4 +257,6 @@ def test_rename_item_plain_rename_asks_category_next(mock_conn):
     cursor.fetchone.side_effect = [{"id": 2, "quantity": 1}, None]
     mock_conn.return_value = conn
     assert crud.rename_item("BIO aln.pfanne", "Frozen mixed veg") == ("Frozen mixed veg", False)
-    assert "name_status = 'category'" in cursor.execute.call_args_list[-1][0][0]
+    statements = [c[0][0] for c in cursor.execute.call_args_list]
+    assert any("name_status = 'category'" in sql for sql in statements)
+    assert any("UPDATE item_aliases SET canonical_name" in sql for sql in statements)

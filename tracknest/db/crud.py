@@ -456,6 +456,9 @@ def rename_item(old_name, new_name):
             (new_name, old["id"]),
         )
         final_name, merged = new_name, False
+    # Receipt wordings already mapped to the old name follow it, so the next
+    # receipt doesn't recreate the item under its old name.
+    cursor.execute("UPDATE item_aliases SET canonical_name = ? WHERE canonical_name = ?", (final_name, old_name))
     conn.commit()
     cursor.close()
     conn.close()

@@ -136,6 +136,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "  /total_spent [item_name] — Total amount spent\n"
         "  /par_level [item_name] <1|2> — 1 = replace when low, 2 = always "
         "keep a spare. No item name sets the household default.\n"
+        "  /rename <old name> = <new name> — Give an item a readable name\n"
         "  /set_budget <amount> — Set a monthly spending budget\n"
         "  /set_goal — Optional: walks you through setting a savings goal "
         "(name, amount, date), shown in /report\n"
@@ -1025,6 +1026,33 @@ async def par_level_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Item '{name}' not found.")
 
 
+async def rename_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /rename <old name> = <new name> — give an item a readable name at any time.
+
+    Receipt abbreviations ("LEERDAMMER CAR") stick once the naming question
+    has passed. The old wording is remembered as an alias so future receipts
+    land on the new name, and the item's category and profile carry over.
+    """
+    old_name, sep, new_name = " ".join(context.args).partition("=")
+    old_name, new_name = old_name.strip(), new_name.strip()
+    if not sep or not old_name or not new_name:
+        await update.message.reply_text("Usage: /rename <old name> = <new name>")
+        return
+    item = crud.get_item(old_name)
+    if not item:
+        await update.message.reply_text(f"Item '{old_name}' not found — see /list_items for exact names.")
+        return
+    final_name, merged = crud.rename_item(old_name, new_name)
+    if not merged and item["category"]:
+        crud.set_item_category(final_name, item["category"])
+    crud.save_alias(old_name, final_name, item["category"])
+    if merged:
+        await update.message.reply_text(f"Merged '{old_name}' into your existing {final_name}.")
+    else:
+        await update.message.reply_text(f"Renamed '{old_name}' to {final_name}.")
+        await send_pending_profile_question(context.bot, update.effective_chat.id)
+
+
 async def set_budget_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /set_budget <amount> — set the household's monthly spending budget."""
     args = context.args
@@ -1328,6 +1356,7 @@ async def main():
     app.add_handler(CommandHandler("my_expenses", my_expenses))
     app.add_handler(CommandHandler("total_spent", total_spent))
     app.add_handler(CommandHandler("par_level", par_level_cmd))
+    app.add_handler(CommandHandler("rename", rename_cmd))
     app.add_handler(CommandHandler("set_budget", set_budget_cmd))
     app.add_handler(CommandHandler("set_goal", set_goal_cmd))
     app.add_handler(CommandHandler("report", report))

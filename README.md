@@ -22,6 +22,8 @@ It helps you manage home inventory and track household expenses through a conver
 - ✅ `/list_items` – Show current inventory
 - ✅ `/remove_item <name>` – Remove an item
 - ✅ `/update_item <name> <qty>` – Set item quantity to an absolute value
+- ✅ `/rename <old name> = <new name>` – Give an item a readable name (e.g. a receipt
+  abbreviation); future receipts with the old wording land on the new name
 - ✅ `/par_level [item_name] <1|2>` – Household replenishment policy: 1 = replace
   right when an item runs low, 2 = always keep a spare on hand. No item name
   sets the household-wide default; with an item name, overrides it for that item.

@@ -96,3 +96,38 @@ async def test_change_on_a_deleted_item(mock_crud):
 
     mock_crud.set_profile.assert_not_called()
     update.callback_query.edit_message_text.assert_called_once_with("That item no longer exists.")
+
+
+def _command_update():
+    update = MagicMock()
+    update.message.reply_text = AsyncMock()
+    return update
+
+
+@pytest.mark.asyncio
+@patch("bot.main.send_pending_profile_question", new_callable=AsyncMock)
+@patch("bot.main.crud")
+async def test_rename_keeps_category_and_remembers_receipt_wording(mock_crud, _mock_ask):
+    mock_crud.get_item.return_value = {"id": 4, "name": "LEERDAMMER CAR", "category": "Dairy"}
+    mock_crud.rename_item.return_value = ("Leerdammer Caractère", False)
+    context = MagicMock()
+    context.args = ["LEERDAMMER", "CAR", "=", "Leerdammer", "Caractère"]
+
+    await main.rename_cmd(_command_update(), context)
+
+    mock_crud.rename_item.assert_called_once_with("LEERDAMMER CAR", "Leerdammer Caractère")
+    mock_crud.set_item_category.assert_called_once_with("Leerdammer Caractère", "Dairy")
+    mock_crud.save_alias.assert_called_once_with("LEERDAMMER CAR", "Leerdammer Caractère", "Dairy")
+
+
+@pytest.mark.asyncio
+@patch("bot.main.crud")
+async def test_rename_needs_an_equals_sign(mock_crud):
+    update = _command_update()
+    context = MagicMock()
+    context.args = ["LEERDAMMER", "CAR", "Leerdammer"]
+
+    await main.rename_cmd(update, context)
+
+    mock_crud.rename_item.assert_not_called()
+    assert "Usage" in update.message.reply_text.call_args[0][0]
