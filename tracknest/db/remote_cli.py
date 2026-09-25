@@ -13,7 +13,7 @@ import json
 import sys
 
 from config import BOT_TOKEN
-from db import receipt_queue, shopping_list
+from db import crud, receipt_queue, settings, shopping_list
 from telegram import Bot
 
 
@@ -29,6 +29,17 @@ async def _finish_receipt(args: dict) -> dict:
     return {"ok": True}
 
 
+async def _suggest_products(args: dict) -> dict:
+    """Store product guesses for existing items, then ask about the first one."""
+    from bot.main import send_pending_profile_question
+
+    updated = [name for name, product in args["guesses"].items() if crud.suggest_product(name, product)]
+    chat_id = settings.get_chat_id()
+    if updated and chat_id:
+        await send_pending_profile_question(Bot(token=BOT_TOKEN), chat_id)
+    return {"updated": len(updated)}
+
+
 async def _fail_receipt(args: dict) -> dict:
     """Resolve a queue entry as failed and let the chat know."""
     receipt_queue.resolve_receipt(args["receipt_id"], status="failed")
@@ -42,10 +53,12 @@ async def _fail_receipt(args: dict) -> dict:
 _SYNC_OPS = {
     "get_pending_receipts": lambda args: receipt_queue.get_pending_receipts(),
     "get_shopping_list_names": lambda args: [i["name"] for i in shopping_list.get_all_items()],
+    "get_items_without_product": lambda args: crud.get_items_without_product(),
 }
 _ASYNC_OPS = {
     "finish_receipt": _finish_receipt,
     "fail_receipt": _fail_receipt,
+    "suggest_products": _suggest_products,
 }
 
 

@@ -366,19 +366,24 @@ async def _confirm_product(bot, chat_id: int, receipt_name: str, product: str) -
 
     A product the household already buys under another brand lends this
     item its profile (purchase type, shelf life, spare policy), so those
-    questions are skipped. Then re-guess the category from the product
-    ("bra" says far more than "PUSH UP" did) so the category question
-    arrives pre-ticked — one tap.
+    questions are skipped. The category is re-guessed from the product
+    ("bra" says far more than "PUSH UP" did): an already-profiled item just
+    takes it, a new one gets the category question pre-ticked — one tap.
     """
     crud.set_item_product(receipt_name, product)
     crud.copy_product_profile(receipt_name, product)
-    crud.keep_item_name(receipt_name)
-    item = crud.get_item(receipt_name)
+    item = crud.get_item(receipt_name) or {}
     guess = infer_category(product)
-    if guess != "Other":
-        crud.set_item_category(receipt_name, guess)
-        crud.keep_item_name(receipt_name)  # set_item_category finished naming; reopen it for the tap
-    crud.save_alias(receipt_name, receipt_name, guess if guess != "Other" else (item or {}).get("category"), product)
+    category = guess if guess != "Other" else item.get("category")
+    if item.get("purchase_type") and category:
+        # Already profiled (an existing item, or one that inherited its
+        # product's profile): nothing left to ask.
+        crud.set_item_category(receipt_name, category)
+    else:
+        if guess != "Other":
+            crud.set_item_category(receipt_name, guess)
+        crud.keep_item_name(receipt_name)  # ask the category next, pre-ticked
+    crud.save_alias(receipt_name, receipt_name, category, product)
     await _clear_list_entry_for_named_item(bot, chat_id, receipt_name, product)
     await send_pending_profile_question(bot, chat_id)
 

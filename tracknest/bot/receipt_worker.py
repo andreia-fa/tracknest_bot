@@ -12,7 +12,7 @@ import json
 import logging
 import subprocess
 
-from bot.receipt import parse_receipt
+from bot.receipt import guess_products, parse_receipt
 from config import BOT_TOKEN
 from telegram import Bot
 
@@ -22,6 +22,7 @@ _SSH_HOST = "oracle-tracknest"
 _CONTAINER = "tracknest-bot"
 _POLL_INTERVAL_SECONDS = 60
 _SSH_TIMEOUT_SECONDS = 30
+_PRODUCT_GUESS_BATCH = 15
 
 
 def _remote_call(op: str, args: dict | None = None):
@@ -69,10 +70,30 @@ async def _process_one(bot: Bot, receipt: dict):
     logger.info("Receipt %s processed and logged.", receipt_id)
 
 
+async def _backfill_products():
+    """Guess products for items logged before products existed, one batch per idle cycle.
+
+    The guesses only queue questions — each is confirmed by the user — and
+    an item leaves the backlog as soon as it's queued, so this stops by
+    itself once everything has been through it.
+    """
+    names = _remote_call("get_items_without_product")[:_PRODUCT_GUESS_BATCH]
+    if not names:
+        return
+    guesses = await asyncio.to_thread(guess_products, names)
+    # Anything the model skipped still gets asked, just without a guess.
+    guesses = {name: guesses.get(name, "") for name in names}
+    result = _remote_call("suggest_products", {"guesses": guesses})
+    logger.info("Queued product questions for %d existing item(s).", result["updated"])
+
+
 async def run_once(bot: Bot):
-    """Process every receipt currently queued, oldest first."""
-    for receipt in _remote_call("get_pending_receipts"):
+    """Process every receipt currently queued, oldest first; when idle, backfill products."""
+    receipts = _remote_call("get_pending_receipts")
+    for receipt in receipts:
         await _process_one(bot, receipt)
+    if not receipts:
+        await _backfill_products()
 
 
 async def main():

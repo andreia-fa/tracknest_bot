@@ -276,3 +276,21 @@ def test_copy_product_profile_nothing_to_copy(mock_conn):
     mock_conn.return_value = conn
     assert crud.copy_product_profile("PUSH UP", "bra") is False
     assert cursor.execute.call_count == 1
+
+
+@patch("db.crud.get_connection")
+def test_suggest_product_only_touches_unasked_items(mock_conn):
+    conn, cursor = make_mock_conn(rowcount=1)
+    mock_conn.return_value = conn
+    assert crud.suggest_product("LEERDAMMER CAR", "cheese") is True
+    sql, params = cursor.execute.call_args[0]
+    assert "product IS NULL AND name_status IS NULL" in sql
+    assert params == ("cheese", "LEERDAMMER CAR")
+
+
+@patch("db.crud.get_connection")
+def test_suggest_product_empty_guess_stores_null(mock_conn):
+    conn, cursor = make_mock_conn(rowcount=1)
+    mock_conn.return_value = conn
+    crud.suggest_product("PUSH UP", "")
+    assert cursor.execute.call_args[0][1] == (None, "PUSH UP")

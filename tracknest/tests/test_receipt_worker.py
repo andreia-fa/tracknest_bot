@@ -130,3 +130,34 @@ def test_remote_call_sends_args_over_stdin_not_argv():
             "python", "-m", "db.remote_cli", "finish_receipt",
         ]
         assert called_kwargs["input"] == json.dumps({"receipt_id": 1, "chat_id": 42})
+
+
+@pytest.mark.asyncio
+@patch("bot.receipt_worker.guess_products")
+@patch("bot.receipt_worker._remote_call")
+async def test_idle_cycle_queues_product_guesses_for_existing_items(mock_remote_call, mock_guess):
+    mock_remote_call.side_effect = lambda op, args=None: {
+        "get_pending_receipts": [],
+        "get_items_without_product": ["LEERDAMMER CAR", "PUSH UP"],
+        "suggest_products": {"updated": 2},
+    }[op]
+    mock_guess.return_value = {"LEERDAMMER CAR": "cheese"}
+
+    await receipt_worker.run_once(MagicMock())
+
+    suggest = [c for c in mock_remote_call.call_args_list if c[0][0] == "suggest_products"][0]
+    assert suggest[0][1] == {"guesses": {"LEERDAMMER CAR": "cheese", "PUSH UP": ""}}
+
+
+@pytest.mark.asyncio
+@patch("bot.receipt_worker.guess_products")
+@patch("bot.receipt_worker._process_one", new_callable=AsyncMock)
+@patch("bot.receipt_worker._remote_call")
+async def test_receipts_come_before_the_backfill(mock_remote_call, _process, mock_guess):
+    mock_remote_call.side_effect = lambda op, args=None: {
+        "get_pending_receipts": [{"id": 1}],
+    }[op]
+
+    await receipt_worker.run_once(MagicMock())
+
+    mock_guess.assert_not_called()

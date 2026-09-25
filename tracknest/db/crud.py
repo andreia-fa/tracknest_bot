@@ -565,3 +565,38 @@ def copy_product_profile(name, product):
     cursor.close()
     conn.close()
     return source is not None
+
+
+def get_items_without_product():
+    """Return names of settled items whose product was never worked out (logged before products existed)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM inventory_items WHERE product IS NULL AND name_status IS NULL ORDER BY id")
+    rows = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    return [r["name"] for r in rows]
+
+
+def suggest_product(name, product):
+    """Store a model's product guess for an existing item and queue the what-is-it question.
+
+    The guess goes into product (shown as a one-tap "✓ Yes, cheese") and the
+    item re-enters the naming stage, so it gets asked like a new receipt
+    item. An empty guess queues the question without one. Only touches items
+    still without a product and not mid-question, so a repeated run is a no-op.
+
+    Returns:
+        True if the item was updated.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE inventory_items SET product = ?, name_status = 'name'
+        WHERE name = ? AND product IS NULL AND name_status IS NULL
+    """, (product or None, name))
+    affected = cursor.rowcount
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return affected > 0

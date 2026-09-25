@@ -20,6 +20,17 @@ _RECONCILE_TOLERANCE = 0.02
 # reads that instead — items then sum to exactly total_paid × (1 + rate).
 _VAT_RATES = (0.07, 0.19)
 
+_PRODUCT_RULES = (
+    "The most general everyday word for this item, lowercase English, as "
+    "someone would write it on a shopping list. Drop brand, variety, flavour, "
+    "fat level, age and size: any variety of cheese is 'cheese', any pasta "
+    "shape is 'pasta', any cow's milk is 'milk' — but a different thing stays "
+    "different (oat milk is 'oat milk', not 'milk'). Brands are not products: "
+    "'LEERDAMMER CAR' -> 'cheese', 'Rama Original' -> 'margarine', 'Tempo "
+    "Taschent.' -> 'tissues'. Empty string if you genuinely can't tell — "
+    "never guess."
+)
+
 _RESPONSE_SCHEMA = {
     "type": "object",
     "properties": {
@@ -56,17 +67,7 @@ _RESPONSE_SCHEMA = {
                     },
                     "product": {
                         "type": "string",
-                        "description": (
-                            "The most general everyday word for this item, lowercase "
-                            "English, as someone would write it on a shopping list. Drop "
-                            "brand, variety, flavour, fat level, age and size: any variety "
-                            "of cheese is 'cheese', any pasta shape is 'pasta', any cow's "
-                            "milk is 'milk' — but a different thing stays different (oat "
-                            "milk is 'oat milk', not 'milk'). Brands are not products: "
-                            "'LEERDAMMER CAR' -> 'cheese', 'Rama Original' -> 'margarine', "
-                            "'Tempo Taschent.' -> 'tissues'. Empty string if you "
-                            "genuinely can't tell — never guess."
-                        ),
+                        "description": _PRODUCT_RULES,
                     },
                     "matched_shopping_list_item": {
                         "type": "string",
@@ -244,4 +245,55 @@ def parse_receipt(image_bytes: bytes, shopping_list_names: list[str]) -> dict:
         "items_total": items_total,
         "reconciled": reconciled,
         "store": store,
+    }
+
+
+_GUESS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "line": {"type": "string", "description": "The item line exactly as given"},
+                    "product": {"type": "string", "description": _PRODUCT_RULES},
+                },
+                "required": ["line", "product"],
+            },
+        },
+    },
+    "required": ["items"],
+}
+
+
+def guess_products(names: list[str]) -> dict[str, str]:
+    """Guess what each already-known item generically is, from its name alone.
+
+    For items logged before products existed. Only a guess: the user
+    confirms each one, since the model is confidently wrong on brand-only
+    names it doesn't know.
+
+    Returns:
+        {name: product} for each name the model answered, product "" when
+        it couldn't tell. Names it skipped or mangled are left out.
+    """
+    _ensure_server_running()
+    prompt = (
+        "Item names from a household's grocery receipts (German supermarkets "
+        "mostly; food, drinks, household, toiletries or clothing). For each "
+        "one, say what it generically is, using what you know about brands "
+        "and German/Portuguese/English grocery names.\n\n" + "\n".join(names)
+    )
+    response = _client.chat(
+        model=_MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        format=_GUESS_SCHEMA,
+        options={"temperature": 0},
+    )
+    wanted = set(names)
+    return {
+        line["line"]: (line.get("product") or "").strip().lower()
+        for line in json.loads(response.message.content)["items"]
+        if line.get("line") in wanted
     }

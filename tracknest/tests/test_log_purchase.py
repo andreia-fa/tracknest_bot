@@ -112,6 +112,22 @@ async def test_naming_leaves_unrelated_list_entries_alone(mock_crud, mock_list, 
 
 
 @pytest.mark.asyncio
+@patch("bot.main.send_pending_profile_question", new_callable=AsyncMock)
+@patch("bot.main.shopping_list")
+@patch("bot.main.crud")
+async def test_confirming_an_already_profiled_item_asks_nothing_more(mock_crud, mock_list, _next_question):
+    mock_crud.get_item.return_value = {"category": "Dairy", "purchase_type": "essential"}
+    mock_list.get_all_items.return_value = []
+    bot = MagicMock()
+    bot.send_message = AsyncMock()
+
+    await main._confirm_product(bot, 1, "LEERDAMMER CAR", "cheese")
+
+    mock_crud.set_item_category.assert_called_once_with("LEERDAMMER CAR", "Dairy")
+    mock_crud.keep_item_name.assert_not_called()
+
+
+@pytest.mark.asyncio
 @patch("bot.main.crud")
 async def test_new_receipt_item_question_offers_the_models_guess(mock_crud):
     mock_crud.get_pending_profile_item.return_value = ("LEERDAMMER CAR", "name")
