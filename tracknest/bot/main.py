@@ -50,9 +50,10 @@ _ONBOARD_GOAL_KEYBOARD = InlineKeyboardMarkup([
     [InlineKeyboardButton("Set one now", callback_data="onboard_goal:yes")],
     [InlineKeyboardButton("Skip for now", callback_data="onboard_goal:skip")],
 ])
-_NAME_KEEP_KEYBOARD = InlineKeyboardMarkup([
-    [InlineKeyboardButton("✓ Name is fine, keep it", callback_data="name_keep")],
-])
+
+
+def _product_confirm_keyboard(product: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton(f"✓ Yes, {product}", callback_data="product_ok")]])
 
 
 def _category_keyboard(suggested: str | None) -> InlineKeyboardMarkup:
@@ -277,14 +278,23 @@ async def send_pending_profile_question(bot, chat_id: int):
         return
     name, stage = pending
     if stage == "name":
-        await bot.send_message(
-            chat_id,
-            f"🧾 New on a receipt: \"{name}\". What is it?\n\n"
-            "✏️ Type its real name as a message (e.g. Frozen mixed veg) — "
-            "I'll remember it for next time.\n"
-            "Or tap the button if the receipt's name is already fine.",
-            reply_markup=_NAME_KEEP_KEYBOARD,
-        )
+        item = crud.get_item(name)
+        guess = item.get("product") if item else None
+        if guess:
+            await bot.send_message(
+                chat_id,
+                f"🧾 New on a receipt: \"{name}\" — I think it's {guess}.\n\n"
+                "Tap to confirm, or type what it really is in a word or two "
+                "(e.g. bra, frozen veg). I'll remember it for next time.",
+                reply_markup=_product_confirm_keyboard(guess),
+            )
+        else:
+            await bot.send_message(
+                chat_id,
+                f"🧾 New on a receipt: \"{name}\" — I can't tell what that is.\n\n"
+                "Type what it is in a word or two (e.g. cheese, bra, frozen veg). "
+                "I'll remember it for next time.",
+            )
     elif stage == "category":
         item = crud.get_item(name)
         await bot.send_message(
@@ -316,7 +326,8 @@ async def _handle_profile_answer(update: Update, context: ContextTypes.DEFAULT_T
     """
     name, stage = pending
     if stage == "name":
-        await _rename_receipt_item(context.bot, update.effective_chat.id, name, update.message.text.strip())
+        product = update.message.text.strip().lower()
+        await _confirm_product(context.bot, update.effective_chat.id, name, product)
         return
     if stage == "category":
         await update.message.reply_text("Pick a category with the buttons above.")
@@ -350,28 +361,21 @@ async def _handle_profile_answer(update: Update, context: ContextTypes.DEFAULT_T
     await _set_purchase_type(context.bot, update.effective_chat.id, name, purchase_type)
 
 
-async def _rename_receipt_item(bot, chat_id: int, receipt_name: str, new_name: str) -> None:
-    """Apply the user's real name for a receipt item and remember it as an alias.
+async def _confirm_product(bot, chat_id: int, receipt_name: str, product: str) -> None:
+    """Save what a new receipt item generically is, and remember it for that wording.
 
-    If the name already exists, the purchase merges into that item — its
-    category and profile are already known, so nothing more is asked about it.
+    Then re-guess the category from the product ("bra" says far more than
+    "PUSH UP" did) so the category question arrives pre-ticked — one tap.
     """
-    final_name, merged = crud.rename_item(receipt_name, new_name)
-    item = crud.get_item(final_name)
-    crud.save_alias(
-        receipt_name, final_name, item["category"] if item else None, item.get("product") if item else None
-    )
-    await _clear_list_entry_for_named_item(bot, chat_id, receipt_name, final_name)
-    if merged:
-        await bot.send_message(chat_id, f"Got it — added to your existing {final_name}.")
-    else:
-        # Re-guess from the real name ("Frozen mixed veg" says far more than
-        # "BIO aln.pfanne" did) so the category question below arrives with
-        # that guess pre-ticked — one tap to confirm.
-        guess = infer_category(final_name)
-        if guess != "Other":
-            crud.set_item_category(final_name, guess)
-            crud.keep_item_name(final_name)  # set_item_category finished naming; reopen it for the tap
+    crud.set_item_product(receipt_name, product)
+    crud.keep_item_name(receipt_name)
+    item = crud.get_item(receipt_name)
+    guess = infer_category(product)
+    if guess != "Other":
+        crud.set_item_category(receipt_name, guess)
+        crud.keep_item_name(receipt_name)  # set_item_category finished naming; reopen it for the tap
+    crud.save_alias(receipt_name, receipt_name, guess if guess != "Other" else (item or {}).get("category"), product)
+    await _clear_list_entry_for_named_item(bot, chat_id, receipt_name, product)
     await send_pending_profile_question(bot, chat_id)
 
 
@@ -394,8 +398,8 @@ async def _clear_list_entry_for_named_item(bot, chat_id: int, receipt_name: str,
         )
 
 
-async def handle_name_keep(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle "Keep this name" on a new receipt item's naming question."""
+async def handle_product_ok(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle "✓ Yes, <product>" on a new receipt item's what-is-it question."""
     query = update.callback_query
     await query.answer()
     pending = crud.get_pending_profile_item()
@@ -403,11 +407,13 @@ async def handle_name_keep(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("Already answered.")
         return
     name, _stage = pending
-    await query.edit_message_text(f"Keeping \"{name}\".")
-    crud.keep_item_name(name)
     item = crud.get_item(name)
-    crud.save_alias(name, name, item["category"] if item else None, item.get("product") if item else None)
-    await send_pending_profile_question(context.bot, update.effective_chat.id)
+    product = item.get("product") if item else None
+    if not product:
+        await query.edit_message_text(f"What is \"{name}\"? Type it in a word or two.")
+        return
+    await query.edit_message_text(f"{name}: {product}.")
+    await _confirm_product(context.bot, update.effective_chat.id, name, product)
 
 
 async def handle_name_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1374,7 +1380,7 @@ async def main():
     app.add_handler(CallbackQueryHandler(handle_goal_date_choice, pattern=r"^goal_date:"))
     app.add_handler(CallbackQueryHandler(handle_onboarding_choice, pattern=r"^onboard_"))
     app.add_handler(CallbackQueryHandler(handle_profile_type_choice, pattern=r"^profile_type:"))
-    app.add_handler(CallbackQueryHandler(handle_name_keep, pattern=r"^name_keep$"))
+    app.add_handler(CallbackQueryHandler(handle_product_ok, pattern=r"^product_ok$"))
     app.add_handler(CallbackQueryHandler(handle_restore, pattern=r"^restore:"))
     app.add_handler(CallbackQueryHandler(handle_name_category, pattern=r"^name_cat:"))
     app.add_handler(CallbackQueryHandler(handle_profile_shelf_choice, pattern=r"^profile_shelf:"))
