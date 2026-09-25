@@ -108,7 +108,7 @@ def _command_update():
 @patch("bot.main.send_pending_profile_question", new_callable=AsyncMock)
 @patch("bot.main.crud")
 async def test_rename_keeps_category_and_remembers_receipt_wording(mock_crud, _mock_ask):
-    mock_crud.get_item.return_value = {"id": 4, "name": "LEERDAMMER CAR", "category": "Dairy"}
+    mock_crud.get_item.return_value = {"id": 4, "name": "LEERDAMMER CAR", "category": "Dairy", "product": "cheese"}
     mock_crud.rename_item.return_value = ("Leerdammer Caractère", False)
     context = MagicMock()
     context.args = ["LEERDAMMER", "CAR", "=", "Leerdammer", "Caractère"]
@@ -117,7 +117,7 @@ async def test_rename_keeps_category_and_remembers_receipt_wording(mock_crud, _m
 
     mock_crud.rename_item.assert_called_once_with("LEERDAMMER CAR", "Leerdammer Caractère")
     mock_crud.set_item_category.assert_called_once_with("Leerdammer Caractère", "Dairy")
-    mock_crud.save_alias.assert_called_once_with("LEERDAMMER CAR", "Leerdammer Caractère", "Dairy")
+    mock_crud.save_alias.assert_called_once_with("LEERDAMMER CAR", "Leerdammer Caractère", "Dairy", "cheese")
 
 
 @pytest.mark.asyncio

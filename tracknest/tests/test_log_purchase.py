@@ -8,7 +8,8 @@ from bot import main
 @patch("bot.main.expenses")
 @patch("bot.main.crud")
 @patch("bot.main.shopping_list.remove_item", return_value=True)
-def test_names_the_list_entry_when_receipt_wording_differs(_remove, _crud, mock_expenses):
+def test_names_the_list_entry_when_receipt_wording_differs(_remove, mock_crud, mock_expenses):
+    mock_crud.get_item.return_value = None
     mock_expenses.is_duplicate_purchase.return_value = False
     mock_expenses.get_price_delta.return_value = None
 
@@ -20,7 +21,8 @@ def test_names_the_list_entry_when_receipt_wording_differs(_remove, _crud, mock_
 @patch("bot.main.expenses")
 @patch("bot.main.crud")
 @patch("bot.main.shopping_list.remove_item", return_value=True)
-def test_plain_note_when_names_match(_remove, _crud, mock_expenses):
+def test_plain_note_when_names_match(_remove, mock_crud, mock_expenses):
+    mock_crud.get_item.return_value = None
     mock_expenses.is_duplicate_purchase.return_value = False
     mock_expenses.get_price_delta.return_value = None
 
@@ -32,25 +34,25 @@ def test_plain_note_when_names_match(_remove, _crud, mock_expenses):
 @patch("bot.main.crud.get_alias", return_value={"canonical_name": "Frozen mixed veg", "category": "Fruits/Veg"})
 def test_known_receipt_wording_maps_to_the_users_name(_alias):
     item = {"name": "BIO aln.pfanne", "category": "Snack"}
-    assert main._resolve_receipt_name(item) == ("Frozen mixed veg", "Fruits/Veg", False)
+    assert main._resolve_receipt_name(item) == ("Frozen mixed veg", "Fruits/Veg", None, False)
 
 
 @patch("bot.main.crud.get_alias", return_value=None)
 def test_keyword_category_beats_the_models_guess(_alias):
     item = {"name": "Käsescheiben", "category": "Snack"}
-    assert main._resolve_receipt_name(item) == ("Käsescheiben", "Dairy", True)
+    assert main._resolve_receipt_name(item) == ("Käsescheiben", "Dairy", None, True)
 
 
 @patch("bot.main.crud.get_alias", return_value=None)
 def test_models_category_is_the_fallback(_alias):
     item = {"name": "BIO aln.pfanne", "category": "Fruits/Veg"}
-    assert main._resolve_receipt_name(item) == ("BIO aln.pfanne", "Fruits/Veg", True)
+    assert main._resolve_receipt_name(item) == ("BIO aln.pfanne", "Fruits/Veg", None, True)
 
 
 @patch("bot.main.crud.get_alias", return_value=None)
 def test_vat_code_is_never_taken_as_a_category(_alias):
     item = {"name": "VOLVIC NATURELLE", "category": "A"}
-    assert main._resolve_receipt_name(item) == ("VOLVIC NATURELLE", None, True)
+    assert main._resolve_receipt_name(item) == ("VOLVIC NATURELLE", None, None, True)
 
 
 @patch("bot.main._log_purchase", return_value=("• line", None))
@@ -106,3 +108,31 @@ async def test_naming_leaves_unrelated_list_entries_alone(mock_crud, mock_list, 
     await main._rename_receipt_item(bot, 1, "BIO aln.pfanne", "Frozen mixed veg")
 
     mock_list.remove_item.assert_not_called()
+
+
+@patch("bot.main.crud")
+def test_models_product_is_kept_for_a_brand_only_line(mock_crud):
+    mock_crud.get_alias.return_value = None
+    item = {"name": "LEERDAMMER CAR", "category": "Dairy", "product": "cheese"}
+    assert main._resolve_receipt_name(item)[2] == "cheese"
+
+
+@patch("bot.main.crud")
+def test_alias_product_beats_the_models_guess(mock_crud):
+    mock_crud.get_alias.return_value = {"canonical_name": "Leerdammer", "category": "Dairy", "product": "cheese"}
+    item = {"name": "LEERDAMMER CAR", "category": "Dairy", "product": "ham"}
+    assert main._resolve_receipt_name(item) == ("Leerdammer", "Dairy", "cheese", False)
+
+
+@patch("bot.main.expenses")
+@patch("bot.main.crud")
+@patch("bot.main.shopping_list.remove_item", return_value=None)
+def test_purchase_line_shows_what_the_item_is(_remove, mock_crud, mock_expenses):
+    mock_expenses.is_duplicate_purchase.return_value = False
+    mock_expenses.get_price_delta.return_value = None
+    mock_crud.get_item.return_value = {"product": "cheese"}
+
+    line, _ = main._log_purchase("LEERDAMMER CAR", 1, 2.99, product="cheese")
+
+    assert line.startswith("• 1x LEERDAMMER CAR (cheese) at")
+    assert mock_crud.add_item.call_args.kwargs["product"] == "cheese"

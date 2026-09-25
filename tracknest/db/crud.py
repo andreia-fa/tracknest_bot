@@ -3,11 +3,12 @@
 from db.database import get_connection
 
 
-def add_item(name, quantity, unit=None, category=None, alert_threshold=None):
+def add_item(name, quantity, unit=None, category=None, alert_threshold=None, product=None):
     """Add a new item or restock an existing one.
 
     Uses an UPSERT: if an item with the same name already exists, the given
-    quantity is added to its current stock rather than replacing it.
+    quantity is added to its current stock rather than replacing it, and a
+    product is only filled in if the item didn't have one yet.
 
     Args:
         name: Item name (case-sensitive, must be unique in the table).
@@ -15,14 +16,17 @@ def add_item(name, quantity, unit=None, category=None, alert_threshold=None):
         unit: Unit of measure (e.g. "kg", "L", "pcs").
         category: Optional grouping label (e.g. "Dairy").
         alert_threshold: Optional minimum stock level for low-stock alerts.
+        product: What the item generically is, brand aside (e.g. "cheese").
     """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO inventory_items (name, quantity, unit, category, alert_threshold)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(name) DO UPDATE SET quantity = quantity + excluded.quantity
-    """, (name, quantity, unit, category, alert_threshold))
+        INSERT INTO inventory_items (name, quantity, unit, category, alert_threshold, product)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(name) DO UPDATE SET
+            quantity = quantity + excluded.quantity,
+            product = COALESCE(inventory_items.product, excluded.product)
+    """, (name, quantity, unit, category, alert_threshold, product))
     conn.commit()
     cursor.close()
     conn.close()
@@ -388,7 +392,7 @@ def get_alias(receipt_name):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT canonical_name, category FROM item_aliases WHERE receipt_name = ?",
+        "SELECT canonical_name, category, product FROM item_aliases WHERE receipt_name = ?",
         (receipt_name,),
     )
     row = cursor.fetchone()
@@ -397,15 +401,16 @@ def get_alias(receipt_name):
     return dict(row) if row else None
 
 
-def save_alias(receipt_name, canonical_name, category=None):
-    """Remember (or update) the real name and category behind a receipt's wording."""
+def save_alias(receipt_name, canonical_name, category=None, product=None):
+    """Remember (or update) the real name, category and product behind a receipt's wording."""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO item_aliases (receipt_name, canonical_name, category) VALUES (?, ?, ?)
+        INSERT INTO item_aliases (receipt_name, canonical_name, category, product) VALUES (?, ?, ?, ?)
         ON CONFLICT(receipt_name) DO UPDATE SET
-            canonical_name = excluded.canonical_name, category = excluded.category
-    """, (receipt_name, canonical_name, category))
+            canonical_name = excluded.canonical_name, category = excluded.category,
+            product = COALESCE(excluded.product, item_aliases.product)
+    """, (receipt_name, canonical_name, category, product))
     conn.commit()
     cursor.close()
     conn.close()
@@ -488,6 +493,17 @@ def set_item_category(name, category):
         (category, name),
     )
     cursor.execute("UPDATE item_aliases SET category = ? WHERE canonical_name = ?", (category, name))
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+
+def set_item_product(name, product):
+    """Set what an item generically is, and update any alias pointing at it to match."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE inventory_items SET product = ? WHERE name = ?", (product, name))
+    cursor.execute("UPDATE item_aliases SET product = ? WHERE canonical_name = ?", (product, name))
     conn.commit()
     cursor.close()
     conn.close()

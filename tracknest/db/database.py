@@ -94,6 +94,11 @@ def init_db():
     # purchase type, so the profiling questions use the real name.
     if "name_status" not in existing_inv_cols:
         cursor.execute("ALTER TABLE inventory_items ADD COLUMN name_status TEXT")
+    # product: what the item generically is ("cheese" for "LEERDAMMER CAR",
+    # "milk" for any brand of milk) — needs are reasoned about per product,
+    # not per brand. NULL = not known yet.
+    if "product" not in existing_inv_cols:
+        cursor.execute("ALTER TABLE inventory_items ADD COLUMN product TEXT")
     # shelf_life_corrected tracked whether log_expense had auto-corrected an
     # estimate, but nothing ever read it — dropped 2026-09-20.
     if "shelf_life_corrected" in existing_inv_cols:
@@ -158,6 +163,9 @@ def init_db():
             category TEXT
         )
     """)
+    existing_alias_cols = {row[1] for row in cursor.execute("PRAGMA table_info(item_aliases)")}
+    if "product" not in existing_alias_cols:
+        cursor.execute("ALTER TABLE item_aliases ADD COLUMN product TEXT")
     # Receipt photos are queued here by the (cloud) bot and processed later by
     # the local worker, which is the only thing with access to Ollama.
     cursor.execute("""

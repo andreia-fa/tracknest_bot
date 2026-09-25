@@ -54,6 +54,20 @@ _RESPONSE_SCHEMA = {
                             "Other if unsure."
                         ),
                     },
+                    "product": {
+                        "type": "string",
+                        "description": (
+                            "The most general everyday word for this item, lowercase "
+                            "English, as someone would write it on a shopping list. Drop "
+                            "brand, variety, flavour, fat level, age and size: any variety "
+                            "of cheese is 'cheese', any pasta shape is 'pasta', any cow's "
+                            "milk is 'milk' — but a different thing stays different (oat "
+                            "milk is 'oat milk', not 'milk'). Brands are not products: "
+                            "'LEERDAMMER CAR' -> 'cheese', 'Rama Original' -> 'margarine', "
+                            "'Tempo Taschent.' -> 'tissues'. Empty string if you "
+                            "genuinely can't tell — never guess."
+                        ),
+                    },
                     "matched_shopping_list_item": {
                         "type": "string",
                         "description": (
@@ -64,7 +78,7 @@ _RESPONSE_SCHEMA = {
                         ),
                     },
                 },
-                "required": ["name", "quantity", "unit_price", "category", "matched_shopping_list_item"],
+                "required": ["name", "quantity", "unit_price", "category", "product", "matched_shopping_list_item"],
             },
         },
         "total_paid": {
@@ -147,7 +161,8 @@ def parse_receipt(image_bytes: bytes, shopping_list_names: list[str]) -> dict:
     Returns:
         Dict with keys:
         - items: list of dicts (name, quantity, unit_price, category,
-          matched_shopping_list_item — empty string when nothing matched).
+          product — what it generically is, e.g. "cheese", empty if unknown —
+          and matched_shopping_list_item — empty string when nothing matched).
         - total_paid: the receipt's printed total, as read by the model.
         - items_total: quantity*unit_price summed across items.
         - reconciled: True if items_total matches total_paid within a cent
@@ -185,7 +200,10 @@ def parse_receipt(image_bytes: bytes, shopping_list_names: list[str]) -> dict:
         "For each receipt item, set matched_shopping_list_item to the exact "
         "text of the shopping list entry it corresponds to, if any — "
         "matching may cross languages, abbreviations, or typos. Otherwise "
-        "leave it as an empty string."
+        "leave it as an empty string.\n\n"
+        "For each item, also say what it generically is (product): use what "
+        "you know about brands and German/Portuguese/English grocery names, so "
+        "a brand-only line like 'LEERDAMMER CAR' still becomes 'cheese'."
     )
     response = _client.chat(
         model=_MODEL,
@@ -200,6 +218,7 @@ def parse_receipt(image_bytes: bytes, shopping_list_names: list[str]) -> dict:
     lines = result["items"]
     for line in lines:
         line["name"] = clean_name(line["name"])
+        line["product"] = (line.get("product") or "").strip().lower()
     total_paid = result["total_paid"]
     store = result.get("store") or ""
     # Deposits/discounts still count toward what was paid; info lines

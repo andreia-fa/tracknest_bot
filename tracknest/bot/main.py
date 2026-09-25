@@ -358,7 +358,9 @@ async def _rename_receipt_item(bot, chat_id: int, receipt_name: str, new_name: s
     """
     final_name, merged = crud.rename_item(receipt_name, new_name)
     item = crud.get_item(final_name)
-    crud.save_alias(receipt_name, final_name, item["category"] if item else None)
+    crud.save_alias(
+        receipt_name, final_name, item["category"] if item else None, item.get("product") if item else None
+    )
     await _clear_list_entry_for_named_item(bot, chat_id, receipt_name, final_name)
     if merged:
         await bot.send_message(chat_id, f"Got it — added to your existing {final_name}.")
@@ -404,7 +406,7 @@ async def handle_name_keep(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(f"Keeping \"{name}\".")
     crud.keep_item_name(name)
     item = crud.get_item(name)
-    crud.save_alias(name, name, item["category"] if item else None)
+    crud.save_alias(name, name, item["category"] if item else None, item.get("product") if item else None)
     await send_pending_profile_question(context.bot, update.effective_chat.id)
 
 
@@ -676,7 +678,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def _log_purchase(
-    name, qty, price, *, store=None, category=None, matched_list_item=None, ask_name=False,
+    name, qty, price, *, store=None, category=None, product=None, matched_list_item=None, ask_name=False,
     clear_reason="purchase", source=None,
 ) -> tuple[str, int | None]:
     """Log one purchased item (inventory + expense) and describe it for a reply.
@@ -698,12 +700,15 @@ def _log_purchase(
             "was already logged in the last hour (looks like the same receipt sent twice)"
         ), None
     is_new = ask_name and crud.get_item(name) is None
-    crud.add_item(name, qty, category=category)
+    crud.add_item(name, qty, category=category, product=product)
     if is_new:
         crud.mark_name_pending(name)
     delta = expenses.get_price_delta(name, price)
     expenses.log_expense(name, qty, price, store=store)
-    line = f"• {qty}x {name} at €{price:.2f} each"
+    # Show what the bot understood the item to be, so a wrong guess is visible.
+    product = (crud.get_item(name) or {}).get("product") or product
+    shown = f"{name} ({product})" if product and product.casefold() not in name.casefold() else name
+    line = f"• {qty}x {shown} at €{price:.2f} each"
     cleared_id = (
         shopping_list.remove_item(matched_list_item, reason=clear_reason, source=source or name)
         if matched_list_item else None
@@ -726,24 +731,28 @@ def _log_purchase(
     return line, cleared_id
 
 
-def _resolve_receipt_name(item: dict) -> tuple[str, str | None, bool]:
-    """Turn a receipt line's wording into (name, category, ask_name).
+def _resolve_receipt_name(item: dict) -> tuple[str, str | None, str | None, bool]:
+    """Turn a receipt line's wording into (name, category, product, ask_name).
 
-    A wording the user already named maps straight to their name and
-    category. Otherwise the keyword list beats the model's category guess
-    (deterministic, and it knows "Käse" is cheese), and the user gets asked
+    A wording the user already named maps straight to their name, category
+    and product (falling back to the model's product if the alias predates
+    products). Otherwise the keyword list beats the model's category guess
+    (deterministic, and it knows "Käse" is cheese), the product is the
+    model's reading of what the item generically is, and the user gets asked
     what the item really is.
     """
+    model_product = item.get("product") or None
     alias = crud.get_alias(item["name"])
     if alias:
-        return alias["canonical_name"], alias["category"], False
+        return alias["canonical_name"], alias["category"], alias.get("product") or model_product, False
     keyword = infer_category(item["name"])
     if keyword != "Other":
-        return item["name"], keyword, True
+        return item["name"], keyword, model_product, True
     # The model's guess only counts if it's one of our own labels — it has
     # filled this field with VAT codes ("A", "B") before.
     guess = item.get("category")
-    return item["name"], guess if guess in CATEGORY_NAMES and guess != "Other" else None, True
+    category = guess if guess in CATEGORY_NAMES and guess != "Other" else None
+    return item["name"], category, model_product, True
 
 
 def _put_back_keyboard(cleared: list[tuple[int, str]]) -> InlineKeyboardMarkup | None:
@@ -779,13 +788,13 @@ async def process_receipt_result(parsed: dict) -> tuple[str, InlineKeyboardMarku
     replies = []
     cleared = []
     for item in items:
-        name, category, ask_name = _resolve_receipt_name(item)
+        name, category, product, ask_name = _resolve_receipt_name(item)
         list_match = choose_list_match(item["name"], name, item["matched_shopping_list_item"], list_names)
         if list_match:
             list_names.remove(list_match)
         line, cleared_id = _log_purchase(
             name, item["quantity"], item["unit_price"],
-            store=store, category=category, matched_list_item=list_match, ask_name=ask_name,
+            store=store, category=category, product=product, matched_list_item=list_match, ask_name=ask_name,
             clear_reason="receipt", source=item["name"],
         )
         replies.append(line)
@@ -1045,7 +1054,7 @@ async def rename_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     final_name, merged = crud.rename_item(old_name, new_name)
     if not merged and item["category"]:
         crud.set_item_category(final_name, item["category"])
-    crud.save_alias(old_name, final_name, item["category"])
+    crud.save_alias(old_name, final_name, item["category"], item.get("product"))
     if merged:
         await update.message.reply_text(f"Merged '{old_name}' into your existing {final_name}.")
     else:
