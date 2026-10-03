@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the TrackNest DB snapshot once a week
+
+[Timer]
+OnCalendar=weekly
+# Laptop off at the scheduled time: run as soon as it's next on instead.
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target

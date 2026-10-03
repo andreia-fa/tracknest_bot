@@ -1,5 +1,16 @@
 # TODO
 
+## 💾 Backups (2026-10-03) — weekly snapshot on the laptop, for now
+`deploy/local/backup_db.sh`, run weekly by `tracknest-backup.timer` (systemd
+user unit, installed + enabled; `Persistent=true` catches up after the laptop
+was off). Keeps ONE copy, `~/tracknest-backups/tracknest-weekly.db`, replaced
+each week — the user's choice. Known trade-off: a mistake that goes unnoticed
+for a week gets copied over the good snapshot; bump to keeping 2-4 if that
+ever bites. A broken/failed pull never replaces the last good copy
+(integrity-checked first). Restore: stop the bot, copy the file to the VM's
+`/home/ubuntu/tracknest-data/tracknest.db`, start it. Later: move backups to
+the Oracle side.
+
 ## ✅ Done (2026-09-23) — TRACKNEST_DASHBOARD_PASSWORD GitHub secret added
 Secret added by the user; CD re-run of `060b09e` succeeded. That commit also
 fixed the local receipt worker crash-looping since `fd55f79` (config required

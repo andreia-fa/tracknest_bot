@@ -1,0 +1,8 @@
+[Unit]
+Description=TrackNest weekly DB snapshot (pulls the live DB from the Oracle VM)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/afa/my_projects/tracknest_bot/deploy/local/backup_db.sh
