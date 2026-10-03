@@ -56,9 +56,10 @@ def test_vat_code_is_never_taken_as_a_category(_alias):
 
 
 @patch("bot.main._log_purchase", return_value=("• line", None))
+@patch("bot.main.crud.get_item", return_value=None)
 @patch("bot.main.crud.get_alias", return_value=None)
 @patch("bot.main.shopping_list.get_all_items", return_value=[{"name": "Salmon"}, {"name": "morangos"}])
-def test_receipt_uses_the_synonym_matcher_not_the_model_alone(_list, _alias, mock_log):
+def test_receipt_uses_the_synonym_matcher_not_the_model_alone(_list, _alias, _item, mock_log):
     import asyncio
     parsed = {
         "items": [
