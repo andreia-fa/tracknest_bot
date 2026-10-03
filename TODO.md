@@ -1,19 +1,14 @@
 # TODO
 
-## 🔁 Revisit (2026-10-03) — purchase type mixes two questions; user wants to rethink it
-Prompted by the pretzels disagreeing: Pfefferbreze (Yormas) is "luxury",
-Pfefferbretzel and LAUGENBREZEL are "necessity". User: "bretzels (of all
-kind) are often times a one day purchase... idk if luxury is the right
-classification." Root cause: `purchase_type` (luxury / essential /
-necessity) answers two independent things at once — *how long it lasts*
-(necessity = gone the same day) and *treat or need* (luxury vs essential).
-A pretzel is same-day AND can be either; sushi is a treat lasting 2 days.
-Suggested (not decided): two button questions per item — treat-or-need
-(drives the /report treats split) and how-long-it-lasts with "same day" as
-one choice (necessity becomes shelf_life_days = 1, not a type; check-ins and
-spare alerts only for needs lasting > 1 day). Needs a migration of existing
-purchase_type values. Pfefferbreze deliberately left as luxury until then.
-**Wait for the user to pick this up — don't start it unprompted.**
+## ✅ Done (2026-10-03) — purchase type split into treat-or-need + how long it lasts
+Decided with the user the same day instead of revisiting later.
+`purchase_type` is gone: `treat_or_need` (treat/need/unknown) and `lasts`
+(same_day/days/one_off/unknown), `shelf_life_days` only with lasts = days —
+all enforced by CHECK constraints (user: blanks aren't good practice). New
+items are filed from their product, then a category default
+(`bot/profile_guess.py`), shown with a ✏️ button; only mixed categories
+(Bread/Bakery, Beverages, Other) still get asked. Item notes added too
+(`notes`, 📝 button, /note, `//` when typing).
 
 ## 💾 Backups (2026-10-03) — weekly snapshot on the laptop, for now
 `deploy/local/backup_db.sh`, run weekly by `tracknest-backup.timer` (systemd
