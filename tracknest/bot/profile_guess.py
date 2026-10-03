@@ -22,6 +22,7 @@ _DEFAULTS: dict[str, tuple[str | None, tuple[str, int | None] | None]] = {
     "Snacks": ("treat", ("days", 7)),
     "Ready Meals": ("treat", ("same_day", None)),
     "Clothing": (None, ("days", 120)),
+    "Leisure": ("treat", ("same_day", None)),
 }
 
 

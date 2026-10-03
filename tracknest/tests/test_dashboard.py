@@ -132,12 +132,16 @@ def test_spare_alerts_are_shopping_and_attention_shows_only_open_questions():
 def test_share_view_never_contains_an_amount():
     """The share view is for screenshots sent to friends: percentages, never money."""
     import re
-    html = dashboard.render_dashboard_html(sample_data())
+    trips = sample_data()["trips"] | {"top_ups": [{"day": "2026-09-26", "store": "Yormas", "total": 1.0}],
+                                      "not_shopping": 5.5}
+    html = dashboard.render_dashboard_html(sample_data(trips=trips))
+    assert "1 of 4 were small top-ups (under €5) · €1.00 together" in html  # private view has amounts
     shared = re.findall(r'<div class="shared">(.*?)</div></section>', html, re.S)
     assert shared, "every month has a share view"
     for part in shared:
         assert "€" not in part and "EUR" not in part
         assert "REWE" in part and "Fruits/Veg" in part  # names are fine to share
+        assert "1 of 4 were small top-ups" in part and "Yormas" in part
         assert "%" in part
     assert 'id="share"' in html and "👁 Share" in html
 

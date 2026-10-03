@@ -884,6 +884,7 @@ def _apply_list_lines(text: str) -> tuple[list[str], list[int] | None]:
     """
     replies = []
     new_item_ids = None
+    trip_key = f"typed:{datetime.now(tz=timezone.utc).isoformat()}"  # one visit per typed message
     for line in (line for line in text.splitlines() if line.strip()):
         line, note = _split_note(line)
         stripped = line.strip()
@@ -906,7 +907,7 @@ def _apply_list_lines(text: str) -> tuple[list[str], list[int] | None]:
             is_new = crud.get_item(name) is None
             line, _cleared_id = _log_purchase(
                 name, qty, unit_price, store=_typed_purchase_store(name, unit_price),
-                category=infer_category(name), matched_list_item=name,
+                category=infer_category(name), matched_list_item=name, trip_key=trip_key,
             )
             if note:
                 crud.set_item_note(name, note)
@@ -1060,7 +1061,7 @@ def _purchased_at(receipt_date: str | None) -> datetime | None:
 
 def _log_purchase(
     name, qty, price, *, store=None, category=None, product=None, matched_list_item=None, ask_name=False,
-    clear_reason="purchase", source=None, receipt_date=None,
+    clear_reason="purchase", source=None, receipt_date=None, trip_key=None,
 ) -> tuple[str, int | None]:
     """Log one purchased item (inventory + expense) and describe it for a reply.
 
@@ -1087,7 +1088,7 @@ def _log_purchase(
     if not existed:
         _fill_guesses(name, product)
     delta = expenses.get_price_delta(name, price, store=store)
-    expenses.log_expense(name, qty, price, store=store, purchased_at=_purchased_at(receipt_date))
+    expenses.log_expense(name, qty, price, store=store, purchased_at=_purchased_at(receipt_date), trip_key=trip_key)
     # Show what the bot understood the item to be, so a wrong guess is visible.
     product = (crud.get_item(name) or {}).get("product") or product
     shown = f"{name} ({product})" if product and product.casefold() not in name.casefold() else name
@@ -1150,7 +1151,7 @@ def _put_back_keyboard(cleared: list[tuple[int, str]]) -> InlineKeyboardMarkup |
     ])
 
 
-async def process_receipt_result(parsed: dict) -> tuple[str, InlineKeyboardMarkup | None]:
+async def process_receipt_result(parsed: dict, receipt_id: int | None = None) -> tuple[str, InlineKeyboardMarkup | None]:
     """Log a parsed receipt's items and build the summary reply text.
 
     Used by the local receipt worker after it runs parse_receipt. New
@@ -1187,6 +1188,7 @@ async def process_receipt_result(parsed: dict) -> tuple[str, InlineKeyboardMarku
             name, item["quantity"], item["unit_price"],
             store=store, category=category, product=product, matched_list_item=list_match, ask_name=ask_name,
             clear_reason="receipt", source=item["name"], receipt_date=receipt_date,
+            trip_key=f"receipt:{receipt_id}" if receipt_id is not None else None,
         )
         if is_code_only(item["name"]):
             line += " ⚠️ no readable name on the receipt — check this one"

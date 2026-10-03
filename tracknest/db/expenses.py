@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from db.database import get_connection
 
 
-def log_expense(item_name, quantity_purchased, unit_price, store=None, purchased_at=None):
+def log_expense(item_name, quantity_purchased, unit_price, store=None, purchased_at=None, trip_key=None):
     """Record a purchase for an existing inventory item.
 
     For a need lasting a known number of days, if this purchase
@@ -31,6 +31,8 @@ def log_expense(item_name, quantity_purchased, unit_price, store=None, purchased
         purchased_at: When it was bought (an aware datetime), for a receipt
             sent days later; defaults to now. Both purchase_date and the
             timing below use it, so a September receipt counts in September.
+        trip_key: Which visit this purchase belongs to ("receipt:16", one
+            key per typed message) — see metrics.get_shopping_trips.
 
     Returns:
         True if the expense was logged, False if the item does not exist.
@@ -83,9 +85,9 @@ def log_expense(item_name, quantity_purchased, unit_price, store=None, purchased
             (item["id"],)
         )
     cursor.execute("""
-        INSERT INTO item_expenses (item_id, quantity_purchased, unit_price, store, purchase_date, logged_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (item["id"], quantity_purchased, unit_price, store, now.date().isoformat(), now.isoformat()))
+        INSERT INTO item_expenses (item_id, quantity_purchased, unit_price, store, purchase_date, logged_at, trip_key)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (item["id"], quantity_purchased, unit_price, store, now.date().isoformat(), now.isoformat(), trip_key))
     conn.commit()
     cursor.close()
     conn.close()

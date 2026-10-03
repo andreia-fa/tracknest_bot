@@ -15,7 +15,10 @@ _ADJUSTMENT = re.compile(
 # elsewhere): ignored entirely.
 _INFO = re.compile(
     r"\b(normalpreis|zwischensumme|summe|mwst|ust|netto|brutto|steuer|"
-    r"sie sparen|ec[- ]?karte|kartenzahlung|r(ü|ue)ckgeld|gegeben)\b",
+    r"sie sparen|ec[- ]?karte|kartenzahlung|r(ü|ue)ckgeld|gegeben|"
+    # The "customer receipt" footer — also as the model has misread it
+    # ("Kuchenbeleg" is no German word; cake topping is "Kuchenbelag").
+    r"k-?u-?n-?d-?e-?n-?b-?e-?l-?e-?g|kuchenbeleg)\b",
     re.IGNORECASE,
 )
 

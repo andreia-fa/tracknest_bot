@@ -302,6 +302,8 @@ def get_goal_status():
 
 
 _MIN_PRICE_RISE_PCT = 1.0
+# A trip spending less than this is a top-up: the kind one bigger shop could absorb.
+TOP_UP_TRIP_EUR = 5.0
 
 
 def get_price_trends(min_history=2, top_n=3):
@@ -408,33 +410,48 @@ def get_inventory_health():
 
 
 def get_shopping_trips(year=None, month=None):
-    """Return a month's shopping trips — one per distinct (day, store) — and where they happened.
+    """Return a month's shopping trips — one per receipt or typed message — and where they happened.
 
-    A receipt carries no trip id, so a trip is approximated as every
-    purchase logged on the same day at the same store. Purchases with no
-    store (typed in by hand) count as one trip per day.
+    Purchases carry a trip_key (see expenses.log_expense); older ones
+    without it fall back to one trip per store per day, which undercounts
+    two visits to the same store on one day. Spending that isn't shopping
+    (categorize.NOT_SHOPPING, e.g. a pool ticket) is never a trip: it's
+    reported separately as not_shopping, and left out of everything else here.
 
     Args:
         year: Calendar year. Defaults to the current month.
         month: Calendar month (1-12). Defaults to the current month.
 
     Returns:
-        Dict with keys count, avg_basket (float, or None with no trips), and
+        Dict with keys count, avg_basket (float, or None with no trips),
         by_store (list of {store, trips, total}, biggest spend first; store
-        is None for hand-typed purchases).
+        is None for hand-typed purchases), top_ups (trips under
+        TOP_UP_TRIP_EUR, as {day, store, total}) and not_shopping (euros).
     """
+    from bot.categorize import NOT_SHOPPING
+
     now = datetime.now(tz=timezone.utc)
     prefix = f"{year or now.year:04d}-{month or now.month:02d}"
+    placeholders = ", ".join("?" for _ in NOT_SHOPPING)
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("""
-        SELECT purchase_date AS day, store AS store,
-               SUM(quantity_purchased * unit_price) AS total
-        FROM item_expenses
-        WHERE purchase_date LIKE ?
-        GROUP BY purchase_date, store
-    """, (f"{prefix}%",))
+    cursor.execute(f"""
+        SELECT COALESCE(e.trip_key, e.purchase_date || '|' || COALESCE(e.store, '')) AS trip,
+               MIN(e.purchase_date) AS day, e.store AS store,
+               SUM(e.quantity_purchased * e.unit_price) AS total
+        FROM item_expenses e
+        JOIN inventory_items i ON i.id = e.item_id
+        WHERE e.purchase_date LIKE ? AND COALESCE(i.category, '') NOT IN ({placeholders})
+        GROUP BY trip, e.store
+    """, (f"{prefix}%", *NOT_SHOPPING))
     trips = cursor.fetchall()
+    cursor.execute(f"""
+        SELECT COALESCE(SUM(e.quantity_purchased * e.unit_price), 0)
+        FROM item_expenses e
+        JOIN inventory_items i ON i.id = e.item_id
+        WHERE e.purchase_date LIKE ? AND i.category IN ({placeholders})
+    """, (f"{prefix}%", *NOT_SHOPPING))
+    not_shopping = float(cursor.fetchone()[0])
     cursor.close()
     conn.close()
 
@@ -444,10 +461,17 @@ def get_shopping_trips(year=None, month=None):
         entry["trips"] += 1
         entry["total"] += float(trip["total"])
     grand_total = sum(float(t["total"]) for t in trips)
+    top_ups = sorted(
+        ({"day": t["day"], "store": t["store"], "total": float(t["total"])}
+         for t in trips if float(t["total"]) < TOP_UP_TRIP_EUR),
+        key=lambda t: t["day"],
+    )
     return {
         "count": len(trips),
         "avg_basket": grand_total / len(trips) if trips else None,
         "by_store": sorted(by_store.values(), key=lambda s: s["total"], reverse=True),
+        "top_ups": top_ups,
+        "not_shopping": not_shopping,
     }
 
 

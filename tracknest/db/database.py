@@ -315,6 +315,11 @@ def init_db():
     existing_cols = {row[1] for row in cursor.execute("PRAGMA table_info(item_expenses)")}
     if "logged_at" not in existing_cols:
         cursor.execute("ALTER TABLE item_expenses ADD COLUMN logged_at TEXT")
+    # trip_key: which visit a purchase belongs to — "receipt:<id>" or
+    # "typed:<when>" (one per typed message). NULL on purchases from before
+    # it existed; those fall back to one trip per store per day.
+    if "trip_key" not in existing_cols:
+        cursor.execute("ALTER TABLE item_expenses ADD COLUMN trip_key TEXT")
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS bot_settings (
             key TEXT PRIMARY KEY,

@@ -109,6 +109,8 @@ def _hero(data: dict) -> str:
         )
     else:
         sub = "No purchases logged yet this month"
+    if trips.get("not_shopping"):
+        sub += f' · includes {_eur(trips["not_shopping"])} leisure (not a shopping trip)'
     current = data.get("is_current", True)
     if not current:
         forecast = "Month closed — this is the final total"
@@ -451,6 +453,7 @@ _STYLE = """
   .tool { border: 1px solid var(--border); background: var(--surface); color: var(--ink-2); border-radius: 8px;
           padding: 4px 9px; font-size: 14px; cursor: pointer; }
   .tool[hidden] { display: none; }
+  .rows.tight { padding: 6px 0 4px; gap: 6px; }
   .group-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
                  color: var(--ink-muted); margin: 22px 0 10px; }
   .kpi { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
@@ -513,7 +516,7 @@ def _pct_bars(rows: list[tuple[str, float, str]]) -> str:
     )
 
 
-def _share_view(month: dict) -> str:
+def _share_view(month: dict, previous: dict | None = None) -> str:
     """One month in relative terms only, for a screenshot to share with friends.
 
     Built separately from the private view rather than by hiding its euro
@@ -561,6 +564,7 @@ def _share_view(month: dict) -> str:
     <p class="period">{escape(month["month_label"])}</p>
     {hero}
     <div class="cards">
+      {_trips_card(month, previous, share=True)}
       <div class="card section"><p class="section-title">When the shopping happened</p>
         <svg class="daily" viewBox="0 0 {width} {height}" preserveAspectRatio="none" role="img"
              aria-label="Share of the month's spending per day">{bars}</svg>
@@ -588,7 +592,57 @@ _TELEGRAM_SCRIPT = """<script src="https://telegram.org/js/telegram-web-app.js">
 </script>"""
 
 
-def _month_view(month: dict) -> str:
+def _trips_per_week(month: dict) -> float | None:
+    """Trips per week since the month's first purchase — tracking may start mid-month, so not since day 1."""
+    first = next((i for i, v in enumerate(month["daily"]) if v), None)
+    if first is None or not month["trips"]["count"]:
+        return None
+    return month["trips"]["count"] / (month["day"] - first) * 7
+
+
+def _trips_card(month: dict, previous: dict | None, share: bool = False) -> str:
+    """How often the shopping happened — the goal is fewer trips — and which ones were small top-ups.
+
+    share leaves out every amount (the top-up list shows days and stores only).
+    """
+    trips = month["trips"]
+    if not trips["count"]:
+        return ""
+    rate = _trips_per_week(month)
+    before = _trips_per_week(previous) if previous else None
+    if rate is not None and before:
+        change = (rate - before) / before * 100
+        arrow = "✓ fewer" if change <= -5 else "more" if change >= 5 else "about the same"
+        compare = (f'<p class="section-sub">{rate:.1f} trips a week — {arrow} than '
+                   f'{previous["month_label"].split()[0]} ({before:.1f} a week)</p>')
+    else:
+        compare = f'<p class="section-sub">{rate:.1f} trips a week</p>' if rate else ""
+    top_ups = trips.get("top_ups", [])
+    if top_ups:
+        rows = "".join(
+            f'<li class="row"><span class="row-name">{datetime.fromisoformat(t["day"]).strftime("%-d %b")} · '
+            f'{escape(t["store"] or "typed in")}</span>'
+            + ("" if share else f'<span class="row-val muted">{_eur(t["total"])}</span>') + "</li>"
+            for t in top_ups
+        )
+        total = "" if share else f' · {_eur(sum(t["total"] for t in top_ups))} together'
+        top = (f'<p class="attn-head"><span>{len(top_ups)} of {trips["count"]} were small top-ups'
+               f' (under €5){total}</span></p><ul class="rows tight">{rows}</ul>'
+               f'<p class="attn-hint">These are the ones a single bigger shop can absorb — '
+               f'"What to buy" shows what runs out when.</p>')
+        if share:
+            top = top.replace(" (under €5)", "")
+    else:
+        top = '<p class="attn-hint">No small top-up trips — every trip was a real shop. 👏</p>'
+    return f"""
+    <div class="card section">
+      <p class="section-title">Shopping trips: {trips["count"]}</p>
+      {compare}
+      {top}
+    </div>"""
+
+
+def _month_view(month: dict, previous: dict | None = None) -> str:
     """Everything on the page that belongs to one month."""
     if month.get("is_current", True):
         period = f'{month["month_label"]} · day {month["day"]} of {month["days_in_month"]}'
@@ -601,6 +655,7 @@ def _month_view(month: dict) -> str:
     {_hero(month)}
     {kpis}
     <div class="cards">
+      {_trips_card(month, previous)}
       {_daily_chart(month)}
       {_mix_card(month)}
       {_categories_card(month)}
@@ -637,9 +692,9 @@ def render_dashboard_html(data: dict) -> str:
     ) + "</nav>"
     # A month view also shows "right now" figures (the shopping-list card), which live on data.
     views = "".join(
-        f'<section class="month m{i}"><div class="private">{_month_view({**data, **m})}</div>'
-        f'<div class="shared">{_share_view(m)}</div></section>'
-        for i, m in enumerate(months)
+        f'<section class="month m{i}"><div class="private">{_month_view({**data, **m}, prev)}</div>'
+        f'<div class="shared">{_share_view(m, prev)}</div></section>'
+        for i, (m, prev) in enumerate(zip(months, [None, *months[:-1]]))
     )
     return f"""<!doctype html>
 <html lang="en">

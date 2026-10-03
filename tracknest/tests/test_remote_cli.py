@@ -23,7 +23,7 @@ async def test_finish_receipt_logs_resolves_and_replies(
     parsed = {"items": [], "reconciled": True}
     result = await remote_cli._finish_receipt({"receipt_id": 5, "chat_id": 123, "parsed": parsed})
 
-    mock_process.assert_awaited_once_with(parsed)
+    mock_process.assert_awaited_once_with(parsed, receipt_id=5)  # the receipt is the trip
     mock_queue.resolve_receipt.assert_called_once_with(5, status="done")
     mock_bot.send_message.assert_awaited_once_with(
         123, "Receipt processed:\n• 1x Milk at €1.50 each", reply_markup=keyboard

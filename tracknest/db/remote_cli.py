@@ -21,7 +21,7 @@ async def _finish_receipt(args: dict) -> dict:
     """Log a parsed receipt's items, resolve the queue entry, and reply to the chat."""
     from bot.main import process_receipt_result, send_pending_profile_question
 
-    reply, put_back_keyboard = await process_receipt_result(args["parsed"])
+    reply, put_back_keyboard = await process_receipt_result(args["parsed"], receipt_id=args["receipt_id"])
     receipt_queue.resolve_receipt(args["receipt_id"], status="done")
     bot = Bot(token=BOT_TOKEN)
     await bot.send_message(args["chat_id"], reply, reply_markup=put_back_keyboard)

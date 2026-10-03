@@ -252,28 +252,45 @@ def test_get_inventory_health_all_clear(mock_conn):
     assert result == {"checkin_pending": [], "spare_alert_pending": [], "unprofiled": []}
 
 
-@patch("db.metrics.get_connection")
-def test_get_shopping_trips_groups_by_day_and_store(mock_conn):
-    conn, _cursor = make_mock_conn(fetchall_side_effect=[[
-        {"day": "2026-09-20", "store": "REWE", "total": 12.0},
-        {"day": "2026-09-22", "store": "REWE", "total": 8.0},
-        {"day": "2026-09-22", "store": "dm", "total": 4.0},
-    ]])
-    mock_conn.return_value = conn
+def _visit(items, store, day, trip_key=None):
+    """Log (name, price, category) purchases as one visit on a September day."""
+    when = datetime(2026, 9, day, 12, tzinfo=timezone.utc)
+    for name, price, category in items:
+        if crud.get_item(name) is None:
+            crud.add_item(name, 1, category=category)
+        expenses.log_expense(name, 1, price, store=store, purchased_at=when, trip_key=trip_key)
 
+
+def test_each_receipt_is_a_trip_even_at_the_same_store_on_the_same_day(db):
+    _visit([("Sushi", 10.99, "Ready Meals")], "REWE", 30, trip_key="receipt:16")
+    _visit([("Eier", 2.99, "Dairy"), ("Cracker", 3.29, "Snacks")], "REWE", 30, trip_key="receipt:17")
     trips = metrics.get_shopping_trips(2026, 9)
-
-    assert trips["count"] == 3
-    assert trips["avg_basket"] == 8.0
-    assert trips["by_store"][0] == {"store": "REWE", "trips": 2, "total": 20.0}
+    assert trips["count"] == 2
+    assert trips["by_store"] == [{"store": "REWE", "trips": 2, "total": pytest.approx(17.27)}]
 
 
-@patch("db.metrics.get_connection")
-def test_get_shopping_trips_empty_month(mock_conn):
-    conn, _cursor = make_mock_conn(fetchall_side_effect=[[]])
-    mock_conn.return_value = conn
+def test_older_purchases_count_one_trip_per_store_per_day(db):
+    _visit([("Banane", 2.12, "Fruits/Veg"), ("Brötchen", 1.89, "Bread/Bakery")], "REWE", 29)
+    _visit([("Twister", 0.99, "Bread/Bakery")], "REWE", 29)
+    _visit([("Pizza", 0.99, "Ready Meals")], "Aldi", 29)
+    trips = metrics.get_shopping_trips(2026, 9)
+    assert trips["count"] == 2
+    assert trips["avg_basket"] == pytest.approx((2.12 + 1.89 + 0.99 + 0.99) / 2)
 
-    assert metrics.get_shopping_trips(2026, 9) == {"count": 0, "avg_basket": None, "by_store": []}
+
+def test_leisure_is_spending_but_never_a_trip(db):
+    _visit([("Pool", 5.50, "Leisure")], None, 27, trip_key="typed:a")
+    _visit([("Brezel", 1.00, "Bread/Bakery")], "Yormas", 26, trip_key="typed:b")
+    trips = metrics.get_shopping_trips(2026, 9)
+    assert trips["count"] == 1
+    assert trips["not_shopping"] == pytest.approx(5.50)
+    assert trips["top_ups"] == [{"day": "2026-09-26", "store": "Yormas", "total": pytest.approx(1.0)}]
+
+
+def test_get_shopping_trips_empty_month(db):
+    assert metrics.get_shopping_trips(2026, 9) == {
+        "count": 0, "avg_basket": None, "by_store": [], "top_ups": [], "not_shopping": 0.0,
+    }
 
 
 @patch("db.metrics.get_connection")

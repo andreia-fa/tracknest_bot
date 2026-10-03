@@ -269,6 +269,13 @@ def parse_receipt(image_bytes: bytes, shopping_list_names: list[str]) -> dict:
     total_paid = result["total_paid"]
     store = result.get("store") or ""
     purchase_date = parse_receipt_date(result.get("purchase_date", ""), date.today())
+    # A "product" costing exactly the receipt total, next to other products,
+    # is the total line misread as an item (the footer "Kundenbeleg" was once
+    # logged as a €3.18 "Kuchenbeleg" this way).
+    if len(lines) > 1:
+        lines = [line for line in lines
+                 if abs(line["quantity"] * line["unit_price"] - result["total_paid"]) > _RECONCILE_TOLERANCE
+                 or classify_line(line["name"]) != "item"]
     # Deposits/discounts still count toward what was paid; info lines
     # (Normalpreis, Summe, MwSt...) carry no money of their own.
     counted = [line for line in lines if classify_line(line["name"]) != "info"]

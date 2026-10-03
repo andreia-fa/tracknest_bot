@@ -1,3 +1,4 @@
+import json
 from datetime import date
 from unittest.mock import MagicMock, patch
 
@@ -116,3 +117,25 @@ def test_parse_receipt_drops_non_items_but_counts_deposits(mock_client, _mock_en
 ])
 def test_receipt_date_is_trusted_only_when_plausible(raw, expected):
     assert receipt.parse_receipt_date(raw, date(2026, 10, 3)) == expected
+
+
+@patch("bot.receipt._ensure_server_running")
+@patch("bot.receipt._client")
+def test_the_total_misread_as_a_product_is_dropped(mock_client, _mock_ensure):
+    """Real misread, REWE 25 Sep: the €3.18 total came back as an item."""
+    mock_response = MagicMock()
+    mock_response.message.content = json.dumps({
+        "items": [
+            {"name": "HP PUDD.CHOCO V", "quantity": 1, "unit_price": 0.99, "category": "Snacks",
+             "product": "pudding", "matched_shopping_list_item": ""},
+            {"name": "SKYR STYLE MANGO", "quantity": 1, "unit_price": 2.19, "category": "Dairy",
+             "product": "yogurt", "matched_shopping_list_item": ""},
+            {"name": "Mango Dessert", "quantity": 1, "unit_price": 3.18, "category": "Snacks",
+             "product": "", "matched_shopping_list_item": ""},
+        ],
+        "total_paid": 3.18, "store": "REWE", "purchase_date": "2026-09-25",
+    })
+    mock_client.chat.return_value = mock_response
+    result = receipt.parse_receipt(b"fake-image", [])
+    assert [i["name"] for i in result["items"]] == ["HP PUDD.CHOCO V", "SKYR STYLE MANGO"]
+    assert result["reconciled"] is True

@@ -38,3 +38,9 @@ def test_till_codes_are_not_product_names():
     from bot.receipt_lines import is_code_only
     assert all(is_code_only(code) for code in ("X01", "B", "59618", " A "))
     assert not any(is_code_only(name) for name in ("BANANE", "TS CR. ROSM.", "Pampers 4", "EIER MARM."))
+
+
+def test_receipt_footer_is_never_a_product():
+    from bot.receipt_lines import classify_line
+    for footer in ("Kundenbeleg", "** Kundenbeleg **", "-K-U-N-D-E-N-B-E-L-E-G-", "Kuchenbeleg"):
+        assert classify_line(footer) == "info", footer

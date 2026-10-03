@@ -112,7 +112,16 @@ _CATEGORIES: list[tuple[str, list[str]]] = [
         "socks", "socken", "meias", "underwear", "unterwäsche", "unterwaesche",
         "roupa interior",
     ]),
+    # Spending that isn't shopping: never counted as a shopping trip.
+    ("Leisure", [
+        "pool", "schwimmbad", "hallenbad", "freibad", "piscina", "eintritt",
+        "ticket", "kino", "cinema", "museum", "museu", "theater", "concert",
+        "konzert",
+    ]),
 ]
+
+# Categories that are spending but not shopping — no store visit to cut down on.
+NOT_SHOPPING = ("Leisure",)
 
 
 # Every label infer_category can return, in display order — also the choices
