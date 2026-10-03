@@ -1,5 +1,12 @@
 # TODO
 
+## 💡 Idea (2026-10-03) — travel trips, later
+User: "maybe in the future we will also count trips? for now, i don't have
+any." Shopping trips (to buy what's needed, incl. Intimissimi) are counted
+and should be minimised; Leisure (pool, cinema, cafés) is spending, never a
+shopping trip. Travel (holidays — cf. the "Trips!" savings goal) isn't
+modelled at all yet. Revisit when the user has one to track.
+
 ## ✅ Done (2026-10-03) — purchase type split into treat-or-need + how long it lasts
 Decided with the user the same day instead of revisiting later.
 `purchase_type` is gone: `treat_or_need` (treat/need/unknown) and `lasts`

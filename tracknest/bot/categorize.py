@@ -117,6 +117,9 @@ _CATEGORIES: list[tuple[str, list[str]]] = [
         "pool", "schwimmbad", "hallenbad", "freibad", "piscina", "eintritt",
         "ticket", "kino", "cinema", "museum", "museu", "theater", "concert",
         "konzert",
+        # Café drinks — not "espresso"/"kaffee", which are bought at the
+        # supermarket too.
+        "café", "cafe", "latte", "cappuccino", "matcha", "flat white", "chai",
     ]),
 ]
 

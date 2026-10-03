@@ -536,6 +536,26 @@ def keep_item_name(name):
     conn.close()
 
 
+def change_item_category(name, category):
+    """Move an already-settled item to another category (e.g. a café drink to Leisure).
+
+    Unlike set_item_category, leaves any open naming question alone. Aliases
+    follow, so the next receipt with the same wording lands there too.
+
+    Returns:
+        True if the item was found and updated, False otherwise.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE inventory_items SET category = ? WHERE name = ?", (category, name))
+    affected = cursor.rowcount
+    cursor.execute("UPDATE item_aliases SET category = ? WHERE canonical_name = ?", (category, name))
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return affected > 0
+
+
 def set_item_category(name, category):
     """Set an item's category and finish its naming step.
 

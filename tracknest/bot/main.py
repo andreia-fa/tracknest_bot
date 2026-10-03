@@ -180,6 +180,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "keep a spare. No item name sets the household default.\n"
         "  /rename <old name> = <new name> — Give an item a readable name\n"
         "  /note — Remember something about an item (e.g. a size)\n"
+        "  /item <name> — See an item and change its category, treat/need, how long it lasts\n"
         "  /set_budget <amount> — Set a monthly spending budget\n"
         "  /set_goal — Optional: walks you through setting a savings goal "
         "(name, amount, date), shown in /report\n"
@@ -526,8 +527,64 @@ def _fix_keyboard(item_id: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton("🍫 Treat", callback_data=f"kind_set:{item_id}:treat"),
         InlineKeyboardButton("🧺 Need", callback_data=f"kind_set:{item_id}:need"),
     ]
-    note_row = [InlineKeyboardButton("📝 Note", callback_data=f"note:{item_id}")]
-    return InlineKeyboardMarkup([kind_row, *_shelf_keyboard(f"shelf_set:{item_id}:").inline_keyboard, note_row])
+    extra_row = [
+        InlineKeyboardButton("🏷 Category", callback_data=f"cat_edit:{item_id}"),
+        InlineKeyboardButton("📝 Note", callback_data=f"note:{item_id}"),
+    ]
+    return InlineKeyboardMarkup([kind_row, *_shelf_keyboard(f"shelf_set:{item_id}:").inline_keyboard, extra_row])
+
+
+async def handle_category_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle "🏷 Category" under an item: offer every category, the current one ticked."""
+    query = update.callback_query
+    await query.answer()
+    item = crud.get_item_by_id(int(query.data.split(":", 1)[1]))
+    if not item:
+        await query.edit_message_text("That item no longer exists.")
+        return
+    buttons = [
+        InlineKeyboardButton(f"✓ {name}" if name == item["category"] else name,
+                             callback_data=f"cat_set:{item['id']}:{i}")
+        for i, name in enumerate(CATEGORY_NAMES)
+    ]
+    await query.edit_message_text(
+        f"Which category is {item['name']}?",
+        reply_markup=InlineKeyboardMarkup([buttons[i:i + 2] for i in range(0, len(buttons), 2)]),
+    )
+
+
+async def handle_category_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle a category tap from "🏷 Category" — Leisure, for instance, takes it out of shopping trips."""
+    query = update.callback_query
+    await query.answer()
+    _prefix, item_id, index = query.data.split(":", 2)
+    item = crud.get_item_by_id(int(item_id))
+    if not item:
+        await query.edit_message_text("That item no longer exists.")
+        return
+    category = CATEGORY_NAMES[int(index)]
+    crud.change_item_category(item["name"], category)
+    item = crud.get_item_by_id(int(item_id))
+    await query.edit_message_text(
+        f"{item['name']}: {category}. {_profile_note(item)}.", reply_markup=_fix_keyboard(item["id"])
+    )
+
+
+async def item_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /item <name> — show an item's answers with buttons to change them."""
+    name = " ".join(context.args).strip()
+    if not name:
+        await update.message.reply_text("Send /item with the item's name, e.g. /item matcha")
+        return
+    item = crud.get_item(name)
+    if not item:
+        await update.message.reply_text(f"I don't have an item called '{name}' — /list_items shows them all.")
+        return
+    note = f"\n📝 {item['notes']}" if item.get("notes") else ""
+    await update.message.reply_text(
+        f"{item['name']} — {item.get('category') or 'no category'} · {_profile_note(item)}{note}\nChange it:",
+        reply_markup=_fix_keyboard(item["id"]),
+    )
 
 
 def _note_line(item: dict | None) -> str:
@@ -1818,6 +1875,7 @@ async def main():
     app.add_handler(CommandHandler("par_level", par_level_cmd))
     app.add_handler(CommandHandler("rename", rename_cmd))
     app.add_handler(CommandHandler("note", note_cmd))
+    app.add_handler(CommandHandler("item", item_cmd))
     app.add_handler(CommandHandler("set_budget", set_budget_cmd))
     app.add_handler(CommandHandler("set_goal", set_goal_cmd))
     app.add_handler(CommandHandler("report", report))
@@ -1832,6 +1890,8 @@ async def main():
     app.add_handler(CallbackQueryHandler(handle_fix_ok, pattern=r"^fixok$"))
     app.add_handler(CallbackQueryHandler(handle_kind_set, pattern=r"^kind_set:"))
     app.add_handler(CallbackQueryHandler(handle_note_button, pattern=r"^note:"))
+    app.add_handler(CallbackQueryHandler(handle_category_edit, pattern=r"^cat_edit:"))
+    app.add_handler(CallbackQueryHandler(handle_category_set, pattern=r"^cat_set:"))
     app.add_handler(CallbackQueryHandler(handle_name_category, pattern=r"^name_cat:"))
     app.add_handler(CallbackQueryHandler(handle_profile_shelf_choice, pattern=r"^profile_shelf:"))
     app.add_handler(CallbackQueryHandler(handle_shelf_edit, pattern=r"^shelf_edit:"))
