@@ -113,6 +113,39 @@ def is_duplicate_purchase(item_name, unit_price, window_minutes=60):
     return found
 
 
+def guess_store(item_name, product, unit_price):
+    """Name the store a typed purchase came from, judging by its price.
+
+    A price already paid for this item (or the same product under another
+    name — "Pfefferbretzel" typed, "Pfefferbreze" on a Yormas receipt) at
+    exactly one store points to that store. A price never seen, or seen at
+    several stores, gives None: a new store gets registered by sending its
+    receipt, not guessed.
+
+    Args:
+        item_name: The typed item name.
+        product: What the item generically is, if known (e.g. "pretzel").
+        unit_price: The typed unit price.
+
+    Returns:
+        The store name, or None if the price doesn't single one out.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT DISTINCT e.store
+        FROM item_expenses e
+        JOIN inventory_items i ON i.id = e.item_id
+        WHERE e.store IS NOT NULL
+          AND ROUND(e.unit_price, 2) = ROUND(?, 2)
+          AND (lower(i.name) = lower(?) OR (? IS NOT NULL AND lower(i.product) = lower(?)))
+    """, (unit_price, item_name, product, product))
+    stores = [row["store"] for row in cursor.fetchall()]
+    cursor.close()
+    conn.close()
+    return stores[0] if len(stores) == 1 else None
+
+
 def get_price_delta(item_name, new_price, min_history=1):
     """Compare a new price against an item's purchase history.
 

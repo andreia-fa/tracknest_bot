@@ -5,6 +5,9 @@
 - Purchase types the user gave for the items never classified.
 - "pfefferbretzel" merges into "Pfefferbretzel" (purchases moved over,
   stock added up), so item names can become case-insensitive.
+- Typed purchases without a store get one when their price was paid for
+  the same item/product at exactly one store (same rule as
+  expenses.guess_store, now used for new typed purchases).
 
 Backs the DB up first and applies everything in one transaction. Run inside the bot container:
     ssh oracle-tracknest docker exec -i tracknest-bot python - < deploy/fix_items_2026_10_03.py
@@ -76,5 +79,18 @@ with src:  # one transaction: commits on success, rolls back on any error
         src.execute("UPDATE item_aliases SET canonical_name = ? WHERE canonical_name = ?", (keep, dup))
         src.execute("DELETE FROM inventory_items WHERE id = ?", (old["id"],))
         print(f"  merged {dup} into {keep} ({moved} purchase(s) moved)")
+    typed = src.execute("""
+        SELECT e.id, e.unit_price, i.name, i.product FROM item_expenses e
+        JOIN inventory_items i ON i.id = e.item_id WHERE e.store IS NULL
+    """).fetchall()
+    for row in typed:
+        stores = [r[0] for r in src.execute("""
+            SELECT DISTINCT e.store FROM item_expenses e JOIN inventory_items i ON i.id = e.item_id
+            WHERE e.store IS NOT NULL AND ROUND(e.unit_price, 2) = ROUND(?, 2)
+              AND (lower(i.name) = lower(?) OR (? IS NOT NULL AND lower(i.product) = lower(?)))
+        """, (row["unit_price"], row["name"], row["product"], row["product"]))]
+        if len(stores) == 1:
+            src.execute("UPDATE item_expenses SET store = ? WHERE id = ?", (stores[0], row["id"]))
+            print(f"  {row['name']} at €{row['unit_price']:.2f}: store -> {stores[0]}")
 src.close()
 print("Done.")

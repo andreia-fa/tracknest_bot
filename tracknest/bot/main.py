@@ -640,6 +640,12 @@ async def _answer_pending_question(update, context: ContextTypes.DEFAULT_TYPE, k
         await _handle_checkin_answer(update, context, crud.get_pending_checkin_item())
 
 
+def _typed_purchase_store(name: str, unit_price: float) -> str | None:
+    """The store a typed purchase came from, if its price singles one out (see expenses.guess_store)."""
+    item = crud.get_item(name)
+    return expenses.guess_store(name, item.get("product") if item else None, unit_price)
+
+
 def _preview_list_lines(text: str) -> list[str]:
     """Describe what _apply_list_lines would do with each line, without writing anything."""
     preview = []
@@ -656,7 +662,9 @@ def _preview_list_lines(text: str) -> list[str]:
             preview.append(f"• skip '{line}' (not understood)")
             continue
         if unit_price is not None:
-            preview.append(f"• log a purchase: {qty}x {name} at €{unit_price:.2f} each")
+            store = _typed_purchase_store(name, unit_price)
+            where = f" at {store} (same price as before)" if store else ""
+            preview.append(f"• log a purchase: {qty}x {name} at €{unit_price:.2f} each{where}")
         else:
             preview.append(f"• add {qty}x {name} to your shopping list")
     return preview
@@ -690,7 +698,7 @@ def _apply_list_lines(text: str) -> tuple[list[str], bool]:
             continue
         if unit_price is not None:
             line, _cleared_id = _log_purchase(
-                name, qty, unit_price,
+                name, qty, unit_price, store=_typed_purchase_store(name, unit_price),
                 category=infer_category(name), matched_list_item=name,
             )
             replies.append(line)
