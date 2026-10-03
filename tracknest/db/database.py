@@ -4,6 +4,7 @@ import logging
 import os
 import sqlite3
 import time
+from datetime import datetime
 
 from config import DB_PATH
 
@@ -39,6 +40,77 @@ def get_connection():
     raise last_exc
 
 
+def backup_db(label):
+    """Copy the whole DB to a timestamped file in a backups/ folder next to it.
+
+    Uses SQLite's backup API, which is safe while the bot is running (a
+    plain file copy can catch a half-written page). Anything that rewrites
+    data in bulk — migrations, one-off repair scripts — calls this first.
+
+    Returns:
+        The path of the backup file.
+    """
+    backup_dir = os.path.join(os.path.dirname(DB_PATH) or ".", "backups")
+    os.makedirs(backup_dir, exist_ok=True)
+    path = os.path.join(backup_dir, f"tracknest-{datetime.now():%Y%m%d-%H%M%S}-{label}.db")
+    src = sqlite3.connect(DB_PATH)
+    dst = sqlite3.connect(path)
+    src.backup(dst)
+    dst.close()
+    src.close()
+    return path
+
+
+def _make_item_names_case_insensitive(conn):
+    """Rebuild inventory_items so item names ignore case ("pfefferbretzel" is "Pfefferbretzel").
+
+    SQLite can't change a column's collation in place, so the table is
+    rebuilt (same columns and rows) inside one transaction, after a backup.
+    With the collation on the column itself, every lookup, update and the
+    UNIQUE/upsert check ignore case without touching any query. Skipped —
+    loudly — while two names still differ only by case: merging them is a
+    data decision for a person to confirm, not something to do at startup.
+    """
+    sql = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'inventory_items'"
+    ).fetchone()[0]
+    if "COLLATE NOCASE" in sql:
+        return
+    clashes = [row[0] for row in conn.execute(
+        "SELECT lower(name) FROM inventory_items GROUP BY lower(name) HAVING COUNT(*) > 1"
+    )]
+    if clashes:
+        logger.error("Item names differing only by case (%s) — merge them first; names stay case-sensitive.",
+                     ", ".join(clashes))
+        return
+    new_sql = sql.replace("CREATE TABLE inventory_items", "CREATE TABLE inventory_items_new", 1).replace(
+        "name TEXT NOT NULL UNIQUE", "name TEXT NOT NULL UNIQUE COLLATE NOCASE", 1)
+    if "inventory_items_new" not in new_sql or "COLLATE NOCASE" not in new_sql:
+        logger.error("Unexpected inventory_items schema — case-insensitive names not applied.")
+        return
+    conn.commit()
+    logger.info("Backed up to %s before making item names case-insensitive.", backup_db("before-nocase-names"))
+    # Off so dropping the old table can't cascade-delete purchases; it can
+    # only change outside a transaction.
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.execute("BEGIN")
+        conn.execute(new_sql)
+        conn.execute("INSERT INTO inventory_items_new SELECT * FROM inventory_items")
+        conn.execute("DROP TABLE inventory_items")
+        conn.execute("ALTER TABLE inventory_items_new RENAME TO inventory_items")
+        broken = conn.execute("PRAGMA foreign_key_check").fetchall()
+        if broken:
+            raise sqlite3.IntegrityError(f"foreign key check failed: {broken}")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+    logger.info("Item names are now case-insensitive.")
+
+
 def init_db():
     """Create the required tables if they do not already exist (idempotent)."""
     conn = get_connection()
@@ -46,7 +118,7 @@ def init_db():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS inventory_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL UNIQUE COLLATE NOCASE,
             quantity INTEGER NOT NULL,
             unit TEXT,
             category TEXT,
@@ -180,4 +252,5 @@ def init_db():
     """)
     conn.commit()
     cursor.close()
+    _make_item_names_case_insensitive(conn)
     conn.close()
