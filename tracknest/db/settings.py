@@ -109,3 +109,13 @@ def set_financial_goal(name, amount, target_date):
     _set_setting("goal_name", name)
     _set_setting("goal_amount", amount)
     _set_setting("goal_target_date", target_date)
+
+
+def get_profile_reminded_on():
+    """Return the date (YYYY-MM-DD) the last profiling reminder went out, or None."""
+    return _get_setting("profile_reminded_on")
+
+
+def set_profile_reminded_on(day):
+    """Remember the date (YYYY-MM-DD) a profiling reminder went out, so it's once a day at most."""
+    _set_setting("profile_reminded_on", day)

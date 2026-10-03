@@ -3,7 +3,8 @@
 import asyncio
 import logging
 import signal
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from aiohttp import web
 
@@ -27,7 +28,11 @@ from telegram.ext import (
 
 _DASHBOARD_PORT = 8080
 
-_CHECKIN_INTERVAL = timedelta(hours=24)
+# Proactive messages (check-ins, spare/budget alerts, profiling reminders) go
+# out in two fixed rounds a day, one message per round at most — never on
+# startup, since every deploy restarts the bot.
+_LOCAL_TZ = ZoneInfo("Europe/Berlin")
+_PROACTIVE_ROUND_TIMES = (time(10, 0, tzinfo=_LOCAL_TZ), time(18, 0, tzinfo=_LOCAL_TZ))
 _PRICE_SPIKE_THRESHOLD_PCT = 15
 _PRICE_SPIKE_MIN_HISTORY = 2
 _GOAL_DATE_PRESETS = {
@@ -95,7 +100,6 @@ _PROFILE_TYPE_KEYBOARD = InlineKeyboardMarkup([
     [InlineKeyboardButton("Essential", callback_data="profile_type:essential")],
     [InlineKeyboardButton("Necessity (used up same-day)", callback_data="profile_type:necessity")],
 ])
-_PROFILE_REMINDER_INTERVAL = timedelta(hours=3)
 
 logging.basicConfig(
     format="%(asctime)s %(name)s %(levelname)s %(message)s",
@@ -858,32 +862,43 @@ async def cleared_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Recently cleared from your list:\n" + "\n".join(lines), reply_markup=keyboard)
 
 
-async def remind_pending_profile(context: ContextTypes.DEFAULT_TYPE):
-    """Recurring job: re-send the current item-profiling question until it's answered.
+async def remind_pending_profile(context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Re-send the current item-profiling question, at most once a day.
 
     A newly-bought item's profile (purchase type, and for luxury/essential
     items, shelf life) is asked once right after logging it — but a message
     sent once is easy to miss or dismiss, and an unanswered item silently
     stays unprofiled forever otherwise (excluded from check-ins, "running
-    out soon", and the treats/essentials/necessities split). Re-nudging on
-    an interval, same as the other proactive jobs, means it eventually gets
-    answered without anyone having to remember to go back to it.
+    out soon", and the treats/essentials/necessities split). One nudge a day
+    gets it answered eventually without turning into a stream of messages.
+
+    Returns:
+        True if a reminder was sent.
     """
     chat_id = settings.get_chat_id()
-    if not chat_id:
-        return
+    if not chat_id or crud.get_pending_profile_item() is None:
+        return False
+    today = datetime.now(tz=_LOCAL_TZ).date().isoformat()
+    if settings.get_profile_reminded_on() == today:
+        return False
+    settings.set_profile_reminded_on(today)
     await send_pending_profile_question(context.bot, chat_id)
+    return True
 
 
-async def check_expiring_items(context: ContextTypes.DEFAULT_TYPE):
-    """Daily job: proactively ask about any essential item past its estimated shelf life.
+async def check_expiring_items(context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Ask about the first essential item past its estimated shelf life, if any.
 
+    One item per call — the rest stay due and come up in later rounds.
     Luxury items are excluded entirely (see get_checkin_candidates) — a
     treat bought on mood/budget doesn't follow a consumption schedule.
+
+    Returns:
+        True if a check-in was sent.
     """
     chat_id = settings.get_chat_id()
     if not chat_id:
-        return
+        return False
     now = datetime.now(tz=timezone.utc)
     for item in crud.get_checkin_candidates():
         if not item["last_purchase"]:
@@ -896,6 +911,8 @@ async def check_expiring_items(context: ContextTypes.DEFAULT_TYPE):
                 text=f"Quick check — do you still have {_need_name(item)} ({item['name']}), or did it "
                      "run out? Reply 'yes' or 'no'.",
             )
+            return True
+    return False
 
 
 def _spare_alert_lead_days(shelf_life_days: int) -> int:
@@ -943,17 +960,20 @@ def _spare_alert_keyboard(item_id: int) -> InlineKeyboardMarkup:
     ])
 
 
-async def check_spare_stock_alerts(context: ContextTypes.DEFAULT_TYPE):
-    """Daily job: for par=2 items, alert ahead of the estimated run-out date so a spare gets bought in time.
+async def check_spare_stock_alerts(context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """For par=2 items, alert (one item per call) ahead of the estimated run-out date so a spare gets bought in time.
 
     Unlike the par=1 check-in (which waits until the estimate says it's
     already out), a par=2 household wants the spare on hand before that
     point. The message shows the reasoning (when it was bought, how long one
     lasts) so a bad estimate is obvious, with buttons to act on it.
+
+    Returns:
+        True if an alert was sent.
     """
     chat_id = settings.get_chat_id()
     if not chat_id:
-        return
+        return False
     now = datetime.now(tz=timezone.utc)
     default_par_level = settings.get_default_par_level()
     for item in crud.get_par_alert_candidates(default_par_level):
@@ -967,6 +987,8 @@ async def check_spare_stock_alerts(context: ContextTypes.DEFAULT_TYPE):
                 text=_spare_alert_text(item, now),
                 reply_markup=_spare_alert_keyboard(item["id"]),
             )
+            return True
+    return False
 
 
 _SPARE_PLENTY_MIN_EXTEND_DAYS = 3
@@ -1012,14 +1034,18 @@ async def handle_spare_alert_choice(update: Update, context: ContextTypes.DEFAUL
 _BUDGET_ALERT_THRESHOLDS = (100, 80)
 
 
-async def check_budget_alert(context: ContextTypes.DEFAULT_TYPE):
-    """Daily job: alert once per month when spending crosses 80% or 100% of the household budget."""
+async def check_budget_alert(context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Alert once per month when spending crosses 80% or 100% of the household budget.
+
+    Returns:
+        True if an alert was sent.
+    """
     chat_id = settings.get_chat_id()
     if not chat_id:
-        return
+        return False
     status = metrics.get_budget_status()
     if status is None:
-        return
+        return False
     now = datetime.now(tz=timezone.utc)
     current_month = f"{now.year:04d}-{now.month:02d}"
     alerted_month, alerted_threshold = settings.get_budget_alert_state()
@@ -1033,7 +1059,19 @@ async def check_budget_alert(context: ContextTypes.DEFAULT_TYPE):
                 text=f"Budget alert: you've {verb} {threshold}% of this month's €{status['budget']:.2f} "
                      f"budget (€{status['spent']:.2f} spent so far).",
             )
-            break
+            return True
+    return False
+
+
+async def proactive_round(context: ContextTypes.DEFAULT_TYPE):
+    """Scheduled job: send the single most important proactive message, if any.
+
+    Runs at each of _PROACTIVE_ROUND_TIMES, so the bot volunteers at most
+    two messages a day; whatever didn't fit stays due for a later round.
+    """
+    for job in (check_budget_alert, check_expiring_items, check_spare_stock_alerts, remind_pending_profile):
+        if await job(context):
+            return
 
 
 async def par_level_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1408,18 +1446,8 @@ async def main():
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_error_handler(handle_error)
     if app.job_queue is not None:
-        app.job_queue.run_repeating(
-            check_expiring_items, interval=_CHECKIN_INTERVAL, first=timedelta(minutes=1)
-        )
-        app.job_queue.run_repeating(
-            check_spare_stock_alerts, interval=_CHECKIN_INTERVAL, first=timedelta(minutes=1)
-        )
-        app.job_queue.run_repeating(
-            check_budget_alert, interval=_CHECKIN_INTERVAL, first=timedelta(minutes=1)
-        )
-        app.job_queue.run_repeating(
-            remind_pending_profile, interval=_PROFILE_REMINDER_INTERVAL, first=_PROFILE_REMINDER_INTERVAL
-        )
+        for round_time in _PROACTIVE_ROUND_TIMES:
+            app.job_queue.run_daily(proactive_round, time=round_time)
     else:
         logger.warning("JobQueue unavailable (missing job-queue extra) — proactive alerts disabled.")
 
