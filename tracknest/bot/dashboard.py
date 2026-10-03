@@ -15,30 +15,30 @@ from html import escape
 from aiohttp import web
 
 from bot import auth
+from bot.categorize import CATEGORY_NAMES
 from db import metrics, shopping_list
 
 _SESSION_COOKIE = "tracknest_session"
 
-# Categories beyond this many fold into "Other" rather than stretching the
-# list — a 9th row is noise on a phone screen.
-_MAX_CATEGORIES = 6
+# Categories beyond this many fold into "Other". Set to the full category
+# list: a cap of 6 folded €55.82 into an "Other" bigger than any real row,
+# hiding exactly where the money went — and 12 labelled one-colour rows
+# still read fine on a phone.
+_MAX_CATEGORIES = len(CATEGORY_NAMES)
 
 
-def build_dashboard_data() -> dict:
-    """Gather every metric the dashboard shows.
-
-    Pure aside from the DB reads metrics.py itself does — no request/response
-    concerns — so it's testable without spinning up the web app.
+def build_month_data(year: int, month: int) -> dict:
+    """Gather the metrics that belong to one calendar month.
 
     Returns:
-        Dict with keys: month_label, day, days_in_month, spent, projected,
-        budget (dict or None), mix ({need, treat, unknown} in euros), categories (list of {name, total}), trips,
-        daily (euros per day), rising, running_low, shopping_list, health,
-        daily_cost.
+        Dict with keys: key ("YYYY-MM"), is_current, month_label, day,
+        days_in_month, spent, projected, budget (dict or None), mix ({need,
+        treat, unknown} in euros), categories (list of {name, total}), trips
+        and daily (euros per day).
     """
     now = datetime.now(tz=timezone.utc)
-    spending = metrics.get_spending_summary(top_n=50)
-    pace = metrics.get_month_pace()
+    spending = metrics.get_spending_summary(year, month, top_n=50)
+    pace = metrics.get_month_pace(year, month)
 
     categories = [{"name": c["category"], "total": c["total"]} for c in spending["top_categories"]]
     if len(categories) > _MAX_CATEGORIES:
@@ -48,16 +48,37 @@ def build_dashboard_data() -> dict:
         ]
 
     return {
-        "month_label": now.strftime("%B %Y"),
+        "key": f"{year:04d}-{month:02d}",
+        "is_current": (year, month) == (now.year, now.month),
+        "month_label": datetime(year, month, 1).strftime("%B %Y"),
         "day": pace["days_elapsed"],
         "days_in_month": pace["days_in_month"],
         "spent": spending["total"],
         "projected": pace["projected"],
-        "budget": metrics.get_budget_status(),
+        "budget": metrics.get_budget_status(year, month),
         "mix": {k: spending[k] for k in ("need", "treat", "unknown")},
         "categories": categories,
-        "trips": metrics.get_shopping_trips(),
-        "daily": metrics.get_daily_spend(),
+        "trips": metrics.get_shopping_trips(year, month),
+        "daily": metrics.get_daily_spend(year, month),
+    }
+
+
+def build_dashboard_data() -> dict:
+    """Gather every metric the dashboard shows: one view per month, plus what's true right now.
+
+    Pure aside from the DB reads metrics.py itself does — no request/response
+    concerns — so it's testable without spinning up the web app.
+
+    Returns:
+        The current month's build_month_data() keys at the top level, plus
+        months (every month with purchases, oldest first, ending with the
+        current one — switched between on the page without reloading),
+        rising, running_low, shopping_list, health and daily_cost.
+    """
+    months = [build_month_data(year, month) for year, month in metrics.get_months_with_spending()]
+    return {
+        **months[-1],
+        "months": months,
         "rising": metrics.get_price_trends(top_n=5),
         "running_low": metrics.get_running_low(),
         "shopping_list": shopping_list.get_all_items(),
@@ -83,13 +104,17 @@ def _hero(data: dict) -> str:
         )
     else:
         sub = "No purchases logged yet this month"
-    if data["projected"] is not None:
+    current = data.get("is_current", True)
+    if not current:
+        forecast = "Month closed — this is the final total"
+    elif data["projected"] is not None:
         forecast = f'On pace for <strong>{_eur(data["projected"])}</strong> by month end'
     else:
         forecast = "Month-end forecast appears from day 5"
+    label = "Spent this month" if current else f'Spent in {data["month_label"].split()[0]}'
     return f"""
     <div class="card hero">
-      <p class="label">Spent this month</p>
+      <p class="label">{label}</p>
       <div class="hero-value">{_eur(data["spent"])}</div>
       <p class="hero-sub">{sub}</p>
       <p class="hero-sub">{forecast}</p>
@@ -181,7 +206,7 @@ def _daily_chart(data: dict) -> str:
     return f"""
     <div class="card section">
       <p class="section-title">Spend by day</p>
-      <p class="section-sub">You shopped on {spend_days} of {data["day"]} days so far ·
+      <p class="section-sub">You shopped on {spend_days} of {data["day"]} days{" so far" if data.get("is_current", True) else ""} ·
         biggest day was the {busiest}{_ordinal(busiest)} ({_eur(peak)})</p>
       <svg class="daily" viewBox="0 0 {width} {height}" preserveAspectRatio="none" role="img"
            aria-label="Spend per day this month">{"".join(bars)}</svg>
@@ -229,7 +254,7 @@ def _categories_card(data: dict) -> str:
     if not categories:
         return ""
     total = sum(c["total"] for c in categories) or 1.0
-    peak = categories[0]["total"] or 1.0
+    peak = max(c["total"] for c in categories) or 1.0
     rows = "".join(
         f'<div class="bar-row"><span class="bar-name">{escape(c["name"])}</span>'
         f'<div class="bar-track"><div class="bar-fill" style="width:{c["total"] / peak * 100:.1f}%"></div></div>'
@@ -261,11 +286,12 @@ def _prices_card(data: dict) -> str:
     if not rising:
         return _empty(
             "Price watch",
-            "Nothing getting pricier. Once you buy the same item twice, price rises show up here.",
+            "Nothing getting pricier. Once you buy the same item twice at the same store, rises show up here.",
         )
     rows = "".join(
         f'<li class="row"><span class="row-name">{escape(r["name"])}</span>'
         f'<span class="row-val warn">▲ {r["pct_change"]:.0f}%<span class="row-sub">'
+        f'{escape(r["store"]) + ": " if r.get("store") else ""}'
         f'{_eur(r["avg_price"])} → {_eur(r["latest_price"])}</span></span></li>'
         for r in rising
     )
@@ -361,7 +387,7 @@ _STYLE = """
   * { box-sizing: border-box; }
   body { margin: 0 auto; max-width: 760px; padding: 24px 16px; background: var(--page);
          color: var(--ink); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 18px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
   .brand { display: flex; align-items: center; gap: 8px; }
   .brand-mark { width: 10px; height: 10px; border-radius: 3px; background: var(--accent); }
   h1 { font-size: 19px; font-weight: 800; margin: 0; }
@@ -374,6 +400,15 @@ _STYLE = """
   .hero-sub { font-size: 13px; color: var(--ink-2); margin: 8px 0 0; }
   .kpi-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
   .kpi-row .card { margin: 0; }
+  .kpi-row.two { grid-template-columns: 1fr 1fr; }
+  .month-radio { position: absolute; opacity: 0; pointer-events: none; }
+  .month { display: none; }
+  .tabs { display: flex; gap: 4px; padding: 3px; border-radius: 10px; background: var(--surface-2); }
+  .tabs label { padding: 4px 12px; border-radius: 8px; border: 1px solid transparent; font-size: 13px;
+                color: var(--ink-2); cursor: pointer; }
+  .period { margin: 0 0 10px; font-size: 13px; }
+  .group-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+                 color: var(--ink-muted); margin: 22px 0 10px; }
   .kpi { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
   .kpi.empty, .empty-card { border-style: dashed; }
   .kpi-main { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -415,7 +450,7 @@ _STYLE = """
   footer a { color: var(--ink-muted); }
   @media (max-width: 560px) {
     .kpi-row { grid-template-columns: 1fr 1fr; }
-    .kpi-row .card:first-child { grid-column: 1 / -1; }
+    .kpi-row:not(.two) .card:first-child { grid-column: 1 / -1; }
     .split { grid-template-columns: 1fr; gap: 0; }
     .hero-value { font-size: 38px; }
     .bar-row { grid-template-columns: 96px 1fr 70px; }
@@ -423,29 +458,72 @@ _STYLE = """
 """
 
 
+def _month_view(month: dict) -> str:
+    """Everything on the page that belongs to one month."""
+    if month.get("is_current", True):
+        period = f'{month["month_label"]} · day {month["day"]} of {month["days_in_month"]}'
+        kpis = f'<div class="kpi-row">{_budget_kpi(month)}{_treats_kpi(month)}{_list_kpi(month)}</div>'
+    else:
+        period = f'{month["month_label"]} · closed'
+        kpis = f'<div class="kpi-row two">{_budget_kpi(month)}{_treats_kpi(month)}</div>'
+    return f"""
+    <p class="period">{period}</p>
+    {_hero(month)}
+    {kpis}
+    {_daily_chart(month)}
+    {_mix_card(month)}
+    {_categories_card(month)}
+    {_stores_card(month)}"""
+
+
+def _month_tabs_css(count: int) -> str:
+    """Show the month whose radio is checked, and mark its tab — one rule pair per month."""
+    return "".join(
+        f"#m{i}:checked ~ .m{i} {{ display: block; }}"
+        f"#m{i}:checked ~ header label[for=m{i}] {{ background: var(--surface); color: var(--ink); "
+        f"border-color: var(--border); font-weight: 700; }}"
+        for i in range(count)
+    )
+
+
 def render_dashboard_html(data: dict) -> str:
-    """Render the full dashboard page from build_dashboard_data()'s output."""
+    """Render the full dashboard page from build_dashboard_data()'s output.
+
+    Every month is in the page and the tabs are radio buttons, so switching
+    months needs no request: inside Telegram the session cookie is often
+    dropped, and a reload would bounce back to the login.
+    """
     updated = datetime.now(tz=timezone.utc).strftime("%d %b, %H:%M UTC")
+    months = data.get("months") or [{**data, "key": "this-month"}]
+    shown = len(months) - 1
+    radios = "".join(
+        f'<input type="radio" name="month" id="m{i}" class="month-radio"{" checked" if i == shown else ""}>'
+        for i in range(len(months))
+    )
+    tabs = "" if len(months) < 2 else '<nav class="tabs" aria-label="Month">' + "".join(
+        f'<label for="m{i}">{m["month_label"][:3]}</label>' for i, m in enumerate(months)
+    ) + "</nav>"
+    # A month view also shows "right now" figures (the shopping-list card), which live on data.
+    views = "".join(f'<section class="month m{i}">{_month_view({**data, **m})}</section>'
+                    for i, m in enumerate(months))
     return f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TrackNest — {data['month_label']}</title>
-<style>{_STYLE}</style>
+<title>TrackNest</title>
+<style>{_STYLE}{_month_tabs_css(len(months))}</style>
 </head>
 <body>
+  {radios}
   <header>
     <div class="brand"><span class="brand-mark"></span><h1>TrackNest</h1></div>
-    <span class="period">{data['month_label']} · day {data['day']} of {data['days_in_month']}</span>
+    {tabs}
   </header>
-  {_hero(data)}
-  <div class="kpi-row">{_budget_kpi(data)}{_treats_kpi(data)}{_list_kpi(data)}</div>
-  {_daily_chart(data)}
-  {_mix_card(data)}
-  {_categories_card(data)}
-  <div class="split">{_stores_card(data)}{_prices_card(data)}</div>
+  {views}
+  <p class="group-title">Right now</p>
   <div class="split">{_to_buy_card(data)}{_attention_card(data)}</div>
+  {_prices_card(data)}
   {_daily_cost_card(data)}
   <footer>Live from TrackNest · {updated} · <a href="/logout">Log out</a></footer>
 </body>

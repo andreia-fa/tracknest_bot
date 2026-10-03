@@ -163,7 +163,7 @@ def guess_store(item_name, product, unit_price):
     return stores[0] if len(stores) == 1 else None
 
 
-def get_price_delta(item_name, new_price, min_history=1):
+def get_price_delta(item_name, new_price, min_history=1, store=None):
     """Compare a new price against an item's purchase history.
 
     Must be called before log_expense records the new purchase, so the
@@ -178,6 +178,9 @@ def get_price_delta(item_name, new_price, min_history=1):
         min_history: Minimum number of prior purchases required before a
             comparison is meaningful — too little history makes the average
             unreliable.
+        store: Where it's being bought, if known: then only earlier
+            purchases at that store count, since another store's price
+            isn't a price change (no history there means no comparison).
 
     Returns:
         Dict with keys avg_price (historical average), pct_change (signed,
@@ -190,8 +193,8 @@ def get_price_delta(item_name, new_price, min_history=1):
         SELECT AVG(e.unit_price) AS avg_price, COUNT(*) AS n
         FROM item_expenses e
         JOIN inventory_items i ON i.id = e.item_id
-        WHERE i.name = ?
-    """, (item_name,))
+        WHERE i.name = ? AND (? IS NULL OR e.store = ?)
+    """, (item_name, store, store))
     row = cursor.fetchone()
     cursor.close()
     conn.close()

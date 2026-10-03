@@ -1086,7 +1086,7 @@ def _log_purchase(
         crud.mark_name_pending(name)
     if not existed:
         _fill_guesses(name, product)
-    delta = expenses.get_price_delta(name, price)
+    delta = expenses.get_price_delta(name, price, store=store)
     expenses.log_expense(name, qty, price, store=store, purchased_at=_purchased_at(receipt_date))
     # Show what the bot understood the item to be, so a wrong guess is visible.
     product = (crud.get_item(name) or {}).get("product") or product

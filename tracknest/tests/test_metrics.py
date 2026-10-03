@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from db import metrics
+from db import crud, database, expenses, metrics
 
 
 def make_mock_conn(fetchone_side_effect=None, fetchall_side_effect=None):
@@ -177,31 +177,55 @@ def test_get_goal_status_past_target(mock_goal):
     assert result["pace_per_month"] is None
 
 
-@patch("db.metrics.get_connection")
-def test_get_price_trends(mock_conn):
-    rows = [
-        {"name": "Milk", "unit_price": 2.00},
-        {"name": "Milk", "unit_price": 2.20},
-        {"name": "Milk", "unit_price": 3.00},
-        {"name": "Rice", "unit_price": 1.00},
-        {"name": "Rice", "unit_price": 0.90},
-    ]
-    conn, _cursor = make_mock_conn(fetchall_side_effect=[rows])
-    mock_conn.return_value = conn
+@pytest.fixture
+def db(tmp_path):
+    with patch.object(database, "DB_PATH", str(tmp_path / "test.db")):
+        database.init_db()
+        yield
+
+
+def _bought(name, prices, store, start_days_ago=30):
+    if crud.get_item(name) is None:
+        crud.add_item(name, 1)
+    for i, price in enumerate(prices):
+        when = datetime.now(tz=timezone.utc) - timedelta(days=start_days_ago - i)
+        expenses.log_expense(name, 1, price, store=store, purchased_at=when)
+
+
+def test_get_price_trends(db):
+    _bought("Milk", [2.00, 2.20, 3.00], "REWE")
+    _bought("Rice", [1.00, 0.90], "REWE")
     result = metrics.get_price_trends()
-    assert len(result) == 1
-    assert result[0]["name"] == "Milk"
+    assert [(r["name"], r["store"]) for r in result] == [("Milk", "REWE")]
     assert result[0]["pct_change"] == pytest.approx(42.857142857142854)
     assert result[0]["latest_price"] == 3.00
     assert result[0]["avg_price"] == pytest.approx(2.10)
 
 
-@patch("db.metrics.get_connection")
-def test_get_price_trends_insufficient_history(mock_conn):
-    rows = [{"name": "Milk", "unit_price": 2.00}]
-    conn, _cursor = make_mock_conn(fetchall_side_effect=[rows])
-    mock_conn.return_value = conn
+def test_get_price_trends_insufficient_history(db):
+    _bought("Milk", [2.00], "REWE")
     assert metrics.get_price_trends() == []
+
+
+def test_another_stores_price_is_not_a_price_rise(db):
+    """€1.00 pretzels at Yormas and €1.80 at a bakery are two prices, not +80%."""
+    _bought("Pfefferbretzel", [1.00], "Yormas")
+    _bought("Pfefferbretzel", [1.80], "Bäckerei", start_days_ago=10)
+    _bought("Pfefferbretzel", [1.80], None, start_days_ago=5)  # typed, store unknown
+    assert metrics.get_price_trends() == []
+
+
+def test_rounding_noise_is_not_a_price_rise(db):
+    _bought("Banane", [1.99, 1.9900000000000002], "REWE")
+    assert metrics.get_price_trends() == []
+
+
+def test_months_with_spending_include_the_current_one(db):
+    _bought("Milk", [1.0], "REWE", start_days_ago=40)
+    now = datetime.now(tz=timezone.utc)
+    months = metrics.get_months_with_spending()
+    assert months[-1] == (now.year, now.month)
+    assert len(months) == len(set(months)) >= 2
 
 
 @patch("db.metrics.get_connection")

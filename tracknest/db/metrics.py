@@ -253,8 +253,12 @@ def get_daily_cost(top_n=3):
     return {"items": costs[:top_n], "ready": len(costs), "tracked": len(rows)}
 
 
-def get_budget_status():
-    """Return this month's spend against the household budget, or None if no budget is set.
+def get_budget_status(year=None, month=None):
+    """Return a month's spend against the household budget, or None if no budget is set.
+
+    Args:
+        year: Calendar year. Defaults to the current month.
+        month: Calendar month (1-12). Defaults to the current month.
 
     Returns:
         Dict with keys: budget, spent, pct (0-100+, float), or None.
@@ -264,7 +268,7 @@ def get_budget_status():
     budget = get_monthly_budget()
     if budget is None:
         return None
-    spent = get_spending_summary()["total"]
+    spent = get_spending_summary(year, month)["total"]
     pct = (spent / budget * 100) if budget else 0.0
     return {"budget": budget, "spent": spent, "pct": pct}
 
@@ -297,13 +301,19 @@ def get_goal_status():
     return {**goal, "days_left": days_left, "pace_per_month": pace_per_month}
 
 
-def get_price_trends(min_history=2, top_n=3):
-    """Return the items whose latest price has crept up the most against their own history.
+_MIN_PRICE_RISE_PCT = 1.0
 
-    Compares each item's most recent purchase price to the average of its
-    earlier purchases — the same comparison used for the per-purchase price
-    delta, but aggregated across all items so the dashboard can surface
-    creeping inflation, not just one-off jumps.
+
+def get_price_trends(min_history=2, top_n=3):
+    """Return the items whose latest price has crept up the most against their own history, per store.
+
+    Compares each item's most recent purchase price at a store to the
+    average of its earlier purchases at that same store — the same
+    comparison as the per-purchase price delta, aggregated so the dashboard
+    can surface creeping inflation. Different stores charging different
+    prices isn't inflation, so stores are never mixed, and purchases with no
+    known store are left out. Rises under _MIN_PRICE_RISE_PCT are noise
+    (float rounding, a cent) and are left out too.
 
     Args:
         min_history: Minimum number of purchases (including the latest)
@@ -311,16 +321,16 @@ def get_price_trends(min_history=2, top_n=3):
         top_n: How many items to return, highest increase first.
 
     Returns:
-        List of dicts: name, pct_change (signed), latest_price, avg_price.
-        Only items with a positive pct_change are included.
+        List of dicts: name, store, pct_change, latest_price, avg_price.
     """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT i.name AS name, e.unit_price AS unit_price
+        SELECT i.name AS name, e.store AS store, e.unit_price AS unit_price
         FROM item_expenses e
         JOIN inventory_items i ON i.id = e.item_id
-        ORDER BY i.name, e.id ASC
+        WHERE e.store IS NOT NULL
+        ORDER BY i.name, e.store, COALESCE(e.logged_at, e.purchase_date), e.id
     """)
     rows = cursor.fetchall()
     cursor.close()
@@ -328,10 +338,10 @@ def get_price_trends(min_history=2, top_n=3):
 
     prices_by_item = {}
     for row in rows:
-        prices_by_item.setdefault(row["name"], []).append(row["unit_price"])
+        prices_by_item.setdefault((row["name"], row["store"]), []).append(row["unit_price"])
 
     trends = []
-    for name, prices in prices_by_item.items():
+    for (name, store), prices in prices_by_item.items():
         if len(prices) < min_history:
             continue
         *prior, latest = prices
@@ -339,14 +349,31 @@ def get_price_trends(min_history=2, top_n=3):
         if avg_price <= 0:
             continue
         pct_change = (latest - avg_price) / avg_price * 100
-        if pct_change > 0:
+        if pct_change >= _MIN_PRICE_RISE_PCT:
             trends.append({
-                "name": name, "pct_change": pct_change,
+                "name": name, "store": store, "pct_change": pct_change,
                 "latest_price": latest, "avg_price": avg_price,
             })
 
     trends.sort(key=lambda t: t["pct_change"], reverse=True)
     return trends[:top_n]
+
+
+def get_months_with_spending(limit=12):
+    """Return the (year, month) pairs that have purchases, plus the current month, oldest first.
+
+    Args:
+        limit: How many of the most recent months to return at most.
+    """
+    now = datetime.now(tz=timezone.utc)
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT DISTINCT substr(purchase_date, 1, 7) AS ym FROM item_expenses WHERE purchase_date IS NOT NULL")
+    months = {tuple(int(part) for part in row["ym"].split("-")) for row in cursor.fetchall()}
+    cursor.close()
+    conn.close()
+    months.add((now.year, now.month))
+    return sorted(m for m in months if m <= (now.year, now.month))[-limit:]
 
 
 def get_inventory_health():
