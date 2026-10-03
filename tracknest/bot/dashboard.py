@@ -15,7 +15,7 @@ from html import escape
 from aiohttp import web
 
 from bot import auth
-from bot.categorize import CATEGORY_NAMES
+from bot.categorize import CATEGORY_NAMES, PURPOSES, purpose_of
 from db import crud, metrics, shopping_list
 
 _SESSION_COOKIE = "tracknest_session"
@@ -25,6 +25,14 @@ _SESSION_COOKIE = "tracknest_session"
 # hiding exactly where the money went — and 12 labelled one-colour rows
 # still read fine on a phone.
 _MAX_CATEGORIES = len(CATEGORY_NAMES)
+
+
+def _purposes(categories: list[dict]) -> list[dict]:
+    """Category totals summed per purpose (Food, Personal & home, Leisure, Other), biggest first, empty ones left out."""
+    totals = {purpose: 0.0 for purpose in PURPOSES}
+    for c in categories:
+        totals[purpose_of(c["category"])] += c["total"]
+    return sorted(({"name": p, "total": t} for p, t in totals.items() if t), key=lambda p: p["total"], reverse=True)
 
 
 def build_month_data(year: int, month: int) -> dict:
@@ -37,6 +45,7 @@ def build_month_data(year: int, month: int) -> dict:
         and daily (euros per day).
     """
     now = datetime.now(tz=timezone.utc)
+    is_current = (year, month) == (now.year, now.month)
     spending = metrics.get_spending_summary(year, month, top_n=50)
     pace = metrics.get_month_pace(year, month)
 
@@ -49,15 +58,19 @@ def build_month_data(year: int, month: int) -> dict:
 
     return {
         "key": f"{year:04d}-{month:02d}",
-        "is_current": (year, month) == (now.year, now.month),
+        "is_current": is_current,
         "month_label": datetime(year, month, 1).strftime("%B %Y"),
         "day": pace["days_elapsed"],
         "days_in_month": pace["days_in_month"],
         "spent": spending["total"],
         "projected": pace["projected"],
-        "budget": metrics.get_budget_status(year, month),
+        # Only the current month: the budget is a single setting with no
+        # history, so measuring a closed month against today's figure
+        # (set after that month ended) would be made up.
+        "budget": metrics.get_budget_status(year, month) if is_current else None,
         "mix": {k: spending[k] for k in ("need", "treat", "unknown")},
         "categories": categories,
+        "purposes": _purposes(spending["top_categories"]),
         "trips": metrics.get_shopping_trips(year, month),
         "daily": metrics.get_daily_spend(year, month),
     }
@@ -100,17 +113,30 @@ def _empty(title: str, body: str) -> str:
     return f'<div class="card empty-card"><strong>{title}</strong>{body}</div>'
 
 
+_PURPOSE_COLORS = {"Food": "var(--p-food)", "Personal & home": "var(--p-home)",
+                   "Leisure": "var(--p-leisure)", "Other": "var(--mix-none)"}
+
+
+def _purpose_bar(purposes: list[dict], total: float, amounts: bool) -> str:
+    """One stacked bar of what the money went to, with a legend; amounts=False shows percentages only."""
+    if not total or not purposes:
+        return ""
+    segments = "".join(
+        f'<div style="width:{p["total"] / total * 100:.2f}%;background:{_PURPOSE_COLORS[p["name"]]}" '
+        f'title="{p["name"]}: {p["total"] / total * 100:.0f}%"></div>'
+        for p in purposes
+    )
+    legend = "".join(
+        f'<div class="legend-item"><span class="swatch" style="background:{_PURPOSE_COLORS[p["name"]]}"></span>'
+        f'{p["name"]} <strong>{p["total"] / total * 100:.0f}%</strong>'
+        + (f' <span class="muted">{_eur(p["total"])}</span>' if amounts else "") + "</div>"
+        for p in purposes
+    )
+    return f'<div class="mix-bar purpose">{segments}</div><div class="legend">{legend}</div>'
+
+
 def _hero(data: dict) -> str:
-    trips = data["trips"]
-    if trips["count"]:
-        sub = (
-            f'{trips["count"]} shopping trip{"s" if trips["count"] != 1 else ""} · '
-            f'average basket {_eur(trips["avg_basket"])}'
-        )
-    else:
-        sub = "No purchases logged yet this month"
-    if trips.get("not_shopping"):
-        sub += f' · includes {_eur(trips["not_shopping"])} leisure (not a shopping trip)'
+    sub = "" if data["spent"] else '<p class="hero-sub">No purchases logged yet this month</p>'
     current = data.get("is_current", True)
     if not current:
         forecast = "Month closed — this is the final total"
@@ -123,8 +149,8 @@ def _hero(data: dict) -> str:
     <div class="card hero">
       <p class="label">{label}</p>
       <div class="hero-value">{_eur(data["spent"])}</div>
-      <p class="hero-sub">{sub}</p>
-      <p class="hero-sub">{forecast}</p>
+      <p class="hero-sub">{forecast}</p>{sub}
+      {_purpose_bar(data.get("purposes", []), data["spent"], amounts=True)}
     </div>"""
 
 
@@ -394,6 +420,7 @@ _STYLE = """
     --border: rgba(11,11,11,0.10); --track: #eceae2;
     --accent: #1baf7a; --warn: #b87700;
     --mix-need: #2a78d6; --mix-treats: #eb6834; --mix-none: #c3c2b7;
+    --p-food: #1baf7a; --p-home: #4a3aa7; --p-leisure: #eda100;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
@@ -403,6 +430,7 @@ _STYLE = """
       --border: rgba(255,255,255,0.10); --track: #2c2c2a;
       --accent: #199e70; --warn: #fab219;
       --mix-need: #3987e5; --mix-treats: #d95926; --mix-none: #52514e;
+      --p-food: #199e70; --p-home: #9085e9; --p-leisure: #c98500;
     }
   }
   * { box-sizing: border-box; }
@@ -422,6 +450,7 @@ _STYLE = """
   .kpi-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
   .kpi-row .card { margin: 0; }
   .kpi-row.two { grid-template-columns: 1fr 1fr; }
+  .kpi-row.one { grid-template-columns: 1fr; }
   .month-radio { position: absolute; opacity: 0; pointer-events: none; }
   .month { display: none; }
   .tabs { display: flex; gap: 4px; padding: 3px; border-radius: 10px; background: var(--surface-2); }
@@ -454,6 +483,7 @@ _STYLE = """
           padding: 4px 9px; font-size: 14px; cursor: pointer; }
   .tool[hidden] { display: none; }
   .rows.tight { padding: 6px 0 4px; gap: 6px; }
+  .mix-bar.purpose { margin-top: 16px; }
   .group-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
                  color: var(--ink-muted); margin: 22px 0 10px; }
   .kpi { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
@@ -497,7 +527,7 @@ _STYLE = """
   footer a { color: var(--ink-muted); }
   @media (max-width: 560px) {
     .kpi-row { grid-template-columns: 1fr 1fr; }
-    .kpi-row:not(.two) .card:first-child { grid-column: 1 / -1; }
+    .kpi-row:not(.two):not(.one) .card:first-child { grid-column: 1 / -1; }
     .split { grid-template-columns: 1fr; gap: 0; }
     .hero-value { font-size: 38px; }
     .bar-row { grid-template-columns: 96px 1fr 70px; }
@@ -529,11 +559,16 @@ def _share_view(month: dict, previous: dict | None = None) -> str:
     shopped = sum(1 for v in days if v)
     budget = month["budget"]
     budget_line = f'<p class="hero-sub">{budget["pct"]:.0f}% of the monthly budget used</p>' if budget else ""
+    purposes = month.get("purposes", [])
+    lead = purposes[0] if purposes else None
+    headline = (f'<div class="hero-value">{lead["total"] / total * 100:.0f}%</div>'
+                f'<p class="hero-sub">went on {lead["name"].lower()}</p>' if lead else
+                '<p class="hero-sub">No purchases logged yet this month</p>')
     hero = f"""
     <div class="card hero">
-      <p class="label">Shopping trips</p>
-      <div class="hero-value">{trips["count"]}</div>
-      <p class="hero-sub">on {shopped} of {month["day"]} days</p>{budget_line}
+      <p class="label">Where the money went</p>
+      {headline}{budget_line}
+      {_purpose_bar(purposes, total, amounts=False)}
     </div>"""
     if not total:
         return f'<p class="period">{escape(month["month_label"])}</p>{hero}'
@@ -566,6 +601,7 @@ def _share_view(month: dict, previous: dict | None = None) -> str:
     <div class="cards">
       {_trips_card(month, previous, share=True)}
       <div class="card section"><p class="section-title">When the shopping happened</p>
+        <p class="section-sub">Shopped on {shopped} of {month["day"]} days</p>
         <svg class="daily" viewBox="0 0 {width} {height}" preserveAspectRatio="none" role="img"
              aria-label="Share of the month's spending per day">{bars}</svg>
         <div class="axis"><span>1</span><span>{len(days) // 2}</span><span>{len(days)}</span></div></div>
@@ -638,6 +674,7 @@ def _trips_card(month: dict, previous: dict | None, share: bool = False) -> str:
     <div class="card section">
       <p class="section-title">Shopping trips: {trips["count"]}</p>
       {compare}
+      {"" if share or not trips.get("avg_basket") else f'<p class="section-sub">Average basket {_eur(trips["avg_basket"])}</p>'}
       {top}
     </div>"""
 
@@ -649,7 +686,7 @@ def _month_view(month: dict, previous: dict | None = None) -> str:
         kpis = f'<div class="kpi-row">{_budget_kpi(month)}{_treats_kpi(month)}{_list_kpi(month)}</div>'
     else:
         period = f'{month["month_label"]} · closed'
-        kpis = f'<div class="kpi-row two">{_budget_kpi(month)}{_treats_kpi(month)}</div>'
+        kpis = f'<div class="kpi-row one">{_treats_kpi(month)}</div>'
     return f"""
     <p class="period">{period}</p>
     {_hero(month)}

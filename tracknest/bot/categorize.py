@@ -126,6 +126,20 @@ _CATEGORIES: list[tuple[str, list[str]]] = [
 # Categories that are spending but not shopping — no store visit to cut down on.
 NOT_SHOPPING = ("Leisure",)
 
+# What the money went to, one level above categories — the headline split
+# on the dashboard. Every category belongs to exactly one purpose.
+PURPOSES: dict[str, tuple[str, ...]] = {
+    "Food": ("Fruits/Veg", "Dairy", "Bread/Bakery", "Meat/Fish", "Pantry", "Snacks", "Ready Meals", "Beverages"),
+    "Personal & home": ("Hygiene/Personal Care", "Household", "Clothing"),
+    "Leisure": ("Leisure",),
+    "Other": ("Other",),
+}
+
+
+def purpose_of(category: str | None) -> str:
+    """The purpose ("Food", "Leisure", ...) a category belongs to; "Other" if it's unknown."""
+    return next((p for p, cats in PURPOSES.items() if category in cats), "Other")
+
 
 # Every label infer_category can return, in display order — also the choices
 # offered when the user names a new receipt item.

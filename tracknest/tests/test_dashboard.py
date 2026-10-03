@@ -64,7 +64,8 @@ def test_render_shows_the_headline_numbers():
 
     assert "€120.00" in html
     assert "On pace for <strong>€156.50</strong>" in html
-    assert "4 shopping trips" in html
+    assert html.count("Shopping trips: 4") == 2  # once per view (private, share), only in the trips card
+    assert "4 shopping trips" not in html
     assert "REWE" in html and "Typed in by hand" in html
     assert "▲ 12%" in html
     assert "Broccoli" in html and "2d left" in html
@@ -152,3 +153,23 @@ def test_share_view_of_an_empty_month_still_renders():
         trips={"count": 0, "avg_basket": None, "by_store": []}, daily=[0.0] * 30,
     ))
     assert '<div class="shared">' in html
+
+
+def test_where_the_money_went_leads_both_views():
+    import re
+    purposes = [{"name": "Food", "total": 90.0}, {"name": "Personal & home", "total": 25.0},
+                {"name": "Leisure", "total": 5.0}]
+    html = dashboard.render_dashboard_html(sample_data(purposes=purposes))
+    assert "Food <strong>75%</strong> <span class=\"muted\">€90.00</span>" in html  # private: % and €
+    shared = re.findall(r'<div class="shared">(.*?)</div></section>', html, re.S)[0]
+    assert "Where the money went" in shared and "went on food" in shared
+    assert "Leisure <strong>4%</strong>" in shared and "€" not in shared
+
+
+def test_a_closed_month_is_never_measured_against_todays_budget():
+    month_keys = ("month_label", "day", "days_in_month", "spent", "projected", "mix", "categories", "trips", "daily")
+    closed = {k: v for k, v in sample_data().items() if k in month_keys} | {
+        "key": "2026-09", "is_current": False, "budget": None}
+    html = dashboard.render_dashboard_html(sample_data(months=[closed, sample_data(key="2026-10")]))
+    september = html.split('class="month m0"')[1].split('class="month m1"')[0]
+    assert "Budget" not in september and "/set_budget" not in september
