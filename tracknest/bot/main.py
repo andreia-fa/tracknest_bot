@@ -13,6 +13,7 @@ from bot import dashboard
 from bot.categorize import CATEGORY_NAMES, infer_category
 from bot.list_match import choose_list_match
 from bot.parser import parse_line
+from bot.profile_guess import guess_profile
 from bot.tunnel import CloudflareTunnel
 from config import BOT_TOKEN
 from db import crud, expenses, metrics, receipt_queue, settings, shopping_list
@@ -469,6 +470,94 @@ async def handle_name_category(update: Update, context: ContextTypes.DEFAULT_TYP
     await send_pending_profile_question(context.bot, update.effective_chat.id)
 
 
+def _fill_guesses(name: str, product: str | None) -> None:
+    """Answer a new item's profile questions from what's already known, where possible.
+
+    The same product bought under another name lends its answers first
+    (crud.copy_product_profile); the item's category default
+    (bot.profile_guess) fills what's still unknown. Whatever neither covers
+    stays 'unknown' and gets asked. Guesses are shown on the purchase line
+    with a ✏️ button (see _fix_buttons), never silently.
+    """
+    if product:
+        crud.copy_product_profile(name, product)
+    item = crud.get_item(name) or {}
+    kind, lasts = guess_profile(item.get("category"))
+    if kind and item.get("treat_or_need", "unknown") == "unknown":
+        crud.set_treat_or_need(name, kind)
+    if lasts and item.get("lasts", "unknown") == "unknown":
+        crud.set_lasts(name, *lasts)
+
+
+def _profile_note(item: dict) -> str:
+    """How an item is filed, for a purchase line: "🍫 treat · used up the same day", ❓ where unknown."""
+    kind = _KIND_LABELS.get(item.get("treat_or_need"), "❓ treat or need")
+    lasts = item.get("lasts", "unknown")
+    how_long = "❓ how long it lasts" if lasts == "unknown" else _describe_lasts(lasts, item.get("shelf_life_days"))
+    return f"{kind} · {how_long}"
+
+
+def _fix_buttons(item_ids: list[int]) -> list[list[InlineKeyboardButton]]:
+    """A "✏️ <name>" button per newly filed item, plus "✅ All good" — rows to add under a purchase reply."""
+    rows = []
+    for item_id in item_ids:
+        item = crud.get_item_by_id(item_id)
+        if item:
+            rows.append([InlineKeyboardButton(f"✏️ {item['name']}", callback_data=f"fix:{item_id}")])
+    if rows:
+        rows.append([InlineKeyboardButton("✅ All good", callback_data="fixok")])
+    return rows
+
+
+def _fix_keyboard(item_id: int) -> InlineKeyboardMarkup:
+    """Treat/need plus the how-long-it-lasts choices, for correcting one item."""
+    kind_row = [
+        InlineKeyboardButton("🍫 Treat", callback_data=f"kind_set:{item_id}:treat"),
+        InlineKeyboardButton("🧺 Need", callback_data=f"kind_set:{item_id}:need"),
+    ]
+    return InlineKeyboardMarkup([kind_row, *_shelf_keyboard(f"shelf_set:{item_id}:").inline_keyboard])
+
+
+async def handle_fix(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle "✏️ <name>" under a purchase reply: offer that item's answers to change."""
+    query = update.callback_query
+    await query.answer()
+    item = crud.get_item_by_id(int(query.data.split(":", 1)[1]))
+    if not item:
+        await query.message.reply_text("That item no longer exists.")
+        return
+    await query.message.reply_text(
+        f"{item['name']}: {_profile_note(item)}. Change it:", reply_markup=_fix_keyboard(item["id"])
+    )
+
+
+async def handle_kind_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle 🍫 Treat / 🧺 Need on an item's change keyboard; how long it lasts stays changeable."""
+    query = update.callback_query
+    await query.answer()
+    _prefix, item_id, kind = query.data.split(":", 2)
+    item = crud.get_item_by_id(int(item_id))
+    if not item:
+        await query.edit_message_text("That item no longer exists.")
+        return
+    crud.set_treat_or_need(item["name"], kind)
+    item = crud.get_item_by_id(int(item_id))
+    await query.edit_message_text(
+        f"{item['name']}: {_profile_note(item)}. Change it:", reply_markup=_fix_keyboard(item["id"])
+    )
+
+
+async def handle_fix_ok(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle "✅ All good": drop the ✏️ buttons, keep any ↩️ put-back ones."""
+    query = update.callback_query
+    await query.answer("Thanks!")
+    remaining = [
+        row for row in (query.message.reply_markup.inline_keyboard if query.message.reply_markup else [])
+        if not row[0].callback_data.startswith(("fix:", "fixok"))
+    ]
+    await query.edit_message_reply_markup(InlineKeyboardMarkup(remaining) if remaining else None)
+
+
 def _is_profiled(item: dict) -> bool:
     """Whether both profiling answers (treat or need, how long it lasts) are in."""
     return item.get("treat_or_need", "unknown") != "unknown" and item.get("lasts", "unknown") != "unknown"
@@ -685,15 +774,16 @@ def _preview_list_lines(text: str) -> list[str]:
     return preview
 
 
-def _apply_list_lines(text: str) -> tuple[list[str], bool]:
+def _apply_list_lines(text: str) -> tuple[list[str], list[int] | None]:
     """Apply typed lines to the shopping list (or log priced lines as purchases).
 
     Returns:
-        (replies, logged_a_purchase): one reply line per input line, and
-        whether any line was logged as a purchase.
+        (replies, new_item_ids): one reply line per input line, and the ids
+        of items a purchase line created (to offer ✏️ on their guessed
+        answers) — None if no line was a purchase at all.
     """
     replies = []
-    logged_a_purchase = False
+    new_item_ids = None
     for line in (line for line in text.splitlines() if line.strip()):
         stripped = line.strip()
         if stripped.startswith("-"):
@@ -712,16 +802,19 @@ def _apply_list_lines(text: str) -> tuple[list[str], bool]:
             replies.append(f"Couldn't understand: '{line}'")
             continue
         if unit_price is not None:
+            is_new = crud.get_item(name) is None
             line, _cleared_id = _log_purchase(
                 name, qty, unit_price, store=_typed_purchase_store(name, unit_price),
                 category=infer_category(name), matched_list_item=name,
             )
             replies.append(line)
-            logged_a_purchase = True
+            new_item_ids = new_item_ids or []
+            if is_new and (logged := crud.get_item(name)):
+                new_item_ids.append(logged["id"])
             continue
         shopping_list.add_item(name, qty, category=infer_category(name))
         replies.append(f"Added {qty}x {name} to your shopping list.")
-    return replies, logged_a_purchase
+    return replies, new_item_ids
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -805,9 +898,10 @@ async def handle_typed_choice(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.edit_message_text(f"💬 Answering {pending[2]}: {typed['text']}")
         await _answer_pending_question(_replayed_update(query, typed["text"]), context, pending[0])
         return
-    replies, logged_a_purchase = _apply_list_lines(typed["text"])
-    await query.edit_message_text("\n".join(replies))
-    if logged_a_purchase:
+    replies, new_item_ids = _apply_list_lines(typed["text"])
+    rows = _fix_buttons(new_item_ids or [])
+    await query.edit_message_text("\n".join(replies), reply_markup=InlineKeyboardMarkup(rows) if rows else None)
+    if new_item_ids is not None:
         await send_pending_profile_question(context.bot, query.message.chat_id)
 
 
@@ -869,16 +963,20 @@ def _log_purchase(
             f"• {qty}x {name} at €{price:.2f} each — skipped, this exact item/price "
             "was already logged in the last hour (looks like the same receipt sent twice)"
         ), None
-    is_new = ask_name and crud.get_item(name) is None
+    existed = crud.get_item(name) is not None
     crud.add_item(name, qty, category=category, product=product)
-    if is_new:
+    if ask_name and not existed:
         crud.mark_name_pending(name)
+    if not existed:
+        _fill_guesses(name, product)
     delta = expenses.get_price_delta(name, price)
     expenses.log_expense(name, qty, price, store=store)
     # Show what the bot understood the item to be, so a wrong guess is visible.
     product = (crud.get_item(name) or {}).get("product") or product
     shown = f"{name} ({product})" if product and product.casefold() not in name.casefold() else name
     line = f"• {qty}x {shown} at €{price:.2f} each"
+    if not existed:
+        line += f" — {_profile_note(crud.get_item(name) or {})}"
     cleared_id = (
         shopping_list.remove_item(matched_list_item, reason=clear_reason, source=source or name)
         if matched_list_item else None
@@ -938,9 +1036,10 @@ def _put_back_keyboard(cleared: list[tuple[int, str]]) -> InlineKeyboardMarkup |
 async def process_receipt_result(parsed: dict) -> tuple[str, InlineKeyboardMarkup | None]:
     """Log a parsed receipt's items and build the summary reply text.
 
-    Used by the local receipt worker after it runs parse_receipt. Newly
-    added items with no shelf-life estimate yet are picked up automatically
-    by crud.get_pending_profile_item() — the caller should follow up with
+    Used by the local receipt worker after it runs parse_receipt. New
+    items are filed with a guess where one exists (_fill_guesses), shown on
+    their line with a ✏️ button; anything still unknown is picked up by
+    crud.get_pending_profile_item() — the caller should follow up with
     send_pending_profile_question() once this returns.
 
     Args:
@@ -957,8 +1056,10 @@ async def process_receipt_result(parsed: dict) -> tuple[str, InlineKeyboardMarku
     list_names = [entry["name"] for entry in shopping_list.get_all_items()]
     replies = []
     cleared = []
+    new_ids = []
     for item in items:
         name, category, product, ask_name = _resolve_receipt_name(item)
+        is_new = crud.get_item(name) is None
         list_match = choose_list_match(
             item["name"], name, item["matched_shopping_list_item"], list_names, product=product,
         )
@@ -972,6 +1073,8 @@ async def process_receipt_result(parsed: dict) -> tuple[str, InlineKeyboardMarku
         replies.append(line)
         if cleared_id:
             cleared.append((cleared_id, list_match))
+        if is_new and (logged := crud.get_item(name)):
+            new_ids.append(logged["id"])
     if not parsed["reconciled"]:
         replies.append(
             f"⚠️ Heads up: item prices add up to €{parsed['items_total']:.2f} but the "
@@ -980,7 +1083,10 @@ async def process_receipt_result(parsed: dict) -> tuple[str, InlineKeyboardMarku
         )
     if cleared:
         replies.append("\nWrongly cleared something? Tap to put it back:")
-    return "Receipt processed:\n" + "\n".join(replies), _put_back_keyboard(cleared)
+    if new_ids:
+        replies.append("\nNew items are filed with my best guess — tap ✏️ to change one.")
+    rows = [*(_put_back_keyboard(cleared) or InlineKeyboardMarkup([])).inline_keyboard, *_fix_buttons(new_ids)]
+    return "Receipt processed:\n" + "\n".join(replies), InlineKeyboardMarkup(rows) if rows else None
 
 
 async def handle_restore(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1589,6 +1695,9 @@ async def main():
     app.add_handler(CallbackQueryHandler(handle_profile_kind_choice, pattern=r"^profile_(kind|type):"))
     app.add_handler(CallbackQueryHandler(handle_product_ok, pattern=r"^product_ok$"))
     app.add_handler(CallbackQueryHandler(handle_restore, pattern=r"^restore:"))
+    app.add_handler(CallbackQueryHandler(handle_fix, pattern=r"^fix:"))
+    app.add_handler(CallbackQueryHandler(handle_fix_ok, pattern=r"^fixok$"))
+    app.add_handler(CallbackQueryHandler(handle_kind_set, pattern=r"^kind_set:"))
     app.add_handler(CallbackQueryHandler(handle_name_category, pattern=r"^name_cat:"))
     app.add_handler(CallbackQueryHandler(handle_profile_shelf_choice, pattern=r"^profile_shelf:"))
     app.add_handler(CallbackQueryHandler(handle_shelf_edit, pattern=r"^shelf_edit:"))
