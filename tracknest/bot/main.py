@@ -1703,8 +1703,11 @@ async def dashboard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not url:
         await update.message.reply_text("Dashboard is still starting up — try again in a few seconds.")
         return
+    # Telegram Desktop opens mini apps in a small fixed popup; the browser
+    # button gives the same (password-protected) page a full-size window.
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📊 Open Dashboard", web_app=WebAppInfo(url=f"{url}/login"))]
+        [InlineKeyboardButton("📊 Open in Telegram", web_app=WebAppInfo(url=f"{url}/login"))],
+        [InlineKeyboardButton("🖥 Open in browser", url=f"{url}/login")],
     ])
     await update.message.reply_text("Your dashboard (password-protected):", reply_markup=keyboard)
 

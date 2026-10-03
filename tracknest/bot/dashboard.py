@@ -441,6 +441,10 @@ _STYLE = """
     .cards > .card { margin: 0; }
     .cards { margin-bottom: 14px; }
   }
+  .header-tools { display: flex; align-items: center; gap: 8px; }
+  .tool { border: 1px solid var(--border); background: var(--surface); color: var(--ink-2); border-radius: 8px;
+          padding: 4px 9px; font-size: 14px; cursor: pointer; }
+  .tool[hidden] { display: none; }
   .group-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
                  color: var(--ink-muted); margin: 22px 0 10px; }
   .kpi { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
@@ -490,6 +494,22 @@ _STYLE = """
     .bar-row { grid-template-columns: 96px 1fr 70px; }
   }
 """
+
+
+_TELEGRAM_SCRIPT = """<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+  // Inside Telegram: full height, and a full-screen button where the app supports it (Bot API 8.0+).
+  document.addEventListener("DOMContentLoaded", () => {
+    const app = window.Telegram && Telegram.WebApp;
+    if (!app || !app.initData) return;
+    app.expand();
+    if (app.isVersionAtLeast && app.isVersionAtLeast("8.0") && app.requestFullscreen) {
+      const button = document.getElementById("fullscreen");
+      button.hidden = false;
+      button.onclick = () => app.isFullscreen ? app.exitFullscreen() : app.requestFullscreen();
+    }
+  });
+</script>"""
 
 
 def _month_view(month: dict) -> str:
@@ -549,14 +569,13 @@ def render_dashboard_html(data: dict) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TrackNest</title>
 <style>{_STYLE}{_month_tabs_css(len(months))}</style>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script>window.Telegram && Telegram.WebApp && Telegram.WebApp.expand();</script>
+{_TELEGRAM_SCRIPT}
 </head>
 <body>
   {radios}
   <header>
     <div class="brand"><span class="brand-mark"></span><h1>TrackNest</h1></div>
-    {tabs}
+    <div class="header-tools">{tabs}<button id="fullscreen" class="tool" hidden title="Full screen">⛶</button></div>
   </header>
   {views}
   <p class="group-title">Right now</p>
