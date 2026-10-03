@@ -124,6 +124,8 @@ async def test_cheese_on_the_list_brings_up_every_cheese_note(db):
                  "J.Tag Käseaufschnitt — 🚫 Don't buy again", "J.Tag Emmental — 🚫 Don't buy again"):
         assert line.split(" — ")[0].lstrip("⭐ ") in text and line.split(" — ")[1] in text, line
     assert "Push Up Bra" not in text  # notes of other kinds of things stay out
+    order = [text.index(n) for n in ("Milram", "LEERDAMMER", "J.Tag Käseaufschnitt")]
+    assert order == sorted(order)  # favourite, second favourite, then don't-buys
 
 
 def test_a_dont_buy_cheese_never_lends_its_no_reminders_profile(db):

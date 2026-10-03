@@ -594,10 +594,13 @@ def _related_notes(entry: str) -> str:
     whatever its brand. One line per item, ready to append to a reply.
     """
     lines = []
-    for item in crud.get_noted_items():
-        if same_kind(entry, [item["name"], item["product"]]):
-            mark = "" if item["notes"][:1] in "⭐🚫" else "📝 "
-            lines.append(f"\n  {mark}{item['name']} — {item['notes']}")
+    related = [i for i in crud.get_noted_items() if same_kind(entry, [i["name"], i["product"]])]
+    # ⭐ favourites first ("⭐ Favourite" before "⭐ Second favourite"), then 🚫 don't-buys, then the rest.
+    order = {"⭐": 0, "🚫": 1}
+    related.sort(key=lambda i: (order.get(i["notes"][:1], 2), i["notes"] if i["notes"][:1] == "⭐" else ""))
+    for item in related:
+        mark = "" if item["notes"][:1] in "⭐🚫" else "📝 "
+        lines.append(f"\n  {mark}{item['name']} — {item['notes']}")
     return "".join(lines)
 
 
