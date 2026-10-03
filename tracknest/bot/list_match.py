@@ -31,6 +31,8 @@ _SYNONYMS: list[tuple[str, ...]] = [
     ("cream", "sahne", "nata"),
     ("egg", "eier", "ei", "ovo"),
     ("bread", "brot", "pão", "pao"),
+    ("pretzel", "brezel", "bretzel", "breze"),
+    ("zimtschnecke", "zimtschenecke", "cinnamon bun"),
     ("roll", "brötchen", "semmel"),
     ("water", "wasser", "água", "agua"),
     ("juice", "saft", "sumo"),
@@ -122,8 +124,15 @@ def _same_thing(receipt_names: list[str], list_name: str) -> bool | None:
     return any(group in list_groups for name in receipt_names for group in _groups_of(name))
 
 
+def _shares_a_word(receipt_names: list[str], list_name: str) -> bool:
+    """Tell whether a list entry and the receipt names share a word (or a cut-off start of one)."""
+    list_words = [w for w in _normalize(list_name).split() if len(w) >= _MIN_INSIDE_LEN and not w.isdigit()]
+    return any(_mentions(_normalize(name), word) or _mentions(word, _normalize(name))
+               for name in receipt_names for word in list_words)
+
+
 def choose_list_match(
-    receipt_name: str, canonical_name: str, model_match: str, list_names: list[str],
+    receipt_name: str, canonical_name: str, model_match: str, list_names: list[str], product: str | None = None,
 ) -> str | None:
     """Pick the shopping-list entry this purchase clears, if any.
 
@@ -133,11 +142,14 @@ def choose_list_match(
             if they taught the bot one; otherwise the same as receipt_name).
         model_match: The vision model's suggested list entry ("" for none).
         list_names: Current shopping-list entries.
+        product: What the item generically is ("hair curler" for
+            "Lockenstab XL"), if known — lets a cross-language model match
+            through when the synonym list knows neither word.
 
     Returns:
         The list entry to clear, exactly as it appears on the list, or None.
     """
-    names = [receipt_name, canonical_name]
+    names = [receipt_name, canonical_name] + ([product] if product else [])
     by_key = {_normalize(entry): entry for entry in list_names}
 
     # The user's own name for the item is the strongest signal there is.
@@ -145,8 +157,13 @@ def choose_list_match(
     if exact:
         return exact
     model_entry = by_key.get(_normalize(model_match)) if model_match else None
-    if model_entry and _same_thing(names, model_entry) is not False:
-        return model_entry
+    if model_entry:
+        # The model alone isn't enough: it once cleared "Pfefferbretzel" for
+        # a Kuchenbeleg. When the synonym list can't judge the pair, the
+        # entry must at least share a word with the item's names or product.
+        judged = _same_thing(names, model_entry)
+        if judged or (judged is None and _shares_a_word(names, model_entry)):
+            return model_entry
     for entry in list_names:
         if _same_thing(names, entry):
             return entry

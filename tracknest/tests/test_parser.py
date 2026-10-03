@@ -67,3 +67,14 @@ def test_bare_integer_is_still_quantity_not_price():
     # No decimal separator -> always quantity, never a price, even though
     # "2" alone would also parse fine as a price.
     assert parse_line("Bananas 2") == ("Bananas", 2, None)
+
+
+@pytest.mark.parametrize("line, expected", [
+    ("Pfefferbretzel 1€", ("Pfefferbretzel", 1, 1.0)),
+    ("Zimtschenecke 3.50€", ("Zimtschenecke", 1, 3.5)),
+    ("Zimtschenecke 3,50 €", ("Zimtschenecke", 1, 3.5)),
+    ("Matcha €6.90", ("Matcha", 1, 6.9)),
+    ("Oat Milk 3 2,50€", ("Oat Milk", 3, 2.5)),
+])
+def test_euro_sign_marks_a_price(line, expected):
+    assert parse_line(line) == expected

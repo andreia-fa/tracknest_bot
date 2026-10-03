@@ -9,6 +9,9 @@ import re
 # (e.g. "> -- Soutien branco --" -> "-- Soutien branco --" -> "Soutien branco").
 _LEADING_BULLET_RE = re.compile(r"^[\s\->*•]+")
 _TRAILING_BULLET_RE = re.compile(r"[\s\-*•]+$")
+# A trailing price marked with a euro sign, either side: "1€", "3,50 €", "€6.90".
+# The sign makes it a price even without decimals.
+_EURO_PRICE_RE = re.compile(r"\s*(?:€\s*(\d+(?:[.,]\d+)?)|(\d+(?:[.,]\d+)?)\s*€)$")
 
 
 def parse_line(line: str) -> tuple[str, int, float | None]:
@@ -19,7 +22,8 @@ def parse_line(line: str) -> tuple[str, int, float | None]:
     ',' as the decimal separator (e.g. "Oat Milk 3 2,50" or "Matcha 2.50").
     A price is only recognized when its token contains a decimal separator
     — a bare integer is always read as quantity, never price, so "Bananas
-    2" still means two bananas, not €2. Trailing tokens that don't match
+    2" still means two bananas, not €2 — unless it carries a euro sign
+    ("Pfefferbretzel 1€", "Matcha €6.90"), which always marks a price. Trailing tokens that don't match
     these shapes are treated as part of the name. Leading/trailing
     list-bullet punctuation (">", "*", "•", "--") is stripped first, so
     pasting a formatted list doesn't leak stray symbols into the stored
@@ -47,6 +51,14 @@ def parse_line(line: str) -> tuple[str, int, float | None]:
 
     quantity = 1
     unit_price = None
+
+    euro = _EURO_PRICE_RE.search(line)
+    if euro:
+        unit_price = _parse_price(euro.group(1) or euro.group(2))
+        tokens = line[:euro.start()].split()
+        if len(tokens) >= 2 and tokens[-1].isdigit():
+            quantity = int(tokens[-1])
+            tokens = tokens[:-1]
 
     if len(tokens) >= 3 and tokens[-2].isdigit():
         price = _parse_price(tokens[-1])

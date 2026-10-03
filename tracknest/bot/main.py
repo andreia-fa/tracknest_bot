@@ -936,7 +936,9 @@ async def process_receipt_result(parsed: dict) -> tuple[str, InlineKeyboardMarku
     cleared = []
     for item in items:
         name, category, product, ask_name = _resolve_receipt_name(item)
-        list_match = choose_list_match(item["name"], name, item["matched_shopping_list_item"], list_names)
+        list_match = choose_list_match(
+            item["name"], name, item["matched_shopping_list_item"], list_names, product=product,
+        )
         if list_match:
             list_names.remove(list_match)
         line, cleared_id = _log_purchase(

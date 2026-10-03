@@ -17,8 +17,10 @@ def test_keeps_a_model_match_the_synonyms_confirm():
     assert choose_list_match("PUSH UP", "PUSH UP", "Soutien branco", ["Soutien branco"]) == "Soutien branco"
 
 
-def test_trusts_the_model_when_synonyms_know_nothing():
-    assert choose_list_match("Lockenstab XL", "Lockenstab XL", "hair curler", ["hair curler"]) == "hair curler"
+def test_trusts_the_model_when_synonyms_know_nothing_but_the_product_agrees():
+    assert choose_list_match(
+        "Lockenstab XL", "Lockenstab XL", "hair curler", ["hair curler"], product="hair curler"
+    ) == "hair curler"
 
 
 def test_users_own_name_matches_exactly():
@@ -34,3 +36,20 @@ def test_truncated_and_umlaut_spellings():
 
 def test_no_match_returns_none():
     assert choose_list_match("VOLVIC NATURELLE", "VOLVIC NATURELLE", "", ["Salmon"]) is None
+
+
+def test_model_match_needs_a_shared_word_when_synonyms_cant_judge():
+    entries = ["Pfefferbretzel 1€", "Zimtschenecke 3.50€"]
+    # Real bug, 2026-09-29: the model paired these and both entries got cleared.
+    assert choose_list_match(
+        "Kuchenbeleg", "Kuchenbeleg", "Pfefferbretzel 1€", entries, product="topping (for cake/bread)"
+    ) is None
+    assert choose_list_match("Brotstücker", "Brotstücker", "Zimtschenecke 3.50€", entries, product="bread pieces") is None
+
+
+def test_model_match_kept_when_names_share_a_word():
+    assert choose_list_match("Oatly Hafer Drink", "Oatly Hafer Drink", "Oatly", ["Oatly"]) == "Oatly"
+
+
+def test_pretzels_match_across_spellings():
+    assert choose_list_match("LAUGENBREZEL", "LAUGENBREZEL", "", ["Pfefferbretzel"]) == "Pfefferbretzel"
