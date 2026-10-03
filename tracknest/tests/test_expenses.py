@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from db import expenses
+from db import crud, database, expenses
 
 
 def make_mock_conn(fetchone=None, fetchall=None):
@@ -15,85 +15,93 @@ def make_mock_conn(fetchone=None, fetchall=None):
     return conn, cursor
 
 
-@patch("db.expenses.get_connection")
-def test_log_expense_item_exists(mock_conn):
-    conn, _cursor = make_mock_conn(fetchone={"id": 1, "shelf_life_days": None, "treat_or_need": "need", "lasts": "unknown"})
-    mock_conn.return_value = conn
+@pytest.fixture
+def db(tmp_path):
+    with patch.object(database, "DB_PATH", str(tmp_path / "test.db")):
+        database.init_db()
+        yield
+
+
+def _item(name, kind="need", lasts="days", days=10, product=None, par_level=1):
+    crud.add_item(name, 1, product=product)
+    crud.set_treat_or_need(name, kind)
+    crud.set_lasts(name, lasts, days)
+    crud.set_par_level(name, par_level)
+
+
+def _ago(days):
+    return datetime.now(tz=timezone.utc) - timedelta(days=days)
+
+
+def test_log_expense_item_exists(db):
+    _item("Milk")
     assert expenses.log_expense("Milk", 2, 1.50) is True
-    conn.commit.assert_called_once()
+    assert expenses.get_total_spent("Milk") == pytest.approx(3.0)
 
 
-
-@patch("db.expenses.get_connection")
-def test_log_expense_item_not_found(mock_conn):
-    conn, _cursor = make_mock_conn(fetchone=None)
-    mock_conn.return_value = conn
+def test_log_expense_item_not_found(db):
     assert expenses.log_expense("Ghost", 1, 5.00) is False
-    conn.commit.assert_not_called()
 
 
-@patch("db.expenses.get_connection")
-def test_log_expense_shortens_shelf_life_on_early_repurchase(mock_conn):
-    conn, cursor = make_mock_conn()
-    mock_conn.return_value = conn
-    three_days_ago = (datetime.now(tz=timezone.utc) - timedelta(days=3)).isoformat()
-    cursor.fetchone.side_effect = [
-        {"id": 1, "shelf_life_days": 10, "treat_or_need": "need", "lasts": "days", "par_level": 1, "product_key": "spinach"},
-        {"logged_at": three_days_ago, "quantity_purchased": 1},
-    ]
+def test_log_expense_shortens_shelf_life_on_early_repurchase(db):
+    _item("Spinach", product="spinach")
+    expenses.log_expense("Spinach", 1, 1.11, purchased_at=_ago(3))
     expenses.log_expense("Spinach", 1, 1.11)
-    update_calls = [c for c in cursor.execute.call_args_list if "SET shelf_life_days = ?" in c[0][0]]
-    assert len(update_calls) == 1
-    assert update_calls[0][0][1][0] == 6  # halfway from 10 towards 3, not a jump to 3
+    assert crud.get_item("Spinach")["shelf_life_days"] == 6  # halfway from 10 towards 3, not a jump to 3
 
 
-@patch("db.expenses.get_connection")
-def test_log_expense_counts_quantity_of_prior_purchase(mock_conn):
+def test_log_expense_counts_quantity_of_prior_purchase(db):
     """Two packs gone in 8 days is 4 days a pack."""
-    conn, cursor = make_mock_conn()
-    mock_conn.return_value = conn
-    eight_days_ago = (datetime.now(tz=timezone.utc) - timedelta(days=8)).isoformat()
-    cursor.fetchone.side_effect = [
-        {"id": 1, "shelf_life_days": 10, "treat_or_need": "need", "lasts": "days", "par_level": 1, "product_key": "spinach"},
-        {"logged_at": eight_days_ago, "quantity_purchased": 2},
-    ]
+    _item("Spinach", product="spinach")
+    expenses.log_expense("Spinach", 2, 1.11, purchased_at=_ago(8))
     expenses.log_expense("Spinach", 1, 1.11)
-    update_calls = [c for c in cursor.execute.call_args_list if "SET shelf_life_days = ?" in c[0][0]]
-    assert update_calls[0][0][1][0] == 7
+    assert crud.get_item("Spinach")["shelf_life_days"] == 7
 
 
-@patch("db.expenses.get_connection")
-def test_log_expense_keeps_shelf_life_for_keep_a_spare_items(mock_conn):
+def test_log_expense_keeps_shelf_life_for_keep_a_spare_items(db):
     """Buying the spare early is the par-2 policy working, not a sign the item runs out faster."""
-    conn, cursor = make_mock_conn()
-    mock_conn.return_value = conn
-    cursor.fetchone.side_effect = [
-        {"id": 1, "shelf_life_days": 30, "treat_or_need": "need", "lasts": "days", "par_level": 2},
-    ]
+    _item("Leerdammer", days=30, par_level=2)
+    expenses.log_expense("Leerdammer", 1, 2.99, purchased_at=_ago(5))
     expenses.log_expense("Leerdammer", 1, 2.99)
-    update_calls = [c for c in cursor.execute.call_args_list if "SET shelf_life_days = ?" in c[0][0]]
-    assert len(update_calls) == 0
+    assert crud.get_item("Leerdammer")["shelf_life_days"] == 30
 
 
-@patch("db.expenses.get_connection")
-def test_log_expense_skips_adjustment_for_treats(mock_conn):
-    conn, cursor = make_mock_conn()
-    mock_conn.return_value = conn
-    cursor.fetchone.side_effect = [{"id": 1, "shelf_life_days": 2, "treat_or_need": "treat", "lasts": "days"}]
+def test_log_expense_skips_adjustment_for_treats(db):
+    _item("Sushi", kind="treat", days=4)
+    expenses.log_expense("Sushi", 1, 10.99, purchased_at=_ago(2))
     expenses.log_expense("Sushi", 1, 10.99)
-    update_calls = [c for c in cursor.execute.call_args_list if "SET shelf_life_days = ?" in c[0][0]]
-    assert len(update_calls) == 0
+    assert crud.get_item("Sushi")["shelf_life_days"] == 4
 
 
-@patch("db.expenses.get_connection")
-def test_log_expense_skips_adjustment_for_same_day_items(mock_conn):
-    """A same-day item has no estimate to refine."""
-    conn, cursor = make_mock_conn()
-    mock_conn.return_value = conn
-    cursor.fetchone.side_effect = [{"id": 1, "shelf_life_days": None, "treat_or_need": "need", "lasts": "same_day"}]
+def test_log_expense_skips_adjustment_for_same_day_items(db):
+    _item("Matcha", lasts="same_day", days=None)
+    expenses.log_expense("Matcha", 1, 2.50, purchased_at=_ago(1))
     expenses.log_expense("Matcha", 1, 2.50)
-    update_calls = [c for c in cursor.execute.call_args_list if "SET shelf_life_days = ?" in c[0][0]]
-    assert len(update_calls) == 0
+    assert crud.get_item("Matcha")["shelf_life_days"] is None
+
+
+def test_old_receipt_counts_on_its_own_date(db):
+    _item("Spinach", product="spinach")
+    expenses.log_expense("Spinach", 1, 1.11, purchased_at=datetime(2026, 9, 22, 12, tzinfo=timezone.utc))
+    assert expenses.get_expenses("Spinach")[0]["purchase_date"] == "2026-09-22"
+
+
+def test_old_receipt_caught_up_late_doesnt_disturb_the_newer_purchase(db):
+    """A September receipt sent after an October purchase: no shelf-life change, alerts left alone."""
+    _item("Spinach", product="spinach")
+    expenses.log_expense("Spinach", 1, 1.11)
+    crud.mark_checkin_pending("Spinach")
+    expenses.log_expense("Spinach", 1, 1.11, purchased_at=_ago(3))
+    item = crud.get_item("Spinach")
+    assert item["shelf_life_days"] == 10
+    assert item["checkin_pending"] == 1
+
+
+def test_duplicate_check_by_receipt_date(db):
+    _item("Brezel", kind="treat", lasts="same_day", days=None)
+    expenses.log_expense("Brezel", 1, 1.0, purchased_at=datetime(2026, 9, 22, 12, tzinfo=timezone.utc))
+    assert expenses.is_duplicate_purchase("Brezel", 1.0, purchase_date="2026-09-22") is True
+    assert expenses.is_duplicate_purchase("Brezel", 1.0, purchase_date="2026-09-23") is False
 
 
 @patch("db.expenses.get_connection")

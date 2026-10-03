@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from db.database import get_connection
 
 
-def log_expense(item_name, quantity_purchased, unit_price, store=None):
+def log_expense(item_name, quantity_purchased, unit_price, store=None, purchased_at=None):
     """Record a purchase for an existing inventory item.
 
     For a need lasting a known number of days, if this purchase
@@ -19,13 +19,18 @@ def log_expense(item_name, quantity_purchased, unit_price, store=None):
     each purchase. Treats are exempt (a treat bought on mood/budget doesn't
     follow a consumption schedule), and so are same-day and one-off items
     (no estimate to refine). Any pending check-in for this item is also
-    cleared, since a fresh purchase starts a new shelf-life cycle.
+    cleared, since a fresh purchase starts a new shelf-life cycle — unless an
+    older receipt is being caught up on and a newer purchase of the same
+    product is already logged.
 
     Args:
         item_name: Name of the item being purchased (must already exist).
         quantity_purchased: Number of units bought.
         unit_price: Price per unit.
         store: Optional store or supplier name.
+        purchased_at: When it was bought (an aware datetime), for a receipt
+            sent days later; defaults to now. Both purchase_date and the
+            timing below use it, so a September receipt counts in September.
 
     Returns:
         True if the expense was logged, False if the item does not exist.
@@ -44,16 +49,22 @@ def log_expense(item_name, quantity_purchased, unit_price, store=None):
         cursor.close()
         conn.close()
         return False
-    now = datetime.now(tz=timezone.utc)
+    now = purchased_at or datetime.now(tz=timezone.utc)
+    cursor.execute("""
+        SELECT 1 FROM item_expenses e JOIN inventory_items i ON i.id = e.item_id
+        WHERE COALESCE(i.product, i.name) = ? AND e.logged_at > ? LIMIT 1
+    """, (item["product_key"], now.isoformat()))
+    is_latest = cursor.fetchone() is None
 
     if item["lasts"] == "days" and item["treat_or_need"] == "need" and item["par_level"] < 2:
-        # Any brand of the same product counts as the previous purchase.
+        # Any brand of the same product counts as the previous purchase —
+        # the last one before this, even when receipts arrive out of order.
         cursor.execute("""
             SELECT e.logged_at, e.quantity_purchased FROM item_expenses e
             JOIN inventory_items i ON i.id = e.item_id
-            WHERE COALESCE(i.product, i.name) = ?
+            WHERE COALESCE(i.product, i.name) = ? AND e.logged_at < ?
             ORDER BY e.logged_at DESC LIMIT 1
-        """, (item["product_key"],))
+        """, (item["product_key"], now.isoformat()))
         prior = cursor.fetchone()
         if prior and prior["logged_at"]:
             gap_days = (now - datetime.fromisoformat(prior["logged_at"])).days
@@ -66,10 +77,11 @@ def log_expense(item_name, quantity_purchased, unit_price, store=None):
 
     # A fresh purchase starts a new shelf-life cycle, so both the "did it
     # run out" check-in and the par=2 "buy a spare" alert reset.
-    cursor.execute(
-        "UPDATE inventory_items SET checkin_pending = 0, spare_alert_pending = 0 WHERE id = ?",
-        (item["id"],)
-    )
+    if is_latest:
+        cursor.execute(
+            "UPDATE inventory_items SET checkin_pending = 0, spare_alert_pending = 0 WHERE id = ?",
+            (item["id"],)
+        )
     cursor.execute("""
         INSERT INTO item_expenses (item_id, quantity_purchased, unit_price, store, purchase_date, logged_at)
         VALUES (?, ?, ?, ?, ?, ?)
@@ -80,7 +92,7 @@ def log_expense(item_name, quantity_purchased, unit_price, store=None):
     return True
 
 
-def is_duplicate_purchase(item_name, unit_price, window_minutes=60):
+def is_duplicate_purchase(item_name, unit_price, window_minutes=60, purchase_date=None):
     """Check whether this exact item/price was already logged within the recent window.
 
     Guards against the same physical receipt getting processed twice (e.g.
@@ -93,19 +105,25 @@ def is_duplicate_purchase(item_name, unit_price, window_minutes=60):
         item_name: Name of the item to check.
         unit_price: Price per unit to match against recent expense records.
         window_minutes: How far back counts as "too recent to be real".
+        purchase_date: For a receipt with a printed date (ISO date string):
+            match on that day instead of the window — old receipts sent in a
+            batch would otherwise trip the window on each other's items.
 
     Returns:
-        True if a matching expense was logged within the window.
+        True if a matching expense was logged within the window (or that day).
     """
     conn = get_connection()
     cursor = conn.cursor()
-    cutoff = (datetime.now(tz=timezone.utc) - timedelta(minutes=window_minutes)).isoformat()
-    cursor.execute("""
+    if purchase_date:
+        when, value = "e.purchase_date = ?", purchase_date
+    else:
+        when, value = "e.logged_at >= ?", (datetime.now(tz=timezone.utc) - timedelta(minutes=window_minutes)).isoformat()
+    cursor.execute(f"""
         SELECT 1 FROM item_expenses e
         JOIN inventory_items i ON i.id = e.item_id
-        WHERE i.name = ? AND e.unit_price = ? AND e.logged_at >= ?
+        WHERE i.name = ? AND e.unit_price = ? AND {when}
         LIMIT 1
-    """, (item_name, unit_price, cutoff))
+    """, (item_name, unit_price, value))
     found = cursor.fetchone() is not None
     cursor.close()
     conn.close()

@@ -1,4 +1,7 @@
+from datetime import date
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from bot import receipt
 
@@ -99,3 +102,17 @@ def test_parse_receipt_drops_non_items_but_counts_deposits(mock_client, _mock_en
     result = receipt.parse_receipt(b"fake-image", [])
     assert [i["name"] for i in result["items"]] == ["Water"]
     assert result["reconciled"] is True
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ("2026-09-22", "2026-09-22"),
+    ("22.09.2026", "2026-09-22"),   # printed German form, copied as-is
+    ("22.09.26", "2026-09-22"),
+    ("", None),                     # illegible
+    ("2026-10-04", None),           # in the future: a misread
+    ("2024-09-22", None),           # over a year old: a misread
+    ("31.02.2026", None),           # no such day
+    ("sometime in September", None),
+])
+def test_receipt_date_is_trusted_only_when_plausible(raw, expected):
+    assert receipt.parse_receipt_date(raw, date(2026, 10, 3)) == expected

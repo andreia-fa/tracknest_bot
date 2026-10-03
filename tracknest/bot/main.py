@@ -1041,9 +1041,16 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+def _purchased_at(receipt_date: str | None) -> datetime | None:
+    """When a receipt's purchase happened, if it was before today (noon that day); None means now."""
+    if not receipt_date or receipt_date >= datetime.now(tz=_LOCAL_TZ).date().isoformat():
+        return None
+    return datetime.combine(datetime.fromisoformat(receipt_date).date(), time(12, 0), tzinfo=timezone.utc)
+
+
 def _log_purchase(
     name, qty, price, *, store=None, category=None, product=None, matched_list_item=None, ask_name=False,
-    clear_reason="purchase", source=None,
+    clear_reason="purchase", source=None, receipt_date=None,
 ) -> tuple[str, int | None]:
     """Log one purchased item (inventory + expense) and describe it for a reply.
 
@@ -1058,7 +1065,7 @@ def _log_purchase(
         purchase cleared (None if it cleared nothing) — so a caller can
         offer to put it back.
     """
-    if expenses.is_duplicate_purchase(name, price):
+    if expenses.is_duplicate_purchase(name, price, purchase_date=receipt_date):
         return (
             f"• {qty}x {name} at €{price:.2f} each — skipped, this exact item/price "
             "was already logged in the last hour (looks like the same receipt sent twice)"
@@ -1070,7 +1077,7 @@ def _log_purchase(
     if not existed:
         _fill_guesses(name, product)
     delta = expenses.get_price_delta(name, price)
-    expenses.log_expense(name, qty, price, store=store)
+    expenses.log_expense(name, qty, price, store=store, purchased_at=_purchased_at(receipt_date))
     # Show what the bot understood the item to be, so a wrong guess is visible.
     product = (crud.get_item(name) or {}).get("product") or product
     shown = f"{name} ({product})" if product and product.casefold() not in name.casefold() else name
@@ -1150,6 +1157,7 @@ async def process_receipt_result(parsed: dict) -> tuple[str, InlineKeyboardMarku
     """
     items = parsed["items"]
     store = parsed.get("store") or None
+    receipt_date = parsed.get("purchase_date")
     logger.info("Receipt parsed: %d item(s).", len(items))
     if not items:
         return "Couldn't find any items on that receipt.", None
@@ -1168,13 +1176,15 @@ async def process_receipt_result(parsed: dict) -> tuple[str, InlineKeyboardMarku
         line, cleared_id = _log_purchase(
             name, item["quantity"], item["unit_price"],
             store=store, category=category, product=product, matched_list_item=list_match, ask_name=ask_name,
-            clear_reason="receipt", source=item["name"],
+            clear_reason="receipt", source=item["name"], receipt_date=receipt_date,
         )
         replies.append(line)
         if cleared_id:
             cleared.append((cleared_id, list_match))
         if is_new and (logged := crud.get_item(name)):
             new_ids.append(logged["id"])
+    if not receipt_date:
+        replies.append("⚠️ I couldn't read the date on this receipt, so it's logged as bought today.")
     if not parsed["reconciled"]:
         replies.append(
             f"⚠️ Heads up: item prices add up to €{parsed['items_total']:.2f} but the "
@@ -1186,7 +1196,10 @@ async def process_receipt_result(parsed: dict) -> tuple[str, InlineKeyboardMarku
     if new_ids:
         replies.append("\nNew items are filed with my best guess — tap ✏️ to change one.")
     rows = [*(_put_back_keyboard(cleared) or InlineKeyboardMarkup([])).inline_keyboard, *_fix_buttons(new_ids)]
-    return "Receipt processed:\n" + "\n".join(replies), InlineKeyboardMarkup(rows) if rows else None
+    where = ", ".join(part for part in (
+        store, datetime.fromisoformat(receipt_date).strftime("%-d %b") if receipt_date else None) if part)
+    header = f"Receipt processed ({where}):" if where else "Receipt processed:"
+    return header + "\n" + "\n".join(replies), InlineKeyboardMarkup(rows) if rows else None
 
 
 async def handle_restore(update: Update, context: ContextTypes.DEFAULT_TYPE):

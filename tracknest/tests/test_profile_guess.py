@@ -65,3 +65,24 @@ async def test_known_items_are_not_refiled(db):
     item = crud.get_item("BANANE")
     assert (item["treat_or_need"], item["shelf_life_days"]) == ("treat", 5)
     assert "need" not in text and keyboard is None
+
+
+@pytest.mark.asyncio
+async def test_old_receipt_is_logged_on_its_printed_date(db):
+    from db import expenses
+    parsed = _receipt(_line("BANANE", "banana", price=1.99))
+    parsed["purchase_date"] = "2026-09-22"
+
+    text, _keyboard = await main.process_receipt_result(parsed)
+
+    assert text.startswith("Receipt processed (REWE, 22 Sep):")
+    assert expenses.get_expenses("BANANE")[0]["purchase_date"] == "2026-09-22"
+    # The same receipt sent again is caught, however long after.
+    again, _ = await main.process_receipt_result(parsed)
+    assert "skipped" in again
+
+
+@pytest.mark.asyncio
+async def test_unreadable_date_is_flagged(db):
+    text, _keyboard = await main.process_receipt_result(_receipt(_line("BANANE", "banana")))
+    assert "couldn't read the date" in text

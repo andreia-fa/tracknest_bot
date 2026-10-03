@@ -2,8 +2,10 @@
 
 import json
 import logging
+import re
 import subprocess
 import time
+from datetime import date, datetime, timedelta
 
 import ollama
 
@@ -19,6 +21,9 @@ _RECONCILE_TOLERANCE = 0.02
 # the pre-tax amount right next to the real total, and the model sometimes
 # reads that instead — items then sum to exactly total_paid × (1 + rate).
 _VAT_RATES = (0.07, 0.19)
+# A receipt date older than this is more likely a misread than a real
+# receipt being caught up on.
+_MAX_RECEIPT_AGE = timedelta(days=366)
 
 _PRODUCT_RULES = (
     "The most general everyday word for this item, lowercase English, as "
@@ -100,8 +105,17 @@ _RESPONSE_SCHEMA = {
                 "REWE, dm, Amazon). Empty string if illegible."
             ),
         },
+        "purchase_date": {
+            "type": "string",
+            "description": (
+                "The date the purchase was made, as printed on the receipt "
+                "(German receipts print it like 22.09.2026 or 22.09.26, near "
+                "the time or the payment details), written as YYYY-MM-DD. "
+                "Empty string if no date is legible — never guess."
+            ),
+        },
     },
-    "required": ["items", "total_paid", "store"],
+    "required": ["items", "total_paid", "store", "purchase_date"],
 }
 
 
@@ -145,6 +159,26 @@ def _is_net_total_misread(items_total: float, total_paid: float) -> bool:
     )
 
 
+def parse_receipt_date(raw: str, today: date) -> str | None:
+    """Turn the model's reading of the receipt date into an ISO date, or None if it can't be trusted.
+
+    Accepts YYYY-MM-DD (as asked) and the printed German forms DD.MM.YYYY /
+    DD.MM.YY (in case the model copies them). A date in the future or more
+    than _MAX_RECEIPT_AGE old is treated as a misread.
+    """
+    raw = (raw or "").strip()
+    for pattern, fmt in ((r"\d{4}-\d{2}-\d{2}", "%Y-%m-%d"),
+                         (r"\d{1,2}\.\d{1,2}\.\d{4}", "%d.%m.%Y"),
+                         (r"\d{1,2}\.\d{1,2}\.\d{2}", "%d.%m.%y")):
+        if re.fullmatch(pattern, raw):
+            try:
+                parsed = datetime.strptime(raw, fmt).date()
+            except ValueError:
+                return None
+            return parsed.isoformat() if today - _MAX_RECEIPT_AGE <= parsed <= today else None
+    return None
+
+
 def _items_total(items: list[dict]) -> float:
     """Sum quantity * unit_price across all parsed items, rounded to cents."""
     return round(sum(item["quantity"] * item["unit_price"] for item in items), 2)
@@ -172,6 +206,8 @@ def parse_receipt(image_bytes: bytes, shopping_list_names: list[str]) -> dict:
           caller should warn the user rather than log it silently.
         - store: the store/supplier name as read by the model, empty string
           if illegible.
+        - purchase_date: the printed purchase date (ISO), or None if it was
+          illegible or implausible — see parse_receipt_date.
     """
     _ensure_server_running()
     shopping_list_text = "\n".join(shopping_list_names) if shopping_list_names else "(empty)"
@@ -179,7 +215,8 @@ def parse_receipt(image_bytes: bytes, shopping_list_names: list[str]) -> dict:
         "Read this grocery receipt and record every purchased item: its "
         "name, quantity, and price per unit (not the line total). Also read "
         "the receipt's final total paid and the store or supplier name "
-        "printed on it (e.g. REWE, dm, Amazon).\n\n"
+        "printed on it (e.g. REWE, dm, Amazon), and the purchase date "
+        "printed on it.\n\n"
         "A small number or letter printed immediately next to an item "
         "(e.g. '1', '2', 'A', 'B') is very often a VAT/tax-rate category "
         "code, not a quantity — German receipts print one of these next to "
@@ -222,6 +259,7 @@ def parse_receipt(image_bytes: bytes, shopping_list_names: list[str]) -> dict:
         line["product"] = (line.get("product") or "").strip().lower()
     total_paid = result["total_paid"]
     store = result.get("store") or ""
+    purchase_date = parse_receipt_date(result.get("purchase_date", ""), date.today())
     # Deposits/discounts still count toward what was paid; info lines
     # (Normalpreis, Summe, MwSt...) carry no money of their own.
     counted = [line for line in lines if classify_line(line["name"]) != "info"]
@@ -245,6 +283,7 @@ def parse_receipt(image_bytes: bytes, shopping_list_names: list[str]) -> dict:
         "items_total": items_total,
         "reconciled": reconciled,
         "store": store,
+        "purchase_date": purchase_date,
     }
 
 
