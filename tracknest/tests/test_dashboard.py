@@ -64,8 +64,7 @@ def test_render_shows_the_headline_numbers():
 
     assert "€120.00" in html
     assert "On pace for <strong>€156.50</strong>" in html
-    assert html.count("Shopping trips: 4") == 2  # once per view (private, share), only in the trips card
-    assert "4 shopping trips" not in html
+    assert "Trips per week" in html and '<span class="of"> of 4</span>' in html
     assert "REWE" in html and "Typed in by hand" in html
     assert "▲ 12%" in html
     assert "Broccoli" in html and "2d left" in html
@@ -93,7 +92,7 @@ def test_render_empty_month_shows_prompts_not_errors():
 
     assert "No purchases logged yet" in html
     assert "/set_budget" in html
-    assert "All caught up" in html
+    assert "Action items" not in html and "Price changes" not in html  # empty cards are left out, not shown empty
 
 
 def test_render_offers_every_month_and_opens_on_the_latest():
@@ -107,7 +106,7 @@ def test_render_offers_every_month_and_opens_on_the_latest():
 
     assert '<label for="m0">Aug</label>' in html and '<label for="m1">Sep</label>' in html
     assert 'id="m1" class="month-radio" checked' in html
-    assert "Spent in August" in html and "Month closed" in html and "August 2026 · closed" in html
+    assert "Total spending · August" in html and "Month closed" in html and "August 2026 · closed" in html
     assert "€90.00" in html
 
 
@@ -126,7 +125,7 @@ def test_spare_alerts_are_shopping_and_attention_shows_only_open_questions():
     ))
     assert html.count("🔁 cheese") == 1  # one spare per product, by its readable name
     assert "LEERDAMMER" not in html
-    assert "Questions waiting for you" in html and "<span class=chip>X01</span>" in html
+    assert "Open questions" in html and "<span class=chip>X01</span>" in html
     assert "Buy a spare" not in html
 
 
@@ -136,13 +135,13 @@ def test_share_view_never_contains_an_amount():
     trips = sample_data()["trips"] | {"top_ups": [{"day": "2026-09-26", "store": "Yormas", "total": 1.0}],
                                       "not_shopping": 5.5}
     html = dashboard.render_dashboard_html(sample_data(trips=trips))
-    assert "1 of 4 were small top-ups (under €5) · €1.00 together" in html  # private view has amounts
+    assert "€1.00 in trips under €5" in html  # the private view has amounts
     shared = re.findall(r'<div class="shared">(.*?)</div></section>', html, re.S)
     assert shared, "every month has a share view"
     for part in shared:
         assert "€" not in part and "EUR" not in part
         assert "REWE" in part and "Fruits/Veg" in part  # names are fine to share
-        assert "1 of 4 were small top-ups" in part and "Yormas" in part
+        assert '1<span class="of"> of 4</span>' in part and "Yormas" in part
         assert "%" in part
     assert 'id="share"' in html and "👁 Share" in html
 
@@ -160,10 +159,10 @@ def test_where_the_money_went_leads_both_views():
     purposes = [{"name": "Food", "total": 90.0}, {"name": "Personal & home", "total": 25.0},
                 {"name": "Leisure", "total": 5.0}]
     html = dashboard.render_dashboard_html(sample_data(purposes=purposes))
-    assert "Food <strong>75%</strong> <span class=\"muted\">€90.00</span>" in html  # private: % and €
+    assert '<span class="lg-name">Food</span><strong>75%</strong><span class="lg-amt">€90.00</span>' in html
     shared = re.findall(r'<div class="shared">(.*?)</div></section>', html, re.S)[0]
-    assert "Where the money went" in shared and "went on food" in shared
-    assert "Leisure <strong>4%</strong>" in shared and "€" not in shared
+    assert "Spending breakdown" in shared and ">food</text>" in shared
+    assert '<span class="lg-name">Leisure</span><strong>4%</strong>' in shared and "€" not in shared
 
 
 def test_a_closed_month_is_never_measured_against_todays_budget():

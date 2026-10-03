@@ -109,307 +109,368 @@ def _eur(value: float) -> str:
     return f"€{value:,.2f}"
 
 
-def _empty(title: str, body: str) -> str:
-    return f'<div class="card empty-card"><strong>{title}</strong>{body}</div>'
+def _share(part: float, whole: float) -> float:
+    return part / whole * 100 if whole else 0.0
 
 
 _PURPOSE_COLORS = {"Food": "var(--p-food)", "Personal & home": "var(--p-home)",
                    "Leisure": "var(--p-leisure)", "Other": "var(--mix-none)"}
 
 
-def _purpose_bar(purposes: list[dict], total: float, amounts: bool) -> str:
-    """One stacked bar of what the money went to, with a legend; amounts=False shows percentages only."""
-    if not total or not purposes:
-        return ""
-    segments = "".join(
-        f'<div style="width:{p["total"] / total * 100:.2f}%;background:{_PURPOSE_COLORS[p["name"]]}" '
-        f'title="{p["name"]}: {p["total"] / total * 100:.0f}%"></div>'
-        for p in purposes
-    )
-    legend = "".join(
-        f'<div class="legend-item"><span class="swatch" style="background:{_PURPOSE_COLORS[p["name"]]}"></span>'
-        f'{p["name"]} <strong>{p["total"] / total * 100:.0f}%</strong>'
-        + (f' <span class="muted">{_eur(p["total"])}</span>' if amounts else "") + "</div>"
-        for p in purposes
-    )
-    return f'<div class="mix-bar purpose">{segments}</div><div class="legend">{legend}</div>'
+def _card(title: str, body: str, sub: str = "", cls: str = "") -> str:
+    sub_html = f'<p class="sub">{sub}</p>' if sub else ""
+    return f'<section class="card {cls}"><h2>{title}</h2>{sub_html}{body}</section>'
 
 
-def _hero(data: dict) -> str:
-    sub = "" if data["spent"] else '<p class="hero-sub">No purchases logged yet this month</p>'
-    current = data.get("is_current", True)
+# ── month view parts ──────────────────────────────────────────────
+
+def _stats(pairs: list[tuple[str, str]]) -> str:
+    return '<dl class="stats">' + "".join(f"<div><dt>{k}</dt><dd>{v}</dd></div>" for k, v in pairs) + "</dl>"
+
+
+def _overview(month: dict, amounts: bool) -> str:
+    """The month at a glance. Private: the total, forecast or closing note, budget meter and key averages.
+
+    Share view: the same card without any amount — shopping days, biggest
+    day, most-visited store, top category.
+    """
+    current = month.get("is_current", True)
+    daily = month["daily"]
+    trips = month["trips"]
+    shopped = sum(1 for v in daily if v)
+    busiest = max(range(len(daily)), key=lambda i: daily[i]) if any(daily) else None
+    short = month["month_label"][:3]
+    if not amounts:
+        top_store = max(trips["by_store"], key=lambda st: st["trips"], default=None)
+        top_cat = month["categories"][0] if month["categories"] else None
+        pairs = [
+            ("Shopping days", f'{shopped} of {month["day"]}'),
+            ("Biggest day", f"{busiest + 1} {short}" if busiest is not None else "—"),
+            ("Most visited", f'{escape(top_store["store"] or "typed in")} · {top_store["trips"]}×' if top_store else "—"),
+            ("Top category", f'{escape(top_cat["name"])} · {_share(top_cat["total"], month["spent"]):.0f}%'
+             if top_cat else "—"),
+        ]
+        return _card("Overview", _stats(pairs), sub=f'{month["month_label"]}{"" if current else " · closed"}')
+
+    label = "Total spending" if current else f'Total spending · {month["month_label"].split()[0]}'
     if not current:
-        forecast = "Month closed — this is the final total"
-    elif data["projected"] is not None:
-        forecast = f'On pace for <strong>{_eur(data["projected"])}</strong> by month end'
+        status = "Month closed — final total"
+    elif month["projected"] is not None:
+        status = f'On pace for <strong>{_eur(month["projected"])}</strong> by month end'
+    elif month["spent"]:
+        status = "Month-end forecast from day 5"
     else:
-        forecast = "Month-end forecast appears from day 5"
-    label = "Spent this month" if current else f'Spent in {data["month_label"].split()[0]}'
-    return f"""
-    <div class="card hero">
-      <p class="label">{label}</p>
-      <div class="hero-value">{_eur(data["spent"])}</div>
-      <p class="hero-sub">{forecast}</p>{sub}
-      {_purpose_bar(data.get("purposes", []), data["spent"], amounts=True)}
-    </div>"""
-
-
-def _budget_kpi(data: dict) -> str:
-    budget = data["budget"]
-    month_pct = data["day"] / data["days_in_month"] * 100
-    if not budget:
-        return """
-      <div class="card kpi empty">
-        <div class="label">Budget</div>
-        <div class="kpi-note">No budget yet — set one with <code>/set_budget</code> in Telegram.</div>
-      </div>"""
-    pct = budget["pct"]
-    ahead = pct - month_pct
-    if ahead > 5:
-        note = f"⚠️ {ahead:.0f} pts ahead of the calendar"
+        status = "No purchases logged yet this month"
+    budget = month.get("budget")
+    if budget:
+        month_pct = month["day"] / month["days_in_month"] * 100
+        ahead = budget["pct"] - month_pct
+        state = f"⚠️ {ahead:.0f} pts ahead of the calendar" if ahead > 5 else "✓ Within pace"
+        meter = f"""
+        <div class="budget">
+          <div class="budget-head"><span>Budget {_eur(budget["budget"])}</span><strong>{budget["pct"]:.0f}%</strong></div>
+          <div class="meter" title="Tick = how far through the month we are ({month_pct:.0f}%)">
+            <div class="meter-fill" style="width:{min(budget["pct"], 100):.1f}%"></div>
+            <div class="meter-tick" style="left:{month_pct:.1f}%"></div>
+          </div>
+          <p class="note">{state}</p>
+        </div>"""
+    elif current:
+        meter = '<p class="note">No budget yet — set one with <code>/set_budget</code> in Telegram.</p>'
     else:
-        note = "✓ Within pace"
+        meter = ""
+    stats = ""
+    if month["spent"] and busiest is not None:
+        first = next((i for i, v in enumerate(daily) if v), 0)
+        tracked_days = max(month["day"] - first, 1)
+        stats = _stats([
+            ("Daily average", _eur(month["spent"] / tracked_days)),
+            ("Average basket", _eur(trips["avg_basket"]) if trips.get("avg_basket") else "—"),
+            ("Shopping days", f"{shopped} of {month['day']}"),
+            ("Biggest day", f"{busiest + 1} {short} · {_eur(daily[busiest])}"),
+        ])
     return f"""
-      <div class="card kpi">
-        <div class="label">Budget</div>
-        <div class="kpi-main">{pct:.0f}%<span class="kpi-of"> of {_eur(budget["budget"])}</span></div>
-        <div class="meter" title="Tick = how far through the month we are ({month_pct:.0f}%)">
-          <div class="meter-fill" style="width:{min(pct, 100):.1f}%"></div>
-          <div class="meter-tick" style="left:{month_pct:.1f}%"></div>
-        </div>
-        <div class="kpi-note">{note}</div>
+    <section class="card total">
+      <h2>{label}</h2>
+      <div class="hero-value">{_eur(month["spent"])}</div>
+      <p class="sub">{status}</p>{meter}{stats}
+    </section>"""
+
+
+def _donut(month: dict, amounts: bool) -> str:
+    """Spending breakdown by purpose as a donut — a few parts of one whole, read at a glance."""
+    total = month["spent"]
+    purposes = month.get("purposes", [])
+    if not total or not purposes:
+        return _card("Spending breakdown", '<p class="note">Appears once something is logged this month.</p>', cls="empty")
+    radius, width = 52, 20
+    circumference = 2 * 3.141592653589793 * radius
+    gap = 2.0 if len(purposes) > 1 else 0.0
+    arcs, offset = [], 0.0
+    for p in purposes:
+        length = p["total"] / total * circumference
+        arcs.append(
+            f'<circle r="{radius}" cx="70" cy="70" fill="none" stroke="{_PURPOSE_COLORS[p["name"]]}" '
+            f'stroke-width="{width}" stroke-dasharray="{max(length - gap, 0.5):.2f} {circumference:.2f}" '
+            f'stroke-dashoffset="{-offset:.2f}" transform="rotate(-90 70 70)">'
+            f'<title>{p["name"]}: {_share(p["total"], total):.0f}%</title></circle>'
+        )
+        offset += length
+    lead = purposes[0]
+    legend = "".join(
+        f'<li><span class="swatch" style="background:{_PURPOSE_COLORS[p["name"]]}"></span>'
+        f'<span class="lg-name">{p["name"]}</span><strong>{_share(p["total"], total):.0f}%</strong>'
+        + (f'<span class="lg-amt">{_eur(p["total"])}</span>' if amounts else "") + "</li>"
+        for p in purposes
+    )
+    body = f"""
+      <div class="donut-wrap">
+        <svg class="donut" viewBox="0 0 140 140" role="img" aria-label="Spending breakdown">
+          <circle r="{radius}" cx="70" cy="70" fill="none" stroke="var(--track)" stroke-width="{width}"/>
+          {"".join(arcs)}
+          <text x="70" y="68" text-anchor="middle" class="donut-value">{_share(lead["total"], total):.0f}%</text>
+          <text x="70" y="86" text-anchor="middle" class="donut-label">{lead["name"].lower()}</text>
+        </svg>
+        <ul class="legend-list">{legend}</ul>
       </div>"""
+    return _card("Spending breakdown", body)
 
 
-def _treats_kpi(data: dict) -> str:
-    mix = data["mix"]
-    classified = mix["need"] + mix["treat"]
-    if not classified:
-        return """
-      <div class="card kpi empty">
-        <div class="label">Treats</div>
-        <div class="kpi-note">Answer the bot's "treat or need?" questions to see this.</div>
-      </div>"""
-    # Share of *all* spend, matching the mix bar below — two different
-    # denominators for the same word on one page read as a contradiction.
-    pct = mix["treat"] / data["spent"] * 100 if data["spent"] else 0.0
-    return f"""
-      <div class="card kpi">
-        <div class="label">Treats</div>
-        <div class="kpi-main">{pct:.0f}%</div>
-        <div class="kpi-note">{_eur(mix["treat"])} of this month's spend went on treats</div>
-      </div>"""
+def _tile(label: str, value: str, note: str = "", extra: str = "") -> str:
+    return f'<div class="card tile"><h3>{label}</h3><div class="tile-value">{value}</div>{extra}<p class="note">{note}</p></div>'
 
 
-def _list_kpi(data: dict) -> str:
-    count = len(data["shopping_list"])
-    low = len(data["running_low"])
-    low_note = f"{low} running low this week" if low else "Nothing running low this week"
-    return f"""
-      <div class="card kpi">
-        <div class="label">Shopping list</div>
-        <div class="kpi-main">{count}<span class="kpi-of"> item{"s" if count != 1 else ""}</span></div>
-        <div class="kpi-note">{low_note}</div>
-      </div>"""
+def _trips_per_week(month: dict | None) -> float | None:
+    """Trips per week since the month's first purchase — tracking may start mid-month, so not since day 1."""
+    if not month or not month["trips"]["count"]:
+        return None
+    first = next((i for i, day in enumerate(month["trips"].get("per_day") or []) if day), None)
+    if first is None:
+        first = next((i for i, v in enumerate(month["daily"]) if v), 0)
+    return month["trips"]["count"] / max(month["day"] - first, 1) * 7
 
 
-def _daily_chart(data: dict) -> str:
-    daily = data["daily"]
+def _tiles(month: dict, previous: dict | None, amounts: bool) -> str:
+    """Treats share, trips per week (against last month) and top-up trips — the three numbers to steer by."""
+    total = month["spent"]
+    mix = month["mix"]
+    treat_pct = _share(mix["treat"], total)
+    split = (f'<div class="split-bar"><div style="width:{_share(mix["need"], total):.1f}%;background:var(--mix-need)"></div>'
+             f'<div style="width:{treat_pct:.1f}%;background:var(--mix-treats)"></div></div>') if total else ""
+    need_pct = _share(mix["need"], total)
+    treats = _tile(
+        "Treats share", f"{treat_pct:.0f}%" if total else "—",
+        (f'Needs {need_pct:.0f}% · Treats {treat_pct:.0f}%' + (f' · {_eur(mix["treat"])}' if amounts else ""))
+        if total else "Nothing logged yet",
+        split,
+    )
+    trips = month["trips"]
+    rate, before = _trips_per_week(month), _trips_per_week(previous)
+    if rate is not None and before:
+        change = _share(rate - before, before)
+        if change <= -5:
+            delta = f'<span class="good">▼ {abs(change):.0f}%</span> vs {previous["month_label"][:3]}'
+        elif change >= 5:
+            delta = f'<span class="bad">▲ {change:.0f}%</span> vs {previous["month_label"][:3]}'
+        else:
+            delta = f'about the same as {previous["month_label"][:3]}'
+        note = f'{trips["count"]} trips · {delta}'
+    else:
+        note = f'{trips["count"]} trips this month' if trips["count"] else "No shopping trips yet"
+    per_week = _tile("Trips per week", f"{rate:.1f}" if rate is not None else "—", note)
+    top_ups = trips.get("top_ups", [])
+    if trips["count"]:
+        top_note = (f'{_eur(sum(t["total"] for t in top_ups))} in trips under €5' if amounts
+                    else "trips were small top-ups") if top_ups else "Every trip was a proper shop"
+        top = _tile("Top-up trips", f'{len(top_ups)}<span class="of"> of {trips["count"]}</span>', top_note)
+    else:
+        top = _tile("Top-up trips", "—", "No shopping trips yet")
+    return f'<div class="tiles">{treats}{per_week}{top}</div>'
+
+
+def _timeline(month: dict, amounts: bool) -> str:
+    """Spending per day as columns, with one dot per shopping trip beneath — hollow for a top-up.
+
+    HTML columns rather than an SVG, so the bars keep a fixed height and the
+    dots stay round and readable from a phone to a wide screen.
+    """
+    daily = month["daily"]
+    total = month["spent"]
     if not any(daily):
         return ""
-    width, height, gap = 600, 120, 2
-    bar_w = width / len(daily) - gap
+    per_day = month["trips"].get("per_day") or [[] for _ in daily]
+    short = month["month_label"][:3]
     peak = max(daily)
-    bars = []
+    columns = []
     for i, value in enumerate(daily):
-        day = i + 1
-        x = i * (width / len(daily))
-        if value:
-            h = max(3.0, value / peak * (height - 4))
-            cls = "bar"
-        else:
-            h, cls = 3.0, "bar zero" if day <= data["day"] else "bar future"
-        bars.append(
-            f'<rect class="{cls}" x="{x:.1f}" y="{height - h:.1f}" width="{bar_w:.1f}" '
-            f'height="{h:.1f}" rx="2"><title>{day} {data["month_label"].split()[0][:3]}: '
-            f'{_eur(value)}</title></rect>'
+        trips = per_day[i] if i < len(per_day) else []
+        tops = sum(1 for t in trips if t < 5)
+        what = _eur(value) if amounts else f"{_share(value, total):.0f}% of the month"
+        tip = f"{i + 1} {short}: {what}" + (f" · {len(trips)} trip{'s' if len(trips) != 1 else ''}" if trips else "")
+        tip += f" ({tops} top-up{'s' if tops != 1 else ''})" if tops else ""
+        state = "" if value else (" zero" if i < month["day"] else " future")
+        height = max(value / peak * 100, 3) if value else 3
+        dots = "".join(f'<i class="{"tl-dot topup" if t < 5 else "tl-dot"}"></i>' for t in trips[:4])
+        columns.append(f'<div class="tl-day" title="{tip}"><div class="tl-bar-area">'
+                       f'<div class="tl-bar{state}" style="height:{height:.1f}%"></div></div>'
+                       f'<div class="tl-dots">{dots}</div></div>')
+    busiest = max(range(len(daily)), key=lambda i: daily[i])
+    shopped = sum(1 for v in daily if v)
+    peak_txt = f" ({_eur(peak)})" if amounts else ""
+    sub = f"Shopped on {shopped} of {month['day']} days · biggest day {busiest + 1} {short}{peak_txt}"
+    top_ups = month["trips"].get("top_ups", [])
+    details = ""
+    if top_ups:
+        rows = "".join(
+            f'<tr><td>{datetime.fromisoformat(t["day"]).strftime("%-d %b")}</td>'
+            f'<td class="store">{escape(t["store"] or "typed in")}</td>'
+            + (f'<td class="num">{_eur(t["total"])}</td>' if amounts else "") + "</tr>"
+            for t in top_ups
         )
-    busiest = max(range(len(daily)), key=lambda i: daily[i]) + 1
-    spend_days = sum(1 for v in daily if v)
-    return f"""
-    <div class="card section">
-      <p class="section-title">Spend by day</p>
-      <p class="section-sub">You shopped on {spend_days} of {data["day"]} days{" so far" if data.get("is_current", True) else ""} ·
-        biggest day was the {busiest}{_ordinal(busiest)} ({_eur(peak)})</p>
-      <svg class="daily" viewBox="0 0 {width} {height}" preserveAspectRatio="none" role="img"
-           aria-label="Spend per day this month">{"".join(bars)}</svg>
+        details = (f'<details><summary>Show the {len(top_ups)} top-up trip{"s" if len(top_ups) != 1 else ""}</summary>'
+                   f'<table class="table">{rows}</table>'
+                   f'<p class="note">One bigger shop can absorb these — the restock list shows what runs out when.</p>'
+                   f'</details>')
+    body = f"""
+      <div class="timeline" role="img" aria-label="Daily spending and trips">{"".join(columns)}</div>
       <div class="axis"><span>1</span><span>{len(daily) // 2}</span><span>{len(daily)}</span></div>
-    </div>"""
+      <p class="legend-inline"><span class="dot-key"></span>shopping trip <span class="dot-key topup"></span>top-up ({"under €5" if amounts else "small trip"})</p>
+      {details}"""
+    return _card("Daily spending &amp; trips", body, sub=sub)
 
 
-def _ordinal(n: int) -> str:
-    if 10 <= n % 100 <= 20:
-        return "th"
-    return {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
-
-
-def _mix_card(data: dict) -> str:
-    mix = data["mix"]
-    total = sum(mix.values())
-    if not total:
-        return ""
-    parts = [
-        ("Needs", mix["need"], "var(--mix-need)"),
-        ("Treats", mix["treat"], "var(--mix-treats)"),
-        ("Not sorted yet", mix["unknown"], "var(--mix-none)"),
-    ]
-    parts = [p for p in parts if p[1] > 0]
-    segments = "".join(
-        f'<div style="width:{v / total * 100:.2f}%;background:{c}" '
-        f'title="{label}: {_eur(v)} ({v / total * 100:.0f}%)"></div>'
-        for label, v, c in parts
-    )
-    legend = "".join(
-        f'<div class="legend-item"><span class="swatch" style="background:{c}"></span>'
-        f'{label} <strong>{v / total * 100:.0f}%</strong> <span class="muted">{_eur(v)}</span></div>'
-        for label, v, c in parts
-    )
-    return f"""
-    <div class="card section">
-      <p class="section-title">What kind of spending</p>
-      <div class="mix-bar">{segments}</div>
-      <div class="legend">{legend}</div>
-    </div>"""
-
-
-def _categories_card(data: dict) -> str:
-    categories = data["categories"]
+def _categories(month: dict, amounts: bool) -> str:
+    """One labelled bar per category, scaled to the largest — the names carry identity, so one colour."""
+    categories = month["categories"]
+    total = month["spent"]
     if not categories:
         return ""
-    total = sum(c["total"] for c in categories) or 1.0
     peak = max(c["total"] for c in categories) or 1.0
     rows = "".join(
         f'<div class="bar-row"><span class="bar-name">{escape(c["name"])}</span>'
         f'<div class="bar-track"><div class="bar-fill" style="width:{c["total"] / peak * 100:.1f}%"></div></div>'
-        f'<span class="bar-value">{_eur(c["total"])}<span class="bar-pct">{c["total"] / total * 100:.0f}%</span></span></div>'
+        f'<span class="bar-value">{_share(c["total"], total):.0f}%'
+        + (f'<span class="bar-amt">{_eur(c["total"])}</span>' if amounts else "") + "</span></div>"
         for c in categories
     )
+    return _card("Spending by category", rows)
+
+
+def _stores(month: dict, amounts: bool) -> str:
+    """Stores as a compact table — trips, share of spending, and (privately) the amount."""
+    stores = month["trips"]["by_store"]
+    total = sum(s["total"] for s in stores)
+    if not stores:
+        return ""
+    head = "<tr><th>Store</th><th class='num'>Trips</th><th class='num'>Share</th>" + (
+        "<th class='num'>Amount</th>" if amounts else "") + "</tr>"
+    rows = "".join(
+        f'<tr><td class="store">{escape(s["store"] or "Typed in by hand")}</td><td class="num">{s["trips"]}</td>'
+        f'<td class="num">{_share(s["total"], total):.0f}%</td>'
+        + (f'<td class="num">{_eur(s["total"])}</td>' if amounts else "") + "</tr>"
+        for s in stores
+    )
+    avg = month["trips"].get("avg_basket")
+    sub = f"Average basket {_eur(avg)}" if amounts and avg else ""
+    return _card("Spending by store", f'<table class="table"><thead>{head}</thead><tbody>{rows}</tbody></table>', sub=sub)
+
+
+def _month_view(month: dict, previous: dict | None, amounts: bool) -> str:
+    """One month on a 12-column grid: headline row, timeline, then categories beside stores."""
+    if month.get("is_current", True):
+        period = f'{month["month_label"]} · day {month["day"]} of {month["days_in_month"]}'
+    else:
+        period = f'{month["month_label"]} · closed'
     return f"""
-    <div class="card section">
-      <p class="section-title">Spending by category</p>
-      {rows}
+    <p class="period">{period}</p>
+    <div class="grid">
+      <div class="span-4">{_overview(month, amounts)}</div>
+      <div class="span-4">{_donut(month, amounts)}</div>
+      <div class="span-4">{_tiles(month, previous, amounts)}</div>
+      <div class="span-12">{_timeline(month, amounts)}</div>
+      <div class="span-6">{_categories(month, amounts)}</div>
+      <div class="span-6">{_stores(month, amounts)}</div>
     </div>"""
 
 
-def _stores_card(data: dict) -> str:
-    stores = data["trips"]["by_store"]
-    if not stores:
-        return _empty("Where you shop", "Send a receipt photo and your stores show up here.")
-    rows = "".join(
-        f'<li class="row"><span class="row-name">{escape(s["store"] or "Typed in by hand")}</span>'
-        f'<span class="row-val">{_eur(s["total"])}<span class="row-sub">{s["trips"]} trip'
-        f'{"s" if s["trips"] != 1 else ""} · {_eur(s["total"] / s["trips"])} avg</span></span></li>'
-        for s in stores
-    )
-    return f'<div class="card"><p class="section-title pad">Where you shop</p><ul class="rows">{rows}</ul></div>'
-
-
-def _prices_card(data: dict) -> str:
-    rising = data["rising"]
-    if not rising:
-        return _empty(
-            "Price watch",
-            "Nothing getting pricier. Once you buy the same item twice at the same store, rises show up here.",
-        )
-    rows = "".join(
-        f'<li class="row"><span class="row-name">{escape(r["name"])}</span>'
-        f'<span class="row-val warn">▲ {r["pct_change"]:.0f}%<span class="row-sub">'
-        f'{escape(r["store"]) + ": " if r.get("store") else ""}'
-        f'{_eur(r["avg_price"])} → {_eur(r["latest_price"])}</span></span></li>'
-        for r in rising
-    )
-    return f'<div class="card"><p class="section-title pad">Price watch</p><ul class="rows">{rows}</ul></div>'
-
+# ── right-now parts (private only) ────────────────────────────────
 
 def _readable_names(names: set[str]) -> dict:
     """Map item names to their product ("cheese") when known — receipt names like "LEERDAMMER CAR." read badly."""
     return {n: (crud.get_item(n) or {}).get("product") or n for n in names}
 
 
-def _to_buy_card(data: dict) -> str:
+def _to_buy(data: dict) -> str:
     low = data["running_low"]
     items = data["shopping_list"]
     readable = data.get("readable", {})
     spares = sorted({readable.get(n, n) for n in data["health"]["spare_alert_pending"]})
     if not low and not items and not spares:
-        return _empty("What to buy", "Your list is empty and nothing's running low.")
-    spare_rows = "".join(
-        f'<li class="row"><span class="row-name">🔁 {escape(p)}</span>'
-        f'<span class="row-val muted">keep a spare</span></li>'
-        for p in spares
-    )
-    low_rows = "".join(
-        f'<li class="row"><span class="row-name">⏳ {escape(readable.get(r["name"], r["name"]))}</span>'
-        f'<span class="row-val">{"today" if r["days_left"] == 0 else f"{r['days_left']}d left"}</span></li>'
+        return _card("Shopping list &amp; restock", '<p class="note">List empty and nothing running low.</p>')
+    rows = "".join(
+        f'<tr><td>⏳ {escape(readable.get(r["name"], r["name"]))}</td>'
+        f'<td class="num strong">{"today" if r["days_left"] == 0 else f"{r['days_left']}d left"}</td></tr>'
         for r in low
+    ) + "".join(
+        f'<tr><td>🔁 {escape(p)}</td><td class="num muted">keep a spare</td></tr>' for p in spares
+    ) + "".join(
+        f'<tr><td>🛒 {escape(i["name"])}</td><td class="num muted">{i["quantity"]}×</td></tr>' for i in items[:10]
     )
-    shown = items[:8]
-    list_rows = "".join(
-        f'<li class="row"><span class="row-name">{escape(i["name"])}</span>'
-        f'<span class="row-val muted">{i["quantity"]}×</span></li>'
-        for i in shown
-    )
-    more = (
-        f'<li class="row muted">+ {len(items) - len(shown)} more — <code>/list</code> in Telegram</li>'
-        if len(items) > len(shown) else ""
-    )
-    return (f'<div class="card"><p class="section-title pad">What to buy</p>'
-            f'<ul class="rows">{low_rows}{spare_rows}{list_rows}{more}</ul></div>')
+    more = f'<p class="note">+ {len(items) - 10} more — <code>/list</code> in Telegram</p>' if len(items) > 10 else ""
+    return _card("Shopping list &amp; restock", f'<table class="table">{rows}</table>{more}',
+                 sub="⏳ runs out soon · 🔁 keep-a-spare reminder · 🛒 on your list")
 
 
-def _attention_card(data: dict) -> str:
-    """What the bot is waiting on you for — open questions and "did it run out?" check-ins."""
+def _attention(data: dict) -> str:
+    """What the bot is waiting on you for — shown only when there is something."""
     health = data["health"]
-    groups = [
-        ("Did these run out?", "Answer in Telegram: yes or no", health["checkin_pending"]),
-        ("Questions waiting for you", "The bot asks them one at a time in Telegram", health["unprofiled"]),
-    ]
-    groups = [g for g in groups if g[2]]
     readable = data.get("readable", {})
+    groups = [(label, names) for label, names in (
+        ("Did these run out?", health["checkin_pending"]),
+        ("Open questions", health["unprofiled"]),
+    ) if names]
     if not groups:
-        return _empty("Needs attention", "✓ All caught up — nothing waiting for you.")
+        return ""
     body = "".join(
-        f'<div class="attn"><div class="attn-head"><span>{label}</span><span class="count">{len(names)}</span></div>'
-        f'<div class="chips">{"".join(f"<span class=chip>{escape(readable.get(n, n))}</span>" for n in names)}</div>'
-        f'<p class="attn-hint">{hint}</p></div>'
-        for label, hint, names in groups
+        f'<div class="attn"><div class="attn-head"><span>{label}</span><strong>{len(names)}</strong></div>'
+        f'<div class="chips">{"".join(f"<span class=chip>{escape(readable.get(n, n))}</span>" for n in names)}</div></div>'
+        for label, names in groups
     )
-    return f'<div class="card"><p class="section-title pad">Needs attention</p><div class="attn-body">{body}</div></div>'
+    return _card("Action items", body, sub="Answer these in Telegram")
 
 
-def _daily_cost_card(data: dict) -> str:
+def _prices(data: dict) -> str:
+    """Price rises at the same store — shown only when there are any."""
+    rising = data["rising"]
+    if not rising:
+        return ""
+    rows = "".join(
+        f'<tr><td>{escape(r["name"])}<span class="cell-sub">{escape(r.get("store") or "")}</span></td>'
+        f'<td class="num">{_eur(r["avg_price"])} → {_eur(r["latest_price"])}</td>'
+        f'<td class="num bad">▲ {r["pct_change"]:.0f}%</td></tr>'
+        for r in rising
+    )
+    return _card("Price changes", f'<table class="table">{rows}</table>', sub="Latest price vs. your usual, same store")
+
+
+def _daily_cost(data: dict) -> str:
     cost = data["daily_cost"]
     if not cost["items"]:
-        if not cost["tracked"]:
-            return ""
-        return _empty(
-            "Cost per day you own it",
-            f"Unlocks once an item's been bought twice — 0 of {cost['tracked']} items ready yet. "
-            "It separates expensive to buy from expensive to keep around.",
-        )
+        return ""
     peak = cost["items"][0]["cost_per_day"] or 1.0
     rows = "".join(
-        f'<div class="bar-row"><span class="bar-name">{escape(c["name"])}</span>'
-        f'<div class="bar-track"><div class="bar-fill" style="width:{c["cost_per_day"] / peak * 100:.1f}%"></div></div>'
-        f'<span class="bar-value">{_eur(c["cost_per_day"])}<span class="bar-pct">per day</span></span></div>'
-        for c in cost["items"]
+        f'<div class="bar-row"><span class="bar-name">{escape(i["name"])}</span>'
+        f'<div class="bar-track"><div class="bar-fill" style="width:{i["cost_per_day"] / peak * 100:.1f}%"></div></div>'
+        f'<span class="bar-value">{_eur(i["cost_per_day"])}<span class="bar-amt">per day</span></span></div>'
+        for i in cost["items"]
     )
-    return f"""
-    <div class="card section">
-      <p class="section-title">Cost per day you own it</p>
-      <p class="section-sub">Price ÷ how long it lasts — what's expensive to keep around, not just to buy</p>
-      {rows}
-    </div>"""
+    return _card("Cost per day of use", rows, sub="Price ÷ how long it lasts — what's expensive to keep, not just to buy")
+
+
+def _right_now(data: dict) -> str:
+    cards = [c for c in (_to_buy(data), _attention(data), _prices(data), _daily_cost(data)) if c]
+    cells = "".join(f'<div class="span-6">{c}</div>' for c in cards)
+    return f'<p class="group-title right-now">Right now</p><div class="grid right-now">{cells}</div>'
 
 
 _STYLE = """
@@ -418,7 +479,7 @@ _STYLE = """
     --page: #f9f9f7; --surface: #fcfcfb; --surface-2: #f2f1ec;
     --ink: #0b0b0b; --ink-2: #52514e; --ink-muted: #898781;
     --border: rgba(11,11,11,0.10); --track: #eceae2;
-    --accent: #1baf7a; --warn: #b87700;
+    --accent: #1baf7a; --good: #0ca30c; --bad: #b87700;
     --mix-need: #2a78d6; --mix-treats: #eb6834; --mix-none: #c3c2b7;
     --p-food: #1baf7a; --p-home: #4a3aa7; --p-leisure: #eda100;
   }
@@ -428,188 +489,129 @@ _STYLE = """
       --page: #0d0d0d; --surface: #1a1a19; --surface-2: #232322;
       --ink: #ffffff; --ink-2: #c3c2b7; --ink-muted: #898781;
       --border: rgba(255,255,255,0.10); --track: #2c2c2a;
-      --accent: #199e70; --warn: #fab219;
+      --accent: #199e70; --good: #3fbf5f; --bad: #fab219;
       --mix-need: #3987e5; --mix-treats: #d95926; --mix-none: #52514e;
       --p-food: #199e70; --p-home: #9085e9; --p-leisure: #c98500;
     }
   }
   * { box-sizing: border-box; }
-  body { margin: 0 auto; max-width: 760px; padding: 24px 16px; background: var(--page);
-         color: var(--ink); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+  body { margin: 0 auto; max-width: 1200px; padding: 24px 16px 32px; background: var(--page);
+         color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
   .brand { display: flex; align-items: center; gap: 8px; }
   .brand-mark { width: 10px; height: 10px; border-radius: 3px; background: var(--accent); }
   h1 { font-size: 19px; font-weight: 800; margin: 0; }
-  .period, .muted { color: var(--ink-muted); }
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; margin-bottom: 14px; }
-  .label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
-           color: var(--ink-muted); margin: 0 0 6px; }
-  .hero { padding: 22px; }
-  .hero-value { font-size: 44px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
-  .hero-sub { font-size: 13px; color: var(--ink-2); margin: 8px 0 0; }
-  .kpi-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
-  .kpi-row .card { margin: 0; }
-  .kpi-row.two { grid-template-columns: 1fr 1fr; }
-  .kpi-row.one { grid-template-columns: 1fr; }
-  .month-radio { position: absolute; opacity: 0; pointer-events: none; }
-  .month { display: none; }
+  .header-tools { display: flex; align-items: center; gap: 8px; }
   .tabs { display: flex; gap: 4px; padding: 3px; border-radius: 10px; background: var(--surface-2); }
   .tabs label { padding: 4px 12px; border-radius: 8px; border: 1px solid transparent; font-size: 13px;
                 color: var(--ink-2); cursor: pointer; }
-  .period { margin: 0 0 10px; font-size: 13px; }
-  .cards > .card { margin-bottom: 14px; }
-  .attn-body { padding: 10px 18px 16px; display: flex; flex-direction: column; gap: 14px; }
-  .attn-head { display: flex; justify-content: space-between; font-size: 13px; color: var(--ink-2); }
-  .count { font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-  .chip { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: var(--surface-2);
-          border: 1px solid var(--border); color: var(--ink-2); max-width: 100%;
-          overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .attn-hint { font-size: 11px; color: var(--ink-muted); margin: 6px 0 0; }
-  @media (min-width: 900px) {
-    body { max-width: 1100px; }
-    .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
-    .cards > .card { margin: 0; }
-    .cards { margin-bottom: 14px; }
-  }
-  .shared, .share-note { display: none; }
-  #share:checked ~ .month .private, #share:checked ~ .right-now { display: none; }
-  #share:checked ~ .month .shared { display: block; }
-  #share:checked ~ .share-note { display: block; }
-  #share:checked ~ header .share-toggle { background: var(--ink); color: var(--page); }
-  .share-note { text-align: center; font-size: 12px; color: var(--ink-muted); margin: 18px 0 6px; }
-  .header-tools { display: flex; align-items: center; gap: 8px; }
   .tool { border: 1px solid var(--border); background: var(--surface); color: var(--ink-2); border-radius: 8px;
-          padding: 4px 9px; font-size: 14px; cursor: pointer; }
+          padding: 4px 10px; font-size: 13px; cursor: pointer; }
   .tool[hidden] { display: none; }
-  .rows.tight { padding: 6px 0 4px; gap: 6px; }
-  .mix-bar.purpose { margin-top: 16px; }
-  .group-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
-                 color: var(--ink-muted); margin: 22px 0 10px; }
-  .kpi { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
-  .kpi.empty, .empty-card { border-style: dashed; }
-  .kpi-main { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .kpi-of { font-size: 13px; font-weight: 500; color: var(--ink-muted); }
-  .kpi-note { font-size: 12px; color: var(--ink-2); }
+  .month-radio { position: absolute; opacity: 0; pointer-events: none; }
+  .month, .shared, .share-note { display: none; }
+  #share:checked ~ .month .private, #share:checked ~ .right-now { display: none; }
+  #share:checked ~ .month .shared, #share:checked ~ .share-note { display: block; }
+  #share:checked ~ header .share-toggle { background: var(--ink); color: var(--page); }
+  .period { margin: 0 0 10px; font-size: 13px; color: var(--ink-muted); }
+  .grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
+  .span-4 { grid-column: span 4; } .span-6 { grid-column: span 6; }
+  .span-8 { grid-column: span 8; } .span-12 { grid-column: span 12; }
+  .grid > div { display: flex; flex-direction: column; min-width: 0; }
+  .grid > div > .card { flex: 1; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 18px; }
+  .card.empty { border-style: dashed; }
+  h2 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+       color: var(--ink-muted); margin: 0 0 10px; }
+  h3 { font-size: 12px; font-weight: 600; color: var(--ink-muted); margin: 0; }
+  .sub { font-size: 13px; color: var(--ink-2); margin: -4px 0 12px; }
+  .note { font-size: 12px; color: var(--ink-muted); margin: 6px 0 0; }
+  .hero-value { font-size: 48px; font-weight: 700; line-height: 1.05; letter-spacing: -0.02em; margin: 2px 0 8px; }
+  .total .sub { margin: 0; }
+  .budget { margin-top: 16px; }
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; margin: 18px 0 0; }
+  .stats dt { font-size: 11px; color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .stats dd { margin: 2px 0 0; font-size: 15px; font-weight: 600; }
+  .budget-head { display: flex; justify-content: space-between; font-size: 13px; color: var(--ink-2); margin-bottom: 6px; }
   .meter { position: relative; height: 8px; border-radius: 4px; background: var(--track); }
   .meter-fill { height: 100%; border-radius: 4px; background: var(--accent); }
   .meter-tick { position: absolute; top: -3px; width: 2px; height: 14px; background: var(--ink); }
-  .section { padding: 18px 18px 12px; }
-  .section-title { font-size: 14px; font-weight: 700; margin: 0 0 10px; }
-  .section-title.pad { padding: 18px 18px 0; margin: 0; }
-  .section-sub { font-size: 12px; color: var(--ink-2); margin: -4px 0 12px; }
-  svg.daily { width: 100%; height: 120px; display: block; }
-  .bar { fill: var(--accent); } .bar:hover { opacity: 0.75; }
-  .bar.zero { fill: var(--track); } .bar.future { fill: var(--track); opacity: 0.4; }
-  .axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--ink-muted); margin-top: 4px; }
-  .mix-bar { display: flex; gap: 2px; height: 14px; border-radius: 4px; overflow: hidden; }
-  .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 10px 0 4px; font-size: 13px; color: var(--ink-2); }
-  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .donut-wrap { display: flex; align-items: center; gap: 18px; }
+  .donut { width: 156px; height: 156px; flex: none; }
+  .donut-value { font-size: 24px; font-weight: 700; fill: var(--ink); }
+  .donut-label { font-size: 11px; fill: var(--ink-muted); }
+  .legend-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 0; }
+  .legend-list li { display: grid; grid-template-columns: 10px 1fr auto; column-gap: 8px; align-items: center; font-size: 13px; }
+  .legend-list .lg-name { color: var(--ink-2); }
+  .legend-list .lg-amt { grid-column: 2 / 4; font-size: 11px; color: var(--ink-muted); }
   .swatch { width: 10px; height: 10px; border-radius: 2px; }
-  .bar-row { display: grid; grid-template-columns: 120px 1fr 76px; align-items: center; gap: 10px; padding: 6px 0; }
+  .tiles { display: grid; grid-template-rows: repeat(3, 1fr); gap: 14px; flex: 1; }
+  .tile { padding: 12px 16px; display: flex; flex-direction: column; justify-content: center; }
+  .tile-value { font-size: 26px; font-weight: 700; line-height: 1.2; }
+  .tile-value .of { font-size: 14px; font-weight: 500; color: var(--ink-muted); }
+  .tile .note { margin-top: 2px; }
+  .split-bar { display: flex; gap: 2px; height: 6px; border-radius: 3px; overflow: hidden; margin-top: 6px; }
+  .good { color: var(--good); font-weight: 600; } .bad { color: var(--bad); font-weight: 600; }
+  .timeline { display: flex; gap: 2px; }
+  .tl-day { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; }
+  .tl-bar-area { height: 120px; width: 100%; display: flex; align-items: flex-end; }
+  .tl-bar { width: 100%; border-radius: 3px 3px 0 0; background: var(--accent); }
+  .tl-bar.zero { background: var(--track); } .tl-bar.future { background: var(--track); opacity: 0.4; }
+  .tl-day:hover .tl-bar { opacity: 0.75; }
+  .tl-dots { display: flex; flex-direction: column; align-items: center; gap: 3px; padding-top: 6px; min-height: 26px; }
+  .tl-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-2); display: block; }
+  .tl-dot.topup { background: var(--surface); box-shadow: inset 0 0 0 1.6px var(--bad); }
+  .axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--ink-muted); margin-top: 2px; }
+  .legend-inline { font-size: 12px; color: var(--ink-muted); margin: 8px 0 0; display: flex; align-items: center; gap: 6px; }
+  .dot-key { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-2); display: inline-block; margin-left: 8px; }
+  .dot-key:first-child { margin-left: 0; }
+  .dot-key.topup { background: transparent; border: 1.6px solid var(--bad); }
+  details { margin-top: 12px; }
+  summary { cursor: pointer; font-size: 13px; color: var(--ink-2); }
+  .bar-row { display: grid; grid-template-columns: minmax(0, 150px) 1fr 84px; align-items: center; gap: 10px; padding: 5px 0; }
   .bar-name { font-size: 13px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .bar-track { height: 12px; border-radius: 4px; background: var(--track); }
+  .bar-track { height: 10px; border-radius: 4px; background: var(--track); }
   .bar-fill { height: 100%; border-radius: 4px; background: var(--accent); }
   .bar-value { font-size: 13px; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
-  .bar-pct { display: block; font-size: 11px; font-weight: 400; color: var(--ink-muted); }
-  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-  .split .card { margin-bottom: 14px; }
-  .rows { list-style: none; margin: 0; padding: 10px 18px 16px; display: flex; flex-direction: column; gap: 10px; }
-  .row { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; }
-  .row-name { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .row-val { font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .row-val.warn { color: var(--warn); }
-  .row-sub { display: block; font-size: 11px; font-weight: 400; color: var(--ink-muted); }
-  .empty-card { padding: 18px; font-size: 13px; color: var(--ink-2); }
-  .empty-card strong { display: block; color: var(--ink); margin-bottom: 4px; }
+  .bar-amt { display: block; font-size: 11px; font-weight: 400; color: var(--ink-muted); }
+  .table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .table th { text-align: left; font-size: 11px; font-weight: 600; color: var(--ink-muted); text-transform: uppercase;
+              letter-spacing: 0.04em; padding: 0 0 6px; border-bottom: 1px solid var(--border); }
+  .table td { padding: 7px 0; border-bottom: 1px solid var(--border); color: var(--ink-2); }
+  .table tr:last-child td { border-bottom: 0; }
+  .table .num { text-align: right; font-variant-numeric: tabular-nums; padding-left: 12px; white-space: nowrap; }
+  .table .strong { color: var(--ink); font-weight: 700; } .table .muted { color: var(--ink-muted); }
+  .table .store { max-width: 0; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cell-sub { display: block; font-size: 11px; color: var(--ink-muted); }
+  .attn + .attn { margin-top: 14px; }
+  .attn-head { display: flex; justify-content: space-between; font-size: 13px; color: var(--ink-2); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .chip { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: var(--surface-2);
+          border: 1px solid var(--border); color: var(--ink-2); }
+  .group-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+                 color: var(--ink-muted); margin: 22px 0 10px; }
+  .share-note { text-align: center; font-size: 12px; color: var(--ink-muted); margin: 6px 0; }
   code { background: var(--surface-2); border-radius: 4px; padding: 1px 5px; font-size: 11px; }
-  footer { text-align: center; font-size: 12px; color: var(--ink-muted); padding-top: 6px; }
+  footer { text-align: center; font-size: 12px; color: var(--ink-muted); padding-top: 10px; }
   footer a { color: var(--ink-muted); }
-  @media (max-width: 560px) {
-    .kpi-row { grid-template-columns: 1fr 1fr; }
-    .kpi-row:not(.two):not(.one) .card:first-child { grid-column: 1 / -1; }
-    .split { grid-template-columns: 1fr; gap: 0; }
-    .hero-value { font-size: 38px; }
-    .bar-row { grid-template-columns: 96px 1fr 70px; }
+  @media (max-width: 899px) {
+    .grid { grid-template-columns: minmax(0, 1fr); }
+    .span-4, .span-6, .span-8, .span-12 { grid-column: auto; }
+    .tiles { grid-template-rows: none; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .tile { padding: 10px 12px; }
+    .tile h3 { font-size: 11px; }
+    .tile-value { font-size: 22px; }
+    .hero-value { font-size: 40px; }
+    .bar-row { grid-template-columns: minmax(0, 104px) 1fr 70px; }
+  }
+  @media (max-width: 359px) {
+    .tiles { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 420px) {
+    .donut-wrap { flex-direction: column; align-items: stretch; }
+    .donut { align-self: center; }
   }
 """
-
-
-def _pct_bars(rows: list[tuple[str, float, str]]) -> str:
-    """Labelled one-colour bars from (name, percent, note) rows, scaled to the largest — no amounts."""
-    peak = max((pct for _, pct, _ in rows), default=0) or 1.0
-    return "".join(
-        f'<div class="bar-row"><span class="bar-name">{escape(name)}</span>'
-        f'<div class="bar-track"><div class="bar-fill" style="width:{pct / peak * 100:.1f}%"></div></div>'
-        f'<span class="bar-value">{pct:.0f}%<span class="bar-pct">{escape(note)}</span></span></div>'
-        for name, pct, note in rows
-    )
-
-
-def _share_view(month: dict, previous: dict | None = None) -> str:
-    """One month in relative terms only, for a screenshot to share with friends.
-
-    Built separately from the private view rather than by hiding its euro
-    figures, so no amount is in this part of the page at all, not even
-    hidden. Store and category names are fine to share (the user's call).
-    """
-    total = month["spent"] or 0.0
-    trips = month["trips"]
-    days = month["daily"]
-    shopped = sum(1 for v in days if v)
-    budget = month["budget"]
-    budget_line = f'<p class="hero-sub">{budget["pct"]:.0f}% of the monthly budget used</p>' if budget else ""
-    purposes = month.get("purposes", [])
-    lead = purposes[0] if purposes else None
-    headline = (f'<div class="hero-value">{lead["total"] / total * 100:.0f}%</div>'
-                f'<p class="hero-sub">went on {lead["name"].lower()}</p>' if lead else
-                '<p class="hero-sub">No purchases logged yet this month</p>')
-    hero = f"""
-    <div class="card hero">
-      <p class="label">Where the money went</p>
-      {headline}{budget_line}
-      {_purpose_bar(purposes, total, amounts=False)}
-    </div>"""
-    if not total:
-        return f'<p class="period">{escape(month["month_label"])}</p>{hero}'
-
-    peak = max(days) or 1.0
-    width, height = 600, 90
-    bars = "".join(
-        f'<rect class="{"bar" if v else "bar zero"}" x="{i * width / len(days):.1f}" '
-        f'y="{height - max(3.0, v / peak * (height - 4)):.1f}" width="{width / len(days) - 2:.1f}" '
-        f'height="{max(3.0, v / peak * (height - 4)):.1f}" rx="2"><title>Day {i + 1}: '
-        f'{v / total * 100:.0f}% of the month</title></rect>'
-        for i, v in enumerate(days)
-    )
-    mix = month["mix"]
-    mix_parts = [(label, mix[key] / total * 100, color) for label, key, color in (
-        ("Needs", "need", "var(--mix-need)"), ("Treats", "treat", "var(--mix-treats)"),
-        ("Not sorted yet", "unknown", "var(--mix-none)")) if mix[key]]
-    segments = "".join(f'<div style="width:{pct:.2f}%;background:{c}" title="{label}: {pct:.0f}%"></div>'
-                       for label, pct, c in mix_parts)
-    legend = "".join(f'<div class="legend-item"><span class="swatch" style="background:{c}"></span>'
-                     f'{label} <strong>{pct:.0f}%</strong></div>' for label, pct, c in mix_parts)
-    categories = _pct_bars([(c["name"], c["total"] / total * 100, "") for c in month["categories"]])
-    stores = _pct_bars([
-        (st["store"] or "Typed in by hand", st["total"] / total * 100, f'{st["trips"]} trip{"s" if st["trips"] != 1 else ""}')
-        for st in trips["by_store"]
-    ])
-    return f"""
-    <p class="period">{escape(month["month_label"])}</p>
-    {hero}
-    <div class="cards">
-      {_trips_card(month, previous, share=True)}
-      <div class="card section"><p class="section-title">When the shopping happened</p>
-        <p class="section-sub">Shopped on {shopped} of {month["day"]} days</p>
-        <svg class="daily" viewBox="0 0 {width} {height}" preserveAspectRatio="none" role="img"
-             aria-label="Share of the month's spending per day">{bars}</svg>
-        <div class="axis"><span>1</span><span>{len(days) // 2}</span><span>{len(days)}</span></div></div>
-      <div class="card section"><p class="section-title">What kind of spending</p>
-        <div class="mix-bar">{segments}</div><div class="legend">{legend}</div></div>
-      <div class="card section"><p class="section-title">Spending by category</p>{categories}</div>
-      <div class="card section"><p class="section-title">Where the shopping happens</p>{stores}</div>
-    </div>"""
 
 
 _TELEGRAM_SCRIPT = """<script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -628,78 +630,6 @@ _TELEGRAM_SCRIPT = """<script src="https://telegram.org/js/telegram-web-app.js">
 </script>"""
 
 
-def _trips_per_week(month: dict) -> float | None:
-    """Trips per week since the month's first purchase — tracking may start mid-month, so not since day 1."""
-    first = next((i for i, v in enumerate(month["daily"]) if v), None)
-    if first is None or not month["trips"]["count"]:
-        return None
-    return month["trips"]["count"] / (month["day"] - first) * 7
-
-
-def _trips_card(month: dict, previous: dict | None, share: bool = False) -> str:
-    """How often the shopping happened — the goal is fewer trips — and which ones were small top-ups.
-
-    share leaves out every amount (the top-up list shows days and stores only).
-    """
-    trips = month["trips"]
-    if not trips["count"]:
-        return ""
-    rate = _trips_per_week(month)
-    before = _trips_per_week(previous) if previous else None
-    if rate is not None and before:
-        change = (rate - before) / before * 100
-        arrow = "✓ fewer" if change <= -5 else "more" if change >= 5 else "about the same"
-        compare = (f'<p class="section-sub">{rate:.1f} trips a week — {arrow} than '
-                   f'{previous["month_label"].split()[0]} ({before:.1f} a week)</p>')
-    else:
-        compare = f'<p class="section-sub">{rate:.1f} trips a week</p>' if rate else ""
-    top_ups = trips.get("top_ups", [])
-    if top_ups:
-        rows = "".join(
-            f'<li class="row"><span class="row-name">{datetime.fromisoformat(t["day"]).strftime("%-d %b")} · '
-            f'{escape(t["store"] or "typed in")}</span>'
-            + ("" if share else f'<span class="row-val muted">{_eur(t["total"])}</span>') + "</li>"
-            for t in top_ups
-        )
-        total = "" if share else f' · {_eur(sum(t["total"] for t in top_ups))} together'
-        top = (f'<p class="attn-head"><span>{len(top_ups)} of {trips["count"]} were small top-ups'
-               f' (under €5){total}</span></p><ul class="rows tight">{rows}</ul>'
-               f'<p class="attn-hint">These are the ones a single bigger shop can absorb — '
-               f'"What to buy" shows what runs out when.</p>')
-        if share:
-            top = top.replace(" (under €5)", "")
-    else:
-        top = '<p class="attn-hint">No small top-up trips — every trip was a real shop. 👏</p>'
-    return f"""
-    <div class="card section">
-      <p class="section-title">Shopping trips: {trips["count"]}</p>
-      {compare}
-      {"" if share or not trips.get("avg_basket") else f'<p class="section-sub">Average basket {_eur(trips["avg_basket"])}</p>'}
-      {top}
-    </div>"""
-
-
-def _month_view(month: dict, previous: dict | None = None) -> str:
-    """Everything on the page that belongs to one month."""
-    if month.get("is_current", True):
-        period = f'{month["month_label"]} · day {month["day"]} of {month["days_in_month"]}'
-        kpis = f'<div class="kpi-row">{_budget_kpi(month)}{_treats_kpi(month)}{_list_kpi(month)}</div>'
-    else:
-        period = f'{month["month_label"]} · closed'
-        kpis = f'<div class="kpi-row one">{_treats_kpi(month)}</div>'
-    return f"""
-    <p class="period">{period}</p>
-    {_hero(month)}
-    {kpis}
-    <div class="cards">
-      {_trips_card(month, previous)}
-      {_daily_chart(month)}
-      {_mix_card(month)}
-      {_categories_card(month)}
-      {_stores_card(month)}
-    </div>"""
-
-
 def _month_tabs_css(count: int) -> str:
     """Show the month whose radio is checked, and mark its tab — one rule pair per month."""
     return "".join(
@@ -715,7 +645,9 @@ def render_dashboard_html(data: dict) -> str:
 
     Every month is in the page and the tabs are radio buttons, so switching
     months needs no request: inside Telegram the session cookie is often
-    dropped, and a reload would bounce back to the login.
+    dropped, and a reload would bounce back to the login. Each month is
+    rendered twice — private, and a share view built without any amount
+    (not by hiding them), safe to screenshot.
     """
     updated = datetime.now(tz=timezone.utc).strftime("%d %b, %H:%M UTC")
     months = data.get("months") or [{**data, "key": "this-month"}]
@@ -727,10 +659,9 @@ def render_dashboard_html(data: dict) -> str:
     tabs = "" if len(months) < 2 else '<nav class="tabs" aria-label="Month">' + "".join(
         f'<label for="m{i}">{m["month_label"][:3]}</label>' for i, m in enumerate(months)
     ) + "</nav>"
-    # A month view also shows "right now" figures (the shopping-list card), which live on data.
     views = "".join(
-        f'<section class="month m{i}"><div class="private">{_month_view({**data, **m}, prev)}</div>'
-        f'<div class="shared">{_share_view(m, prev)}</div></section>'
+        f'<section class="month m{i}"><div class="private">{_month_view(m, prev, amounts=True)}</div>'
+        f'<div class="shared">{_month_view(m, prev, amounts=False)}</div></section>'
         for i, (m, prev) in enumerate(zip(months, [None, *months[:-1]]))
     )
     return f"""<!doctype html>
@@ -751,13 +682,7 @@ def render_dashboard_html(data: dict) -> str:
   </header>
   {views}
   <p class="share-note">👁 Share view — percentages only, no amounts. Tap 👁 again for your full view.</p>
-  <p class="group-title right-now">Right now</p>
-  <div class="cards right-now">
-    {_to_buy_card(data)}
-    {_attention_card(data)}
-    {_prices_card(data)}
-    {_daily_cost_card(data)}
-  </div>
+  {_right_now(data)}
   <footer class="right-now">Live from TrackNest · {updated} · <a href="/logout">Log out</a></footer>
 </body>
 </html>"""

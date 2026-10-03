@@ -426,12 +426,15 @@ def get_shopping_trips(year=None, month=None):
         Dict with keys count, avg_basket (float, or None with no trips),
         by_store (list of {store, trips, total}, biggest spend first; store
         is None for hand-typed purchases), top_ups (trips under
-        TOP_UP_TRIP_EUR, as {day, store, total}) and not_shopping (euros).
+        TOP_UP_TRIP_EUR, as {day, store, total}), per_day (one list per
+        day of the month, holding each of that day's trip totals) and
+        not_shopping (euros).
     """
     from bot.categorize import NOT_SHOPPING
 
     now = datetime.now(tz=timezone.utc)
-    prefix = f"{year or now.year:04d}-{month or now.month:02d}"
+    year, month = year or now.year, month or now.month
+    prefix = f"{year:04d}-{month:02d}"
     placeholders = ", ".join("?" for _ in NOT_SHOPPING)
     conn = get_connection()
     cursor = conn.cursor()
@@ -466,11 +469,15 @@ def get_shopping_trips(year=None, month=None):
          for t in trips if float(t["total"]) < TOP_UP_TRIP_EUR),
         key=lambda t: t["day"],
     )
+    per_day = [[] for _ in range(calendar.monthrange(year, month)[1])]
+    for t in trips:
+        per_day[int(t["day"][8:10]) - 1].append(float(t["total"]))
     return {
         "count": len(trips),
         "avg_basket": grand_total / len(trips) if trips else None,
         "by_store": sorted(by_store.values(), key=lambda s: s["total"], reverse=True),
         "top_ups": top_ups,
+        "per_day": per_day,
         "not_shopping": not_shopping,
     }
 
