@@ -30,9 +30,13 @@ _MAX_CATEGORIES = len(CATEGORY_NAMES)
 def _purposes(categories: list[dict]) -> list[dict]:
     """Category totals summed per purpose (Food, Personal & home, Leisure, Other), biggest first, empty ones left out."""
     totals = {purpose: 0.0 for purpose in PURPOSES}
+    holds = {purpose: [] for purpose in PURPOSES}
     for c in categories:
-        totals[purpose_of(c["category"])] += c["total"]
-    return sorted(({"name": p, "total": t} for p, t in totals.items() if t), key=lambda p: p["total"], reverse=True)
+        purpose = purpose_of(c["category"])
+        totals[purpose] += c["total"]
+        holds[purpose].append({"name": c["category"] or "Uncategorized", "total": c["total"]})
+    return sorted(({"name": p, "total": t, "categories": holds[p]} for p, t in totals.items() if t),
+                  key=lambda p: p["total"], reverse=True)
 
 
 def build_month_data(year: int, month: int) -> dict:
@@ -203,6 +207,13 @@ def _donut(month: dict, amounts: bool) -> str:
     purposes = month.get("purposes", [])
     if not total or not purposes:
         return _card("Spending breakdown", '<p class="note">Appears once something is logged this month.</p>', cls="empty")
+    holds = {p["name"]: p.get("categories", []) for p in purposes}
+
+    def inside(name: str) -> str:
+        return ", ".join(
+            f'{escape(c["name"])} {_eur(c["total"]) if amounts else f"{_share(c["total"], total):.0f}%"}'
+            for c in holds[name])
+
     radius, width = 52, 20
     circumference = 2 * 3.141592653589793 * radius
     gap = 2.0 if len(purposes) > 1 else 0.0
@@ -213,14 +224,15 @@ def _donut(month: dict, amounts: bool) -> str:
             f'<circle r="{radius}" cx="70" cy="70" fill="none" stroke="{_PURPOSE_COLORS[p["name"]]}" '
             f'stroke-width="{width}" stroke-dasharray="{max(length - gap, 0.5):.2f} {circumference:.2f}" '
             f'stroke-dashoffset="{-offset:.2f}" transform="rotate(-90 70 70)">'
-            f'<title>{p["name"]}: {_share(p["total"], total):.0f}%</title></circle>'
+            f'<title>{p["name"]} {_share(p["total"], total):.0f}% — {inside(p["name"])}</title></circle>'
         )
         offset += length
     lead = purposes[0]
     legend = "".join(
-        f'<li><span class="swatch" style="background:{_PURPOSE_COLORS[p["name"]]}"></span>'
+        f'<li title="{p["name"]}: {inside(p["name"])}"><span class="swatch" style="background:{_PURPOSE_COLORS[p["name"]]}"></span>'
         f'<span class="lg-name">{p["name"]}</span><strong>{_share(p["total"], total):.0f}%</strong>'
-        + (f'<span class="lg-amt">{_eur(p["total"])}</span>' if amounts else "") + "</li>"
+        + (f'<span class="lg-amt">{_eur(p["total"])} · ' if amounts else '<span class="lg-amt">')
+        + ", ".join(escape(c["name"]) for c in holds[p["name"]]) + "</span></li>"
         for p in purposes
     )
     body = f"""
@@ -304,13 +316,19 @@ def _timeline(month: dict, amounts: bool) -> str:
     columns = []
     for i, value in enumerate(daily):
         trips = per_day[i] if i < len(per_day) else []
-        tops = sum(1 for t in trips if t < 5)
+        tops = sum(1 for t in trips if t["total"] < 5)
         what = _eur(value) if amounts else f"{_share(value, total):.0f}% of the month"
         tip = f"{i + 1} {short}: {what}" + (f" · {len(trips)} trip{'s' if len(trips) != 1 else ''}" if trips else "")
         tip += f" ({tops} top-up{'s' if tops != 1 else ''})" if tops else ""
         state = "" if value else (" zero" if i < month["day"] else " future")
         height = max(value / peak * 100, 3) if value else 3
-        dots = "".join(f'<i class="{"tl-dot topup" if t < 5 else "tl-dot"}"></i>' for t in trips[:4])
+        dots = "".join(
+            f'<i class="{"tl-dot topup" if t["total"] < 5 else "tl-dot"}" '
+            f'title="{i + 1} {short} · {escape(t["store"] or "typed in")}'
+            + (f' · {_eur(t["total"])}' if amounts else "")
+            + (" · top-up" if t["total"] < 5 else "") + '"></i>'
+            for t in trips[:4]
+        ) + (f'<span class="tl-more" title="{len(trips) - 4} more trips">+{len(trips) - 4}</span>' if len(trips) > 4 else "")
         columns.append(f'<div class="tl-day" title="{tip}"><div class="tl-bar-area">'
                        f'<div class="tl-bar{state}" style="height:{height:.1f}%"></div></div>'
                        f'<div class="tl-dots">{dots}</div></div>')
@@ -561,6 +579,10 @@ _STYLE = """
   .tl-dots { display: flex; flex-direction: column; align-items: center; gap: 3px; padding-top: 6px; min-height: 26px; }
   .tl-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-2); display: block; }
   .tl-dot.topup { background: var(--surface); box-shadow: inset 0 0 0 1.6px var(--bad); }
+  .tl-dot { cursor: help; outline: 4px solid transparent; }  /* bigger hover target than the dot */
+  .tl-dot:hover { transform: scale(1.5); }
+  .tl-more { font-size: 9px; color: var(--ink-muted); }
+  .legend-list li { cursor: help; }
   .axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--ink-muted); margin-top: 2px; }
   .legend-inline { font-size: 12px; color: var(--ink-muted); margin: 8px 0 0; display: flex; align-items: center; gap: 6px; }
   .dot-key { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-2); display: inline-block; margin-left: 8px; }

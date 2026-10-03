@@ -428,7 +428,7 @@ def get_shopping_trips(year=None, month=None):
         is None for hand-typed purchases), top_ups (trips under
         TOP_UP_TRIP_EUR, as {day, store, total}), per_day (one list per
         day of the month, holding each of that day's trip totals) and
-        not_shopping (euros).
+        not_shopping (euros). per_day entries are {store, total} per trip.
     """
     from bot.categorize import NOT_SHOPPING
 
@@ -471,7 +471,7 @@ def get_shopping_trips(year=None, month=None):
     )
     per_day = [[] for _ in range(calendar.monthrange(year, month)[1])]
     for t in trips:
-        per_day[int(t["day"][8:10]) - 1].append(float(t["total"]))
+        per_day[int(t["day"][8:10]) - 1].append({"store": t["store"], "total": float(t["total"])})
     return {
         "count": len(trips),
         "avg_basket": grand_total / len(trips) if trips else None,

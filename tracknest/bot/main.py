@@ -1152,6 +1152,8 @@ def _log_purchase(
     line = f"• {qty}x {shown} at €{price:.2f} each"
     if not existed:
         line += f" — {_profile_note(crud.get_item(name) or {})}"
+    elif note := (crud.get_item(name) or {}).get("notes"):
+        line += f"\n  📝 {note}"  # e.g. "don't buy again" — shown when it's bought again anyway
     cleared_id = (
         shopping_list.remove_item(matched_list_item, reason=clear_reason, source=source or name)
         if matched_list_item else None

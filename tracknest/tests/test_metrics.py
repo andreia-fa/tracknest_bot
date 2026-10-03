@@ -267,7 +267,8 @@ def test_each_receipt_is_a_trip_even_at_the_same_store_on_the_same_day(db):
     trips = metrics.get_shopping_trips(2026, 9)
     assert trips["count"] == 2
     assert trips["by_store"] == [{"store": "REWE", "trips": 2, "total": pytest.approx(17.27)}]
-    assert trips["per_day"][29] == [pytest.approx(10.99), pytest.approx(6.28)]
+    assert [t["total"] for t in trips["per_day"][29]] == [pytest.approx(10.99), pytest.approx(6.28)]
+    assert {t["store"] for t in trips["per_day"][29]} == {"REWE"}
 
 
 def test_older_purchases_count_one_trip_per_store_per_day(db):

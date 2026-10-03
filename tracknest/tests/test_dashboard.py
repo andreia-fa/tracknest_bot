@@ -156,10 +156,12 @@ def test_share_view_of_an_empty_month_still_renders():
 
 def test_where_the_money_went_leads_both_views():
     import re
-    purposes = [{"name": "Food", "total": 90.0}, {"name": "Personal & home", "total": 25.0},
-                {"name": "Leisure", "total": 5.0}]
+    purposes = [{"name": "Food", "total": 90.0, "categories": [{"name": "Dairy", "total": 90.0}]},
+                {"name": "Personal & home", "total": 25.0, "categories": [{"name": "Clothing", "total": 25.0}]},
+                {"name": "Leisure", "total": 5.0, "categories": [{"name": "Leisure", "total": 5.0}]}]
     html = dashboard.render_dashboard_html(sample_data(purposes=purposes))
-    assert '<span class="lg-name">Food</span><strong>75%</strong><span class="lg-amt">€90.00</span>' in html
+    assert '<span class="lg-name">Food</span><strong>75%</strong><span class="lg-amt">€90.00 · Dairy</span>' in html
+    assert "<title>Personal &amp; home" in html or "<title>Personal & home 21% — Clothing €25.00</title>" in html
     shared = re.findall(r'<div class="shared">(.*?)</div></section>', html, re.S)[0]
     assert "Spending breakdown" in shared and ">food</text>" in shared
     assert '<span class="lg-name">Leisure</span><strong>4%</strong>' in shared and "€" not in shared
@@ -172,3 +174,14 @@ def test_a_closed_month_is_never_measured_against_todays_budget():
     html = dashboard.render_dashboard_html(sample_data(months=[closed, sample_data(key="2026-10")]))
     september = html.split('class="month m0"')[1].split('class="month m1"')[0]
     assert "Budget" not in september and "/set_budget" not in september
+
+
+def test_each_trip_dot_says_which_trip_it_is():
+    import re
+    trips = sample_data()["trips"] | {"per_day": [[] for _ in range(20)] + [
+        [{"store": "REWE", "total": 46.0}, {"store": "Yormas", "total": 1.0}]] + [[] for _ in range(9)]}
+    html = dashboard.render_dashboard_html(sample_data(trips=trips))
+    assert 'title="21 Sep · REWE · €46.00"' in html
+    assert 'title="21 Sep · Yormas · €1.00 · top-up"' in html
+    shared = re.findall(r'<div class="shared">(.*?)</div></section>', html, re.S)[0]
+    assert 'title="21 Sep · Yormas · top-up"' in shared and "€" not in shared

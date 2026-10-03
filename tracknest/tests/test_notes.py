@@ -90,3 +90,10 @@ async def test_list_and_reminders_show_the_note(db):
             "last_purchase": "2026-09-23T17:32:26+00:00", "last_store": "Intimissimi", "notes": "UK/USA 34B"}
     text = main._spare_alert_text(item, datetime(2026, 10, 3, tzinfo=timezone.utc))
     assert "at Intimissimi" in text and text.endswith("📝 UK/USA 34B")
+
+
+@pytest.mark.asyncio
+async def test_buying_a_noted_item_again_shows_the_note(db):
+    crud.set_item_note("Push Up Bra", "Don't buy again — very gassy")
+    line, _ = main._log_purchase("Push Up Bra", 1, 35.90, store="Intimissimi")
+    assert "📝 Don't buy again — very gassy" in line
