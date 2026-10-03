@@ -16,7 +16,7 @@ from aiohttp import web
 
 from bot import auth
 from bot.categorize import CATEGORY_NAMES
-from db import metrics, shopping_list
+from db import crud, metrics, shopping_list
 
 _SESSION_COOKIE = "tracknest_session"
 
@@ -73,16 +73,21 @@ def build_dashboard_data() -> dict:
         The current month's build_month_data() keys at the top level, plus
         months (every month with purchases, oldest first, ending with the
         current one — switched between on the page without reloading),
-        rising, running_low, shopping_list, health and daily_cost.
+        rising, running_low, shopping_list, health, readable (item name ->
+        product, for display) and daily_cost.
     """
     months = [build_month_data(year, month) for year, month in metrics.get_months_with_spending()]
+    health = metrics.get_inventory_health()
+    running_low = metrics.get_running_low()
+    shown_names = {n for group in health.values() for n in group} | {r["name"] for r in running_low}
     return {
         **months[-1],
         "months": months,
         "rising": metrics.get_price_trends(top_n=5),
-        "running_low": metrics.get_running_low(),
+        "running_low": running_low,
         "shopping_list": shopping_list.get_all_items(),
-        "health": metrics.get_inventory_health(),
+        "health": health,
+        "readable": _readable_names(shown_names),
         "daily_cost": metrics.get_daily_cost(top_n=5),
     }
 
@@ -298,13 +303,25 @@ def _prices_card(data: dict) -> str:
     return f'<div class="card"><p class="section-title pad">Price watch</p><ul class="rows">{rows}</ul></div>'
 
 
+def _readable_names(names: set[str]) -> dict:
+    """Map item names to their product ("cheese") when known — receipt names like "LEERDAMMER CAR." read badly."""
+    return {n: (crud.get_item(n) or {}).get("product") or n for n in names}
+
+
 def _to_buy_card(data: dict) -> str:
     low = data["running_low"]
     items = data["shopping_list"]
-    if not low and not items:
+    readable = data.get("readable", {})
+    spares = sorted({readable.get(n, n) for n in data["health"]["spare_alert_pending"]})
+    if not low and not items and not spares:
         return _empty("What to buy", "Your list is empty and nothing's running low.")
+    spare_rows = "".join(
+        f'<li class="row"><span class="row-name">🔁 {escape(p)}</span>'
+        f'<span class="row-val muted">keep a spare</span></li>'
+        for p in spares
+    )
     low_rows = "".join(
-        f'<li class="row"><span class="row-name">⏳ {escape(r["name"])}</span>'
+        f'<li class="row"><span class="row-name">⏳ {escape(readable.get(r["name"], r["name"]))}</span>'
         f'<span class="row-val">{"today" if r["days_left"] == 0 else f"{r['days_left']}d left"}</span></li>'
         for r in low
     )
@@ -318,26 +335,28 @@ def _to_buy_card(data: dict) -> str:
         f'<li class="row muted">+ {len(items) - len(shown)} more — <code>/list</code> in Telegram</li>'
         if len(items) > len(shown) else ""
     )
-    return f'<div class="card"><p class="section-title pad">What to buy</p><ul class="rows">{low_rows}{list_rows}{more}</ul></div>'
+    return (f'<div class="card"><p class="section-title pad">What to buy</p>'
+            f'<ul class="rows">{low_rows}{spare_rows}{list_rows}{more}</ul></div>')
 
 
 def _attention_card(data: dict) -> str:
+    """What the bot is waiting on you for — open questions and "did it run out?" check-ins."""
     health = data["health"]
-    rows = [
-        ("Did these run out?", health["checkin_pending"]),
-        ("Buy a spare", health["spare_alert_pending"]),
-        ("Waiting for your answer", health["unprofiled"]),
+    groups = [
+        ("Did these run out?", "Answer in Telegram: yes or no", health["checkin_pending"]),
+        ("Questions waiting for you", "The bot asks them one at a time in Telegram", health["unprofiled"]),
     ]
-    rows = [(label, names) for label, names in rows if names]
-    if not rows:
-        return _empty("Needs attention", "✓ All caught up — no open questions from the bot.")
+    groups = [g for g in groups if g[2]]
+    readable = data.get("readable", {})
+    if not groups:
+        return _empty("Needs attention", "✓ All caught up — nothing waiting for you.")
     body = "".join(
-        f'<li class="row-block"><div class="row"><span class="row-name">{label}</span>'
-        f'<span class="row-val">{len(names)}</span></div>'
-        f'<div class="row-sub">{escape(", ".join(names[:4]))}{"…" if len(names) > 4 else ""}</div></li>'
-        for label, names in rows
+        f'<div class="attn"><div class="attn-head"><span>{label}</span><span class="count">{len(names)}</span></div>'
+        f'<div class="chips">{"".join(f"<span class=chip>{escape(readable.get(n, n))}</span>" for n in names)}</div>'
+        f'<p class="attn-hint">{hint}</p></div>'
+        for label, hint, names in groups
     )
-    return f'<div class="card"><p class="section-title pad">Needs attention</p><ul class="rows">{body}</ul></div>'
+    return f'<div class="card"><p class="section-title pad">Needs attention</p><div class="attn-body">{body}</div></div>'
 
 
 def _daily_cost_card(data: dict) -> str:
@@ -407,6 +426,21 @@ _STYLE = """
   .tabs label { padding: 4px 12px; border-radius: 8px; border: 1px solid transparent; font-size: 13px;
                 color: var(--ink-2); cursor: pointer; }
   .period { margin: 0 0 10px; font-size: 13px; }
+  .cards > .card { margin-bottom: 14px; }
+  .attn-body { padding: 10px 18px 16px; display: flex; flex-direction: column; gap: 14px; }
+  .attn-head { display: flex; justify-content: space-between; font-size: 13px; color: var(--ink-2); }
+  .count { font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .chip { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: var(--surface-2);
+          border: 1px solid var(--border); color: var(--ink-2); max-width: 100%;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .attn-hint { font-size: 11px; color: var(--ink-muted); margin: 6px 0 0; }
+  @media (min-width: 900px) {
+    body { max-width: 1100px; }
+    .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+    .cards > .card { margin: 0; }
+    .cards { margin-bottom: 14px; }
+  }
   .group-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
                  color: var(--ink-muted); margin: 22px 0 10px; }
   .kpi { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
@@ -470,10 +504,12 @@ def _month_view(month: dict) -> str:
     <p class="period">{period}</p>
     {_hero(month)}
     {kpis}
-    {_daily_chart(month)}
-    {_mix_card(month)}
-    {_categories_card(month)}
-    {_stores_card(month)}"""
+    <div class="cards">
+      {_daily_chart(month)}
+      {_mix_card(month)}
+      {_categories_card(month)}
+      {_stores_card(month)}
+    </div>"""
 
 
 def _month_tabs_css(count: int) -> str:
@@ -513,6 +549,8 @@ def render_dashboard_html(data: dict) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TrackNest</title>
 <style>{_STYLE}{_month_tabs_css(len(months))}</style>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>window.Telegram && Telegram.WebApp && Telegram.WebApp.expand();</script>
 </head>
 <body>
   {radios}
@@ -522,9 +560,12 @@ def render_dashboard_html(data: dict) -> str:
   </header>
   {views}
   <p class="group-title">Right now</p>
-  <div class="split">{_to_buy_card(data)}{_attention_card(data)}</div>
-  {_prices_card(data)}
-  {_daily_cost_card(data)}
+  <div class="cards">
+    {_to_buy_card(data)}
+    {_attention_card(data)}
+    {_prices_card(data)}
+    {_daily_cost_card(data)}
+  </div>
   <footer>Live from TrackNest · {updated} · <a href="/logout">Log out</a></footer>
 </body>
 </html>"""

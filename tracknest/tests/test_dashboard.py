@@ -33,6 +33,7 @@ def sample_data(**overrides) -> dict:
 
 
 @patch("bot.dashboard.metrics.get_months_with_spending", return_value=[(2026, 8), (2026, 9)])
+@patch("bot.dashboard.crud.get_item", return_value=None)
 @patch("bot.dashboard.metrics.get_daily_cost", return_value={"items": [], "ready": 0, "tracked": 0})
 @patch("bot.dashboard.metrics.get_inventory_health")
 @patch("bot.dashboard.shopping_list.get_all_items", return_value=[])
@@ -114,3 +115,15 @@ def test_largest_category_bar_never_overflows():
         categories=[{"name": "Clothing", "total": 35.9}, {"name": "Other", "total": 55.82}],
     ))
     assert "width:100.0%" in html and "width:155" not in html
+
+
+def test_spare_alerts_are_shopping_and_attention_shows_only_open_questions():
+    html = dashboard.render_dashboard_html(sample_data(
+        health={"checkin_pending": [], "spare_alert_pending": ["LEERDAMMER CAR.", "Milram Käse Scheiben"],
+                "unprofiled": ["X01"]},
+        readable={"LEERDAMMER CAR.": "cheese", "Milram Käse Scheiben": "cheese", "X01": "X01"},
+    ))
+    assert html.count("🔁 cheese") == 1  # one spare per product, by its readable name
+    assert "LEERDAMMER" not in html
+    assert "Questions waiting for you" in html and "<span class=chip>X01</span>" in html
+    assert "Buy a spare" not in html

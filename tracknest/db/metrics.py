@@ -381,7 +381,8 @@ def get_inventory_health():
 
     Returns:
         Dict with keys checkin_pending, spare_alert_pending, unprofiled
-        (items whose treat-or-need or how-long-it-lasts is still unknown)
+        (items with a question still open: what it is, treat-or-need, or
+        how long it lasts)
         — each a list of item names needing that kind of
         attention. An empty list means nothing of that kind needs attention
         right now.
@@ -394,7 +395,7 @@ def get_inventory_health():
     spare_alert_pending = [row["name"] for row in cursor.fetchall()]
     cursor.execute("""
         SELECT name FROM inventory_items
-        WHERE treat_or_need = 'unknown' OR lasts = 'unknown'
+        WHERE treat_or_need = 'unknown' OR lasts = 'unknown' OR name_status IS NOT NULL
     """)
     unprofiled = [row["name"] for row in cursor.fetchall()]
     cursor.close()

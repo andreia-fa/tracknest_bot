@@ -288,3 +288,11 @@ def test_get_daily_spend_zero_fills_the_month(mock_conn):
     assert len(days) == 30
     assert days[2] == 5.5
     assert sum(days) == 5.5
+
+
+def test_an_unanswered_what_is_it_question_needs_attention(db):
+    crud.add_item("Koreanische Alge", 1)
+    crud.set_treat_or_need("Koreanische Alge", "need")
+    crud.set_lasts("Koreanische Alge", "days", 14)
+    crud.mark_name_pending("Koreanische Alge")  # guessed, but "what is it?" still open
+    assert metrics.get_inventory_health()["unprofiled"] == ["Koreanische Alge"]
