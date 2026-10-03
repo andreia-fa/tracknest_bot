@@ -85,7 +85,7 @@ async def test_list_and_reminders_show_the_note(db):
 
     await main.show_shopping_list(update, _context())
 
-    assert "• push up bra (1x)\n📝 UK/USA 34B" in update.message.reply_text.call_args.args[0]
+    assert "• push up bra (1x)\n  📝 Push Up Bra — UK/USA 34B" in update.message.reply_text.call_args.args[0]
     item = {"name": "Push Up Bra", "product": "bra", "shelf_life_days": 120, "last_quantity": 1,
             "last_purchase": "2026-09-23T17:32:26+00:00", "last_store": "Intimissimi", "notes": "UK/USA 34B"}
     text = main._spare_alert_text(item, datetime(2026, 10, 3, tzinfo=timezone.utc))
@@ -97,3 +97,37 @@ async def test_buying_a_noted_item_again_shows_the_note(db):
     crud.set_item_note("Push Up Bra", "Don't buy again — very gassy")
     line, _ = main._log_purchase("Push Up Bra", 1, 35.90, store="Intimissimi")
     assert "📝 Don't buy again — very gassy" in line
+
+
+def _cheeses():
+    for name, product, note, lasts in (
+        ("Milram Käse Scheiben", "sliced cheese", "⭐ Favourite", ("days", 7)),
+        ("LEERDAMMER CAR.", "cheese", "⭐ Second favourite", ("days", 7)),
+        ("J.Tag Käseaufschnitt", "cheese mix", "🚫 Don't buy again — very gassy", ("one_off", None)),
+        ("J.Tag Emmental", "cheese", "🚫 Don't buy again — very gassy", ("one_off", None)),
+    ):
+        crud.add_item(name, 0, category="Dairy", product=product)
+        crud.set_treat_or_need(name, "need")
+        crud.set_lasts(name, *lasts)
+        crud.set_item_note(name, note)
+
+
+@pytest.mark.asyncio
+async def test_cheese_on_the_list_brings_up_every_cheese_note(db):
+    _cheeses()
+    crud.set_treat_or_need("Push Up Bra", "need")  # no open question, so "Käse" is plainly a list line
+    crud.set_lasts("Push Up Bra", "days", 120)
+    context = _context()
+    await main.handle_text(prompt := _text("Käse"), context)
+    text = prompt.message.reply_text.call_args.args[0]
+    for line in ("⭐ Milram Käse Scheiben — ⭐ Favourite", "⭐ LEERDAMMER CAR. — ⭐ Second favourite",
+                 "J.Tag Käseaufschnitt — 🚫 Don't buy again", "J.Tag Emmental — 🚫 Don't buy again"):
+        assert line.split(" — ")[0].lstrip("⭐ ") in text and line.split(" — ")[1] in text, line
+    assert "Push Up Bra" not in text  # notes of other kinds of things stay out
+
+
+def test_a_dont_buy_cheese_never_lends_its_no_reminders_profile(db):
+    _cheeses()
+    crud.add_item("Gouda jung", 1, category="Dairy", product="cheese")
+    crud.copy_product_profile("Gouda jung", "cheese")
+    assert crud.get_item("Gouda jung")["lasts"] == "days"  # from Leerdammer, not one-off from J.Tag Emmental

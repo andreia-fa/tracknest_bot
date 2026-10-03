@@ -179,6 +179,17 @@ def set_item_note(name, note):
     return affected > 0
 
 
+def get_noted_items():
+    """Return every item with a note, as dicts of name, product and notes."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT name, product, notes FROM inventory_items WHERE notes IS NOT NULL ORDER BY id")
+    rows = [dict(r) for r in cursor.fetchall()]
+    cursor.close()
+    conn.close()
+    return rows
+
+
 def set_par_level(name, level):
     """Set a per-item par-level override (1 or 2), superseding the household default.
 
@@ -591,7 +602,9 @@ def copy_product_profile(name, product):
     A new cheese needs no questions if another cheese was already profiled:
     treat-or-need, how long it lasts and keep-a-spare policy are properties
     of the need, not the brand. Only answers the item doesn't have yet
-    (still 'unknown', or no par level) are filled.
+    (still 'unknown', or no par level) are filled. A one-off item never
+    lends its profile: a cheese marked "don't buy again" (one-off, no
+    reminders) says nothing about how cheese is used.
 
     Returns:
         True if another item of that product had a profile to copy.
@@ -601,6 +614,7 @@ def copy_product_profile(name, product):
     cursor.execute("""
         SELECT treat_or_need, lasts, shelf_life_days, par_level FROM inventory_items
         WHERE product = ? AND name != ? AND (treat_or_need != 'unknown' OR lasts != 'unknown')
+          AND lasts != 'one_off'
         ORDER BY (treat_or_need = 'unknown') + (lasts = 'unknown'), id DESC LIMIT 1
     """, (product, name))
     source = cursor.fetchone()

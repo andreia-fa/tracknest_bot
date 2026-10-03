@@ -11,7 +11,7 @@ from aiohttp import web
 
 from bot import dashboard
 from bot.categorize import CATEGORY_NAMES, infer_category
-from bot.list_match import choose_list_match
+from bot.list_match import choose_list_match, same_kind
 from bot.parser import parse_line
 from bot.profile_guess import guess_profile
 from bot.receipt_lines import is_code_only
@@ -587,6 +587,20 @@ async def item_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+def _related_notes(entry: str) -> str:
+    """Notes of every item of the same kind as a list entry — favourites and don't-buys alike.
+
+    "cheese" (or "Käse") on the list brings up every cheese with a note,
+    whatever its brand. One line per item, ready to append to a reply.
+    """
+    lines = []
+    for item in crud.get_noted_items():
+        if same_kind(entry, [item["name"], item["product"]]):
+            mark = "" if item["notes"][:1] in "⭐🚫" else "📝 "
+            lines.append(f"\n  {mark}{item['name']} — {item['notes']}")
+    return "".join(lines)
+
+
 def _note_line(item: dict | None) -> str:
     """"\n📝 <note>" for an item with a note — e.g. the size to buy again — else ""."""
     return f"\n📝 {item['notes']}" if item and item.get("notes") else ""
@@ -927,7 +941,7 @@ def _preview_list_lines(text: str) -> list[str]:
         if note:
             preview[-1] += f"\n  📝 new note: {note}"
         else:
-            preview[-1] += _note_line(crud.get_item(name)).replace("\n", "\n  ")
+            preview[-1] += _related_notes(name)
     return preview
 
 
@@ -1088,7 +1102,7 @@ async def show_shopping_list(update: Update, context: ContextTypes.DEFAULT_TYPE)
         by_category.setdefault(category, []).append(item)
     sections = []
     for category in sorted(by_category, key=lambda c: (c == "Other", c)):
-        lines = [f"• {i['name']} ({i['quantity']}x){_note_line(crud.get_item(i['name']))}"
+        lines = [f"• {i['name']} ({i['quantity']}x){_related_notes(i['name'])}"
                  for i in by_category[category]]
         sections.append(f"{category}:\n" + "\n".join(lines))
     await update.message.reply_text("Shopping list:\n\n" + "\n\n".join(sections))

@@ -124,6 +124,19 @@ def _same_thing(receipt_names: list[str], list_name: str) -> bool | None:
     return any(group in list_groups for name in receipt_names for group in _groups_of(name))
 
 
+def same_kind(entry: str, names: list[str]) -> bool:
+    """Tell whether a shopping-list entry ("cheese", "Käse") names the same kind of thing as any of names.
+
+    Exact (case-insensitive) matches count, and so does sharing a synonym
+    group — so "Käse" on the list relates to "LEERDAMMER CAR." (product
+    "cheese") and "J.Tag Käseaufschnitt".
+    """
+    key = _normalize(entry)
+    if any(_normalize(n) == key for n in names if n):
+        return True
+    return bool(_same_thing([n for n in names if n], entry))
+
+
 def _shares_a_word(receipt_names: list[str], list_name: str) -> bool:
     """Tell whether a list entry and the receipt names share a word (or a cut-off start of one)."""
     list_words = [w for w in _normalize(list_name).split() if len(w) >= _MIN_INSIDE_LEN and not w.isdigit()]
