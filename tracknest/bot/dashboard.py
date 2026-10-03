@@ -441,6 +441,12 @@ _STYLE = """
     .cards > .card { margin: 0; }
     .cards { margin-bottom: 14px; }
   }
+  .shared, .share-note { display: none; }
+  #share:checked ~ .month .private, #share:checked ~ .right-now { display: none; }
+  #share:checked ~ .month .shared { display: block; }
+  #share:checked ~ .share-note { display: block; }
+  #share:checked ~ header .share-toggle { background: var(--ink); color: var(--page); }
+  .share-note { text-align: center; font-size: 12px; color: var(--ink-muted); margin: 18px 0 6px; }
   .header-tools { display: flex; align-items: center; gap: 8px; }
   .tool { border: 1px solid var(--border); background: var(--surface); color: var(--ink-2); border-radius: 8px;
           padding: 4px 9px; font-size: 14px; cursor: pointer; }
@@ -494,6 +500,76 @@ _STYLE = """
     .bar-row { grid-template-columns: 96px 1fr 70px; }
   }
 """
+
+
+def _pct_bars(rows: list[tuple[str, float, str]]) -> str:
+    """Labelled one-colour bars from (name, percent, note) rows, scaled to the largest — no amounts."""
+    peak = max((pct for _, pct, _ in rows), default=0) or 1.0
+    return "".join(
+        f'<div class="bar-row"><span class="bar-name">{escape(name)}</span>'
+        f'<div class="bar-track"><div class="bar-fill" style="width:{pct / peak * 100:.1f}%"></div></div>'
+        f'<span class="bar-value">{pct:.0f}%<span class="bar-pct">{escape(note)}</span></span></div>'
+        for name, pct, note in rows
+    )
+
+
+def _share_view(month: dict) -> str:
+    """One month in relative terms only, for a screenshot to share with friends.
+
+    Built separately from the private view rather than by hiding its euro
+    figures, so no amount is in this part of the page at all, not even
+    hidden. Store and category names are fine to share (the user's call).
+    """
+    total = month["spent"] or 0.0
+    trips = month["trips"]
+    days = month["daily"]
+    shopped = sum(1 for v in days if v)
+    budget = month["budget"]
+    budget_line = f'<p class="hero-sub">{budget["pct"]:.0f}% of the monthly budget used</p>' if budget else ""
+    hero = f"""
+    <div class="card hero">
+      <p class="label">Shopping trips</p>
+      <div class="hero-value">{trips["count"]}</div>
+      <p class="hero-sub">on {shopped} of {month["day"]} days</p>{budget_line}
+    </div>"""
+    if not total:
+        return f'<p class="period">{escape(month["month_label"])}</p>{hero}'
+
+    peak = max(days) or 1.0
+    width, height = 600, 90
+    bars = "".join(
+        f'<rect class="{"bar" if v else "bar zero"}" x="{i * width / len(days):.1f}" '
+        f'y="{height - max(3.0, v / peak * (height - 4)):.1f}" width="{width / len(days) - 2:.1f}" '
+        f'height="{max(3.0, v / peak * (height - 4)):.1f}" rx="2"><title>Day {i + 1}: '
+        f'{v / total * 100:.0f}% of the month</title></rect>'
+        for i, v in enumerate(days)
+    )
+    mix = month["mix"]
+    mix_parts = [(label, mix[key] / total * 100, color) for label, key, color in (
+        ("Needs", "need", "var(--mix-need)"), ("Treats", "treat", "var(--mix-treats)"),
+        ("Not sorted yet", "unknown", "var(--mix-none)")) if mix[key]]
+    segments = "".join(f'<div style="width:{pct:.2f}%;background:{c}" title="{label}: {pct:.0f}%"></div>'
+                       for label, pct, c in mix_parts)
+    legend = "".join(f'<div class="legend-item"><span class="swatch" style="background:{c}"></span>'
+                     f'{label} <strong>{pct:.0f}%</strong></div>' for label, pct, c in mix_parts)
+    categories = _pct_bars([(c["name"], c["total"] / total * 100, "") for c in month["categories"]])
+    stores = _pct_bars([
+        (st["store"] or "Typed in by hand", st["total"] / total * 100, f'{st["trips"]} trip{"s" if st["trips"] != 1 else ""}')
+        for st in trips["by_store"]
+    ])
+    return f"""
+    <p class="period">{escape(month["month_label"])}</p>
+    {hero}
+    <div class="cards">
+      <div class="card section"><p class="section-title">When the shopping happened</p>
+        <svg class="daily" viewBox="0 0 {width} {height}" preserveAspectRatio="none" role="img"
+             aria-label="Share of the month's spending per day">{bars}</svg>
+        <div class="axis"><span>1</span><span>{len(days) // 2}</span><span>{len(days)}</span></div></div>
+      <div class="card section"><p class="section-title">What kind of spending</p>
+        <div class="mix-bar">{segments}</div><div class="legend">{legend}</div></div>
+      <div class="card section"><p class="section-title">Spending by category</p>{categories}</div>
+      <div class="card section"><p class="section-title">Where the shopping happens</p>{stores}</div>
+    </div>"""
 
 
 _TELEGRAM_SCRIPT = """<script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -560,8 +636,11 @@ def render_dashboard_html(data: dict) -> str:
         f'<label for="m{i}">{m["month_label"][:3]}</label>' for i, m in enumerate(months)
     ) + "</nav>"
     # A month view also shows "right now" figures (the shopping-list card), which live on data.
-    views = "".join(f'<section class="month m{i}">{_month_view({**data, **m})}</section>'
-                    for i, m in enumerate(months))
+    views = "".join(
+        f'<section class="month m{i}"><div class="private">{_month_view({**data, **m})}</div>'
+        f'<div class="shared">{_share_view(m)}</div></section>'
+        for i, m in enumerate(months)
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -573,19 +652,21 @@ def render_dashboard_html(data: dict) -> str:
 </head>
 <body>
   {radios}
+  <input type="checkbox" id="share" class="month-radio">
   <header>
     <div class="brand"><span class="brand-mark"></span><h1>TrackNest</h1></div>
-    <div class="header-tools">{tabs}<button id="fullscreen" class="tool" hidden title="Full screen">⛶</button></div>
+    <div class="header-tools">{tabs}<label for="share" class="tool share-toggle" title="Percentages only — safe to screenshot and share">👁 Share</label><button id="fullscreen" class="tool" hidden title="Full screen">⛶</button></div>
   </header>
   {views}
-  <p class="group-title">Right now</p>
-  <div class="cards">
+  <p class="share-note">👁 Share view — percentages only, no amounts. Tap 👁 again for your full view.</p>
+  <p class="group-title right-now">Right now</p>
+  <div class="cards right-now">
     {_to_buy_card(data)}
     {_attention_card(data)}
     {_prices_card(data)}
     {_daily_cost_card(data)}
   </div>
-  <footer>Live from TrackNest · {updated} · <a href="/logout">Log out</a></footer>
+  <footer class="right-now">Live from TrackNest · {updated} · <a href="/logout">Log out</a></footer>
 </body>
 </html>"""
 

@@ -127,3 +127,24 @@ def test_spare_alerts_are_shopping_and_attention_shows_only_open_questions():
     assert "LEERDAMMER" not in html
     assert "Questions waiting for you" in html and "<span class=chip>X01</span>" in html
     assert "Buy a spare" not in html
+
+
+def test_share_view_never_contains_an_amount():
+    """The share view is for screenshots sent to friends: percentages, never money."""
+    import re
+    html = dashboard.render_dashboard_html(sample_data())
+    shared = re.findall(r'<div class="shared">(.*?)</div></section>', html, re.S)
+    assert shared, "every month has a share view"
+    for part in shared:
+        assert "€" not in part and "EUR" not in part
+        assert "REWE" in part and "Fruits/Veg" in part  # names are fine to share
+        assert "%" in part
+    assert 'id="share"' in html and "👁 Share" in html
+
+
+def test_share_view_of_an_empty_month_still_renders():
+    html = dashboard.render_dashboard_html(sample_data(
+        spent=0.0, mix={"need": 0.0, "treat": 0.0, "unknown": 0.0}, categories=[],
+        trips={"count": 0, "avg_basket": None, "by_store": []}, daily=[0.0] * 30,
+    ))
+    assert '<div class="shared">' in html
