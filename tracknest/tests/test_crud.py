@@ -91,31 +91,6 @@ def test_update_item_quantity_not_found(mock_conn):
 
 
 @patch("db.crud.get_connection")
-def test_set_profile_found(mock_conn):
-    conn, _cursor = make_mock_conn(rowcount=1)
-    mock_conn.return_value = conn
-    assert crud.set_profile("Milk", shelf_life_days=7, purchase_type="essential") is True
-    conn.commit.assert_called_once()
-
-
-@patch("db.crud.get_connection")
-def test_set_profile_not_found(mock_conn):
-    conn, _cursor = make_mock_conn(rowcount=0)
-    mock_conn.return_value = conn
-    assert crud.set_profile("Ghost", shelf_life_days=7) is False
-
-
-@patch("db.crud.get_connection")
-def test_set_profile_partial_update(mock_conn):
-    conn, cursor = make_mock_conn(rowcount=1)
-    mock_conn.return_value = conn
-    crud.set_profile("Milk", shelf_life_days=7)
-    args = cursor.execute.call_args[0][1]
-    assert args[0] == 7
-    assert args[1] is None
-
-
-@patch("db.crud.get_connection")
 def test_get_checkin_candidates(mock_conn):
     rows = [{"name": "Milk", "shelf_life_days": 7, "last_purchase": "2026-04-01T00:00:00+00:00"}]
     conn, _cursor = make_mock_conn(fetchall=rows)
@@ -176,7 +151,7 @@ def test_get_par_alert_candidates(mock_conn):
     result = crud.get_par_alert_candidates(default_par_level=1)
     assert result == rows
     assert cursor.execute.call_args[0][1] == (1,)
-    assert "shelf_life_days > 1" in cursor.execute.call_args[0][0]  # same-day items never alert
+    assert "i.lasts = 'days'" in cursor.execute.call_args[0][0]  # same-day items never alert
 
 
 @patch("db.crud.get_connection")
@@ -202,20 +177,20 @@ def test_delete_item_not_found(mock_conn):
 
 
 @patch("db.crud.get_connection")
-def test_get_pending_profile_item_purchase_type_stage_first(mock_conn):
+def test_get_pending_profile_item_treat_or_need_stage_first(mock_conn):
     conn, cursor = make_mock_conn()
     mock_conn.return_value = conn
     cursor.fetchone.side_effect = [None, {"name": "Sushi"}]
-    assert crud.get_pending_profile_item() == ("Sushi", "purchase_type")
+    assert crud.get_pending_profile_item() == ("Sushi", "treat_or_need")
     assert cursor.execute.call_count == 2
 
 
 @patch("db.crud.get_connection")
-def test_get_pending_profile_item_falls_back_to_shelf_life_stage(mock_conn):
+def test_get_pending_profile_item_falls_back_to_lasts_stage(mock_conn):
     conn, cursor = make_mock_conn()
     mock_conn.return_value = conn
     cursor.fetchone.side_effect = [None, None, {"name": "Milk"}]
-    assert crud.get_pending_profile_item() == ("Milk", "shelf_life")
+    assert crud.get_pending_profile_item() == ("Milk", "lasts")
     assert cursor.execute.call_count == 3
 
 
@@ -264,10 +239,12 @@ def test_rename_item_plain_rename_asks_category_next(mock_conn):
 
 @patch("db.crud.get_connection")
 def test_copy_product_profile_fills_gaps_from_another_brand(mock_conn):
-    conn, cursor = make_mock_conn(fetchone={"purchase_type": "essential", "shelf_life_days": 20, "par_level": 2})
+    conn, cursor = make_mock_conn(
+        fetchone={"treat_or_need": "need", "lasts": "days", "shelf_life_days": 20, "par_level": 2}
+    )
     mock_conn.return_value = conn
     assert crud.copy_product_profile("K-Classic Gouda jung", "cheese") is True
-    assert cursor.execute.call_args[0][1] == ("essential", 20, 2, "K-Classic Gouda jung")
+    assert cursor.execute.call_args[0][1] == ("need", "days", 20, 2, "K-Classic Gouda jung")
 
 
 @patch("db.crud.get_connection")

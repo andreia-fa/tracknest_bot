@@ -101,33 +101,56 @@ def update_item_quantity(name, quantity):
     return affected > 0
 
 
-def set_profile(name, shelf_life_days=None, purchase_type=None):
-    """Set shelf-life and/or purchase-type metadata on an existing item.
+TREAT_OR_NEED = ("treat", "need")
+LASTS = ("same_day", "days", "one_off")
 
-    Each field is only overwritten when explicitly passed (via SQL COALESCE),
-    so the two can be set independently across separate calls — e.g. asking
-    the user two follow-up questions in sequence.
+
+def set_treat_or_need(name, value):
+    """Record whether an item is a treat or a need.
 
     Args:
-        name: Exact item name to update.
-        shelf_life_days: Typical days until it spoils; 0 means "doesn't
-            apply / non-perishable" (distinct from NULL, meaning "not yet
-            asked"). Leave unset to not touch this field.
-        purchase_type: One of 'luxury', 'essential', 'necessity' (a
-            same-day-consumed item like a coffee or a pretzel — not stocked,
-            not tracked on a schedule). Leave unset to not touch this field.
+        name: Item name.
+        value: 'treat' or 'need'.
 
     Returns:
         True if the item was found and updated, False otherwise.
     """
+    if value not in TREAT_OR_NEED:
+        raise ValueError(f"treat_or_need must be one of {TREAT_OR_NEED}, not {value!r}")
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("""
-        UPDATE inventory_items
-        SET shelf_life_days = COALESCE(?, shelf_life_days),
-            purchase_type = COALESCE(?, purchase_type)
-        WHERE name = ?
-    """, (shelf_life_days, purchase_type, name))
+    cursor.execute("UPDATE inventory_items SET treat_or_need = ? WHERE name = ?", (value, name))
+    affected = cursor.rowcount
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return affected > 0
+
+
+def set_lasts(name, lasts, days=None):
+    """Record how long an item lasts before it's bought again.
+
+    Args:
+        name: Item name.
+        lasts: 'same_day' (gone the day it's bought — a pretzel, a pool
+            ticket), 'days' (lasts `days` days, then reminders apply) or
+            'one_off' (not rebought on any schedule — never reminded).
+        days: Number of days (2 or more); required for 'days', ignored
+            otherwise.
+
+    Returns:
+        True if the item was found and updated, False otherwise.
+    """
+    if lasts not in LASTS:
+        raise ValueError(f"lasts must be one of {LASTS}, not {lasts!r}")
+    if lasts == "days" and (days is None or days < 2):
+        raise ValueError(f"lasts='days' needs 2 or more days, not {days!r}")
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE inventory_items SET lasts = ?, shelf_life_days = ? WHERE name = ?",
+        (lasts, days if lasts == "days" else None, name),
+    )
     affected = cursor.rowcount
     conn.commit()
     cursor.close()
@@ -170,7 +193,7 @@ _LATEST_PRODUCT_PURCHASE_JOIN = """
 
 
 def get_par_alert_candidates(default_par_level):
-    """Return essential, profiled items on a par=2 policy eligible for a spare-stock alert.
+    """Return needs lasting a number of days, on a par=2 policy, eligible for a spare-stock alert.
 
     Reasoned per product: only the most recently bought item of each product
     is a candidate, timed from that purchase, so one product never alerts
@@ -178,12 +201,11 @@ def get_par_alert_candidates(default_par_level):
 
     Mirrors get_checkin_candidates, but only for items whose effective par
     level (per-item override, or the household default) is 2 — a par=1 item
-    just waits for the regular shelf-life check-in instead. Excludes both
-    luxury (no consumption schedule) and necessity (same-day, never stocked)
-    purchase types, any item that lasts a day or less — its "run out
-    soon" point is the moment it's bought, so the alert would only be noise —
-    and anything already on the shopping list (by name or product), since
-    that's what the alert would ask for.
+    just waits for the regular shelf-life check-in instead. Excludes treats
+    (no consumption schedule), anything same-day or one-off — a same-day
+    item's "run out soon" point is the moment it's bought, so the alert
+    would only be noise — and anything already on the shopping list (by
+    name or product), since that's what the alert would ask for.
 
     Args:
         default_par_level: The household's default par level, used for any
@@ -201,9 +223,8 @@ def get_par_alert_candidates(default_par_level):
                e.logged_at AS last_purchase, e.quantity_purchased AS last_quantity
         FROM inventory_items i
         {_LATEST_PRODUCT_PURCHASE_JOIN}
-        WHERE i.purchase_type = 'essential'
-          AND i.shelf_life_days IS NOT NULL
-          AND i.shelf_life_days > 1
+        WHERE i.treat_or_need = 'need'
+          AND i.lasts = 'days'
           AND i.spare_alert_pending = 0
           AND COALESCE(i.par_level, ?) >= 2
           AND (e.id IS NULL OR e.item_id = i.id)
@@ -245,13 +266,12 @@ def mark_spare_alert_pending(name, pending=True):
 
 
 def get_checkin_candidates():
-    """Return essential, profiled items eligible for a shelf-life check-in.
+    """Return needs lasting a number of days that are eligible for a shelf-life check-in.
 
-    Excludes luxury items (tracing an expiry date isn't meaningful for a
-    treat bought on mood/budget rather than a consumption schedule) and
-    necessity items (same-day-consumed, never actually stocked, so there's
-    nothing to check in on), items with no shelf-life estimate yet, and
-    items with one already pending. Like the spare alert, it's reasoned per
+    Excludes treats (tracing an expiry date isn't meaningful for a treat
+    bought on mood/budget rather than a consumption schedule), same-day and
+    one-off items (never stocked, so there's nothing to check in on), items
+    whose shelf life isn't known yet, and items with one already pending. Like the spare alert, it's reasoned per
     product: only the most recently bought item of each product is asked
     about, timed from that purchase.
 
@@ -266,9 +286,8 @@ def get_checkin_candidates():
         SELECT i.name, i.product, i.shelf_life_days, e.logged_at AS last_purchase
         FROM inventory_items i
         {_LATEST_PRODUCT_PURCHASE_JOIN}
-        WHERE i.purchase_type = 'essential'
-          AND i.shelf_life_days IS NOT NULL
-          AND i.shelf_life_days > 0
+        WHERE i.treat_or_need = 'need'
+          AND i.lasts = 'days'
           AND i.checkin_pending = 0
           AND (e.id IS NULL OR e.item_id = i.id)
     """)
@@ -281,22 +300,16 @@ def get_checkin_candidates():
 def get_pending_profile_item():
     """Return (name, stage) for the oldest item still mid item-profiling, or None.
 
-    Derived entirely from purchase_type/shelf_life_days being NULL ("not yet
-    asked") rather than a separate flag — an item only ever gets these
-    columns via the profiling flow, so this is a faithful, persisted
-    replacement for an in-memory queue. Stage 'purchase_type' comes first
-    for any item never asked at all. Stage 'shelf_life' follows only for a
-    'luxury' or 'essential' item with no shelf-life estimate yet — a
-    'necessity' item (same-day-consumed: a coffee, a pretzel) has its
-    shelf_life_days set to 1 automatically the moment purchase_type is
-    answered, so it's never asked this question at all. Works the same
-    regardless of which process (the live bot or the offline receipt worker)
-    logged the item, since both just leave these columns NULL.
+    Derived from the item's own columns rather than a separate queue: a
+    name still to settle comes first (name_status), then treat_or_need, then
+    lasts, while either is still 'unknown'. Works the same regardless of
+    which process (the live bot or the offline receipt worker) logged the
+    item.
 
     Returns:
         (name, stage) tuple, stage being 'name' or 'category' (a receipt item
-        not yet named by the user — see name_status), 'purchase_type' or
-        'shelf_life', or None if no item needs profiling right now.
+        not yet named by the user — see name_status), 'treat_or_need' or
+        'lasts', or None if no item needs profiling right now.
     """
     conn = get_connection()
     cursor = conn.cursor()
@@ -310,21 +323,16 @@ def get_pending_profile_item():
         cursor.close()
         conn.close()
         return row["name"], row["name_status"]
-    cursor.execute("SELECT name FROM inventory_items WHERE purchase_type IS NULL ORDER BY id LIMIT 1")
-    row = cursor.fetchone()
-    if row:
-        cursor.close()
-        conn.close()
-        return row["name"], "purchase_type"
-    cursor.execute("""
-        SELECT name FROM inventory_items
-        WHERE purchase_type IN ('luxury', 'essential') AND shelf_life_days IS NULL
-        ORDER BY id LIMIT 1
-    """)
-    row = cursor.fetchone()
+    for stage in ("treat_or_need", "lasts"):
+        cursor.execute(f"SELECT name FROM inventory_items WHERE {stage} = 'unknown' ORDER BY id LIMIT 1")
+        row = cursor.fetchone()
+        if row:
+            cursor.close()
+            conn.close()
+            return row["name"], stage
     cursor.close()
     conn.close()
-    return (row["name"], "shelf_life") if row else None
+    return None
 
 
 def get_pending_checkin_item():
@@ -362,7 +370,7 @@ def mark_checkin_pending(name, pending=True):
 
 
 def bump_shelf_life(name, days_delta):
-    """Adjust an item's shelf_life_days estimate by a relative amount, floored at 1 day.
+    """Adjust an item's shelf-life estimate by a relative amount, floored at 2 days.
 
     Used when a check-in reply says an item still lasts, pushing the
     estimate (and so the next check-in) further out rather than re-asking
@@ -378,7 +386,7 @@ def bump_shelf_life(name, days_delta):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "UPDATE inventory_items SET shelf_life_days = MAX(1, shelf_life_days + ?) WHERE name = ?",
+        "UPDATE inventory_items SET shelf_life_days = MAX(2, shelf_life_days + ?) WHERE name = ? AND lasts = 'days'",
         (days_delta, name)
     )
     affected = cursor.rowcount
@@ -539,8 +547,9 @@ def copy_product_profile(name, product):
     """Give an item the profile its product already has from another brand.
 
     A new cheese needs no questions if another cheese was already profiled:
-    purchase type, shelf life and keep-a-spare policy are properties of the
-    need, not the brand. Only fields the item doesn't have yet are filled.
+    treat-or-need, how long it lasts and keep-a-spare policy are properties
+    of the need, not the brand. Only answers the item doesn't have yet
+    (still 'unknown', or no par level) are filled.
 
     Returns:
         True if another item of that product had a profile to copy.
@@ -548,19 +557,22 @@ def copy_product_profile(name, product):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT purchase_type, shelf_life_days, par_level FROM inventory_items
-        WHERE product = ? AND name != ? AND purchase_type IS NOT NULL
-        ORDER BY (shelf_life_days IS NULL), id DESC LIMIT 1
+        SELECT treat_or_need, lasts, shelf_life_days, par_level FROM inventory_items
+        WHERE product = ? AND name != ? AND (treat_or_need != 'unknown' OR lasts != 'unknown')
+        ORDER BY (treat_or_need = 'unknown') + (lasts = 'unknown'), id DESC LIMIT 1
     """, (product, name))
     source = cursor.fetchone()
     if source:
+        # Every SET expression sees the row's old values, so lasts and
+        # shelf_life_days move together (the table refuses one without the other).
         cursor.execute("""
             UPDATE inventory_items
-            SET purchase_type = COALESCE(purchase_type, ?),
-                shelf_life_days = COALESCE(shelf_life_days, ?),
+            SET treat_or_need = CASE WHEN treat_or_need = 'unknown' THEN ? ELSE treat_or_need END,
+                lasts = CASE WHEN lasts = 'unknown' THEN ? ELSE lasts END,
+                shelf_life_days = CASE WHEN lasts = 'unknown' THEN ? ELSE shelf_life_days END,
                 par_level = COALESCE(par_level, ?)
             WHERE name = ?
-        """, (source["purchase_type"], source["shelf_life_days"], source["par_level"], name))
+        """, (source["treat_or_need"], source["lasts"], source["shelf_life_days"], source["par_level"], name))
         conn.commit()
     cursor.close()
     conn.close()

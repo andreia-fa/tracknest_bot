@@ -3,10 +3,9 @@ from unittest.mock import patch
 from bot import dashboard
 
 
-def _summary(total=0.0, essential=0.0, luxury=0.0, necessity=0.0, unclassified=0.0, categories=None):
+def _summary(total=0.0, need=0.0, treat=0.0, unknown=0.0, categories=None):
     return {
-        "total": total, "essential": essential, "luxury": luxury,
-        "necessity": necessity, "unclassified": unclassified,
+        "total": total, "need": need, "treat": treat, "unknown": unknown,
         "top_items": [], "top_categories": categories or [],
     }
 
@@ -17,7 +16,7 @@ def sample_data(**overrides) -> dict:
         "month_label": "September 2026", "day": 23, "days_in_month": 30,
         "spent": 120.0, "projected": 156.5,
         "budget": {"budget": 200.0, "spent": 120.0, "pct": 60.0},
-        "mix": {"essential": 60.0, "luxury": 40.0, "necessity": 10.0, "unclassified": 10.0},
+        "mix": {"need": 70.0, "treat": 40.0, "unknown": 10.0},
         "categories": [{"name": "Fruits/Veg", "total": 70.0}, {"name": "Snacks", "total": 50.0}],
         "trips": {"count": 4, "avg_basket": 30.0,
                   "by_store": [{"store": "REWE", "trips": 3, "total": 100.0},
@@ -45,7 +44,7 @@ def sample_data(**overrides) -> dict:
 @patch("bot.dashboard.metrics.get_spending_summary")
 def test_build_dashboard_data_folds_extra_categories_into_other(mock_summary, mock_pace, *_mocks):
     categories = [{"category": f"C{i}", "total": float(10 - i)} for i in range(8)]
-    mock_summary.return_value = _summary(total=52.0, luxury=20.0, categories=categories)
+    mock_summary.return_value = _summary(total=52.0, treat=20.0, categories=categories)
     mock_pace.return_value = {"days_elapsed": 23, "days_in_month": 30, "projected": 70.0, "spent": 52.0}
 
     data = dashboard.build_dashboard_data()
@@ -54,7 +53,7 @@ def test_build_dashboard_data_folds_extra_categories_into_other(mock_summary, mo
     assert data["categories"][-1] == {"name": "Other", "total": 5.0 + 4.0 + 3.0}
     assert data["spent"] == 52.0
     assert data["projected"] == 70.0
-    assert data["mix"]["luxury"] == 20.0
+    assert data["mix"]["treat"] == 20.0
 
 
 def test_render_shows_the_headline_numbers():
@@ -81,7 +80,7 @@ def test_render_escapes_names_from_receipts():
 def test_render_empty_month_shows_prompts_not_errors():
     html = dashboard.render_dashboard_html(sample_data(
         spent=0.0, projected=None, budget=None,
-        mix={"essential": 0.0, "luxury": 0.0, "necessity": 0.0, "unclassified": 0.0},
+        mix={"need": 0.0, "treat": 0.0, "unknown": 0.0},
         categories=[], trips={"count": 0, "avg_basket": None, "by_store": []},
         daily=[0.0] * 30, rising=[], running_low=[], shopping_list=[],
         health={"checkin_pending": [], "spare_alert_pending": [], "unprofiled": []},

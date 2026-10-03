@@ -17,7 +17,7 @@ def make_mock_conn(fetchone=None, fetchall=None):
 
 @patch("db.expenses.get_connection")
 def test_log_expense_item_exists(mock_conn):
-    conn, _cursor = make_mock_conn(fetchone={"id": 1, "shelf_life_days": None, "purchase_type": "essential"})
+    conn, _cursor = make_mock_conn(fetchone={"id": 1, "shelf_life_days": None, "treat_or_need": "need", "lasts": "unknown"})
     mock_conn.return_value = conn
     assert expenses.log_expense("Milk", 2, 1.50) is True
     conn.commit.assert_called_once()
@@ -38,7 +38,7 @@ def test_log_expense_shortens_shelf_life_on_early_repurchase(mock_conn):
     mock_conn.return_value = conn
     three_days_ago = (datetime.now(tz=timezone.utc) - timedelta(days=3)).isoformat()
     cursor.fetchone.side_effect = [
-        {"id": 1, "shelf_life_days": 10, "purchase_type": "essential", "par_level": 1, "product_key": "spinach"},
+        {"id": 1, "shelf_life_days": 10, "treat_or_need": "need", "lasts": "days", "par_level": 1, "product_key": "spinach"},
         {"logged_at": three_days_ago, "quantity_purchased": 1},
     ]
     expenses.log_expense("Spinach", 1, 1.11)
@@ -54,7 +54,7 @@ def test_log_expense_counts_quantity_of_prior_purchase(mock_conn):
     mock_conn.return_value = conn
     eight_days_ago = (datetime.now(tz=timezone.utc) - timedelta(days=8)).isoformat()
     cursor.fetchone.side_effect = [
-        {"id": 1, "shelf_life_days": 10, "purchase_type": "essential", "par_level": 1, "product_key": "spinach"},
+        {"id": 1, "shelf_life_days": 10, "treat_or_need": "need", "lasts": "days", "par_level": 1, "product_key": "spinach"},
         {"logged_at": eight_days_ago, "quantity_purchased": 2},
     ]
     expenses.log_expense("Spinach", 1, 1.11)
@@ -68,7 +68,7 @@ def test_log_expense_keeps_shelf_life_for_keep_a_spare_items(mock_conn):
     conn, cursor = make_mock_conn()
     mock_conn.return_value = conn
     cursor.fetchone.side_effect = [
-        {"id": 1, "shelf_life_days": 30, "purchase_type": "essential", "par_level": 2},
+        {"id": 1, "shelf_life_days": 30, "treat_or_need": "need", "lasts": "days", "par_level": 2},
     ]
     expenses.log_expense("Leerdammer", 1, 2.99)
     update_calls = [c for c in cursor.execute.call_args_list if "SET shelf_life_days = ?" in c[0][0]]
@@ -76,21 +76,21 @@ def test_log_expense_keeps_shelf_life_for_keep_a_spare_items(mock_conn):
 
 
 @patch("db.expenses.get_connection")
-def test_log_expense_skips_adjustment_for_luxury(mock_conn):
+def test_log_expense_skips_adjustment_for_treats(mock_conn):
     conn, cursor = make_mock_conn()
     mock_conn.return_value = conn
-    cursor.fetchone.side_effect = [{"id": 1, "shelf_life_days": 2, "purchase_type": "luxury"}]
+    cursor.fetchone.side_effect = [{"id": 1, "shelf_life_days": 2, "treat_or_need": "treat", "lasts": "days"}]
     expenses.log_expense("Sushi", 1, 10.99)
     update_calls = [c for c in cursor.execute.call_args_list if "SET shelf_life_days = ?" in c[0][0]]
     assert len(update_calls) == 0
 
 
 @patch("db.expenses.get_connection")
-def test_log_expense_skips_adjustment_for_necessity(mock_conn):
-    """A necessity's shelf_life_days is a fixed same-day marker, not a guess to refine."""
+def test_log_expense_skips_adjustment_for_same_day_items(mock_conn):
+    """A same-day item has no estimate to refine."""
     conn, cursor = make_mock_conn()
     mock_conn.return_value = conn
-    cursor.fetchone.side_effect = [{"id": 1, "shelf_life_days": 1, "purchase_type": "necessity"}]
+    cursor.fetchone.side_effect = [{"id": 1, "shelf_life_days": None, "treat_or_need": "need", "lasts": "same_day"}]
     expenses.log_expense("Matcha", 1, 2.50)
     update_calls = [c for c in cursor.execute.call_args_list if "SET shelf_life_days = ?" in c[0][0]]
     assert len(update_calls) == 0

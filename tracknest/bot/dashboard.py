@@ -32,8 +32,7 @@ def build_dashboard_data() -> dict:
 
     Returns:
         Dict with keys: month_label, day, days_in_month, spent, projected,
-        budget (dict or None), mix ({essential, luxury, necessity,
-        unclassified} in euros), categories (list of {name, total}), trips,
+        budget (dict or None), mix ({need, treat, unknown} in euros), categories (list of {name, total}), trips,
         daily (euros per day), rising, running_low, shopping_list, health,
         daily_cost.
     """
@@ -55,7 +54,7 @@ def build_dashboard_data() -> dict:
         "spent": spending["total"],
         "projected": pace["projected"],
         "budget": metrics.get_budget_status(),
-        "mix": {k: spending[k] for k in ("essential", "luxury", "necessity", "unclassified")},
+        "mix": {k: spending[k] for k in ("need", "treat", "unknown")},
         "categories": categories,
         "trips": metrics.get_shopping_trips(),
         "daily": metrics.get_daily_spend(),
@@ -126,21 +125,21 @@ def _budget_kpi(data: dict) -> str:
 
 def _treats_kpi(data: dict) -> str:
     mix = data["mix"]
-    classified = mix["essential"] + mix["luxury"] + mix["necessity"]
+    classified = mix["need"] + mix["treat"]
     if not classified:
         return """
       <div class="card kpi empty">
         <div class="label">Treats</div>
-        <div class="kpi-note">Answer the bot's "what kind of purchase?" questions to see this.</div>
+        <div class="kpi-note">Answer the bot's "treat or need?" questions to see this.</div>
       </div>"""
     # Share of *all* spend, matching the mix bar below — two different
     # denominators for the same word on one page read as a contradiction.
-    pct = mix["luxury"] / data["spent"] * 100 if data["spent"] else 0.0
+    pct = mix["treat"] / data["spent"] * 100 if data["spent"] else 0.0
     return f"""
       <div class="card kpi">
         <div class="label">Treats</div>
         <div class="kpi-main">{pct:.0f}%</div>
-        <div class="kpi-note">{_eur(mix["luxury"])} of this month's spend went on treats</div>
+        <div class="kpi-note">{_eur(mix["treat"])} of this month's spend went on treats</div>
       </div>"""
 
 
@@ -202,10 +201,9 @@ def _mix_card(data: dict) -> str:
     if not total:
         return ""
     parts = [
-        ("Essentials", mix["essential"], "var(--mix-essential)"),
-        ("Treats", mix["luxury"], "var(--mix-treats)"),
-        ("Same-day", mix["necessity"], "var(--mix-necessity)"),
-        ("Not yet classified", mix["unclassified"], "var(--mix-none)"),
+        ("Needs", mix["need"], "var(--mix-need)"),
+        ("Treats", mix["treat"], "var(--mix-treats)"),
+        ("Not sorted yet", mix["unknown"], "var(--mix-none)"),
     ]
     parts = [p for p in parts if p[1] > 0]
     segments = "".join(
@@ -348,7 +346,7 @@ _STYLE = """
     --ink: #0b0b0b; --ink-2: #52514e; --ink-muted: #898781;
     --border: rgba(11,11,11,0.10); --track: #eceae2;
     --accent: #1baf7a; --warn: #b87700;
-    --mix-essential: #2a78d6; --mix-treats: #eb6834; --mix-necessity: #1baf7a; --mix-none: #c3c2b7;
+    --mix-need: #2a78d6; --mix-treats: #eb6834; --mix-none: #c3c2b7;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
@@ -357,7 +355,7 @@ _STYLE = """
       --ink: #ffffff; --ink-2: #c3c2b7; --ink-muted: #898781;
       --border: rgba(255,255,255,0.10); --track: #2c2c2a;
       --accent: #199e70; --warn: #fab219;
-      --mix-essential: #3987e5; --mix-treats: #d95926; --mix-necessity: #199e70; --mix-none: #52514e;
+      --mix-need: #3987e5; --mix-treats: #d95926; --mix-none: #52514e;
     }
   }
   * { box-sizing: border-box; }

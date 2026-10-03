@@ -71,4 +71,4 @@ def test_clashing_names_block_the_migration(old_db):
     schema = sqlite3.connect(old_db).execute(
         "SELECT sql FROM sqlite_master WHERE name = 'inventory_items'").fetchone()[0]
     assert "COLLATE NOCASE" not in schema
-    assert not (old_db.parent / "backups").exists()
+    assert not list((old_db.parent / "backups").glob("*-before-nocase-names.db"))

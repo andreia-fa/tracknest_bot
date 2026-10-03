@@ -27,19 +27,19 @@ def _buttons(markup):
 
 
 def test_shelf_keyboard_offers_long_lasting_choices():
-    assert {"profile_shelf:30", "profile_shelf:90"} <= set(_buttons(main._PROFILE_SHELF_KEYBOARD))
+    assert {"profile_shelf:30", "profile_shelf:90", "profile_shelf:same", "profile_shelf:oneoff"} <= set(_buttons(main._PROFILE_SHELF_KEYBOARD))
 
 
 @pytest.mark.asyncio
 @patch("bot.main.crud")
 async def test_answer_comes_back_with_a_change_button(mock_crud):
-    mock_crud.get_pending_profile_item.side_effect = [("Berida Garnele", "shelf_life"), None]
+    mock_crud.get_pending_profile_item.side_effect = [("Berida Garnele", "lasts"), None]
     mock_crud.get_item.return_value = PRAWNS
-    update = _callback_update("profile_shelf:1")
+    update = _callback_update("profile_shelf:same")
 
     await main.handle_profile_shelf_choice(update, MagicMock())
 
-    mock_crud.set_profile.assert_called_once_with("Berida Garnele", shelf_life_days=1)
+    mock_crud.set_lasts.assert_called_once_with("Berida Garnele", "same_day", None)
     kwargs = update.callback_query.edit_message_text.call_args.kwargs
     assert _buttons(kwargs["reply_markup"]) == ["shelf_edit:7"]
 
@@ -64,10 +64,10 @@ async def test_changed_answer_is_saved_and_alerts_restart(mock_crud):
 
     await main.handle_shelf_set(update, MagicMock())
 
-    mock_crud.set_profile.assert_called_once_with("Berida Garnele", shelf_life_days=90)
+    mock_crud.set_lasts.assert_called_once_with("Berida Garnele", "days", 90)
     mock_crud.mark_spare_alert_pending.assert_called_once_with("Berida Garnele", pending=False)
     mock_crud.mark_checkin_pending.assert_called_once_with("Berida Garnele", pending=False)
-    assert "90 day(s)" in update.callback_query.edit_message_text.call_args.args[0]
+    assert "lasts 90 day(s)" in update.callback_query.edit_message_text.call_args.args[0]
 
 
 @pytest.mark.asyncio
@@ -79,15 +79,15 @@ async def test_changed_answer_can_be_typed(mock_crud):
 
     await main.handle_shelf_set(_callback_update("shelf_set:7:custom"), context)
     await main.handle_text(_text_update("45"), context)
-    mock_crud.set_profile.assert_not_called()  # nothing saved before the confirmation tap
+    mock_crud.set_lasts.assert_not_called()  # nothing saved before the confirmation tap
     confirm = _callback_update("typed:answer:1")
     confirm.callback_query.get_bot.return_value.send_message = AsyncMock()
     await main.handle_typed_choice(confirm, context)
 
-    mock_crud.set_profile.assert_called_once_with("Berida Garnele", shelf_life_days=45)
+    mock_crud.set_lasts.assert_called_once_with("Berida Garnele", "days", 45)
     assert "shelf_edit_item" not in context.chat_data
     send_message = confirm.callback_query.get_bot.return_value.send_message
-    assert "45 day(s)" in send_message.call_args.args[1]
+    assert "lasts 45 day(s)" in send_message.call_args.args[1]
 
 
 @pytest.mark.asyncio
@@ -98,7 +98,7 @@ async def test_change_on_a_deleted_item(mock_crud):
 
     await main.handle_shelf_set(update, MagicMock())
 
-    mock_crud.set_profile.assert_not_called()
+    mock_crud.set_lasts.assert_not_called()
     update.callback_query.edit_message_text.assert_called_once_with("That item no longer exists.")
 
 

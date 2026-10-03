@@ -8,7 +8,7 @@ from db.database import get_connection
 def log_expense(item_name, quantity_purchased, unit_price, store=None):
     """Record a purchase for an existing inventory item.
 
-    For an essential item with a known shelf-life estimate, if this purchase
+    For a need lasting a known number of days, if this purchase
     comes sooner than the last one of the same product (any brand) should
     have lasted (per unit bought), the
     estimate is nudged halfway towards the actual gap — one early trip
@@ -16,11 +16,10 @@ def log_expense(item_name, quantity_purchased, unit_price, store=None):
     buying before running out is exactly what that policy asks for, so an
     early repurchase says nothing about how fast it's used — correcting on it
     shrank the estimate every cycle until the spare alert fired right after
-    each purchase. Luxury items are exempt (a treat bought on mood/budget
-    doesn't follow a consumption schedule); necessity items are exempt too
-    (their shelf_life_days is a fixed same-day marker, not an estimate to
-    refine). Any pending check-in for this item is also cleared, since a
-    fresh purchase starts a new shelf-life cycle.
+    each purchase. Treats are exempt (a treat bought on mood/budget doesn't
+    follow a consumption schedule), and so are same-day and one-off items
+    (no estimate to refine). Any pending check-in for this item is also
+    cleared, since a fresh purchase starts a new shelf-life cycle.
 
     Args:
         item_name: Name of the item being purchased (must already exist).
@@ -34,7 +33,7 @@ def log_expense(item_name, quantity_purchased, unit_price, store=None):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT id, shelf_life_days, purchase_type, COALESCE(product, name) AS product_key,
+        SELECT id, shelf_life_days, treat_or_need, lasts, COALESCE(product, name) AS product_key,
                COALESCE(par_level,
                         (SELECT CAST(value AS INTEGER) FROM bot_settings WHERE key = 'default_par_level'),
                         1) AS par_level
@@ -47,7 +46,7 @@ def log_expense(item_name, quantity_purchased, unit_price, store=None):
         return False
     now = datetime.now(tz=timezone.utc)
 
-    if item["shelf_life_days"] and item["purchase_type"] == "essential" and item["par_level"] < 2:
+    if item["lasts"] == "days" and item["treat_or_need"] == "need" and item["par_level"] < 2:
         # Any brand of the same product counts as the previous purchase.
         cursor.execute("""
             SELECT e.logged_at, e.quantity_purchased FROM item_expenses e
@@ -62,7 +61,7 @@ def log_expense(item_name, quantity_purchased, unit_price, store=None):
             if 1 <= per_unit_days < item["shelf_life_days"]:
                 cursor.execute(
                     "UPDATE inventory_items SET shelf_life_days = ? WHERE id = ?",
-                    (round((item["shelf_life_days"] + per_unit_days) / 2), item["id"]),
+                    (max(2, round((item["shelf_life_days"] + per_unit_days) / 2)), item["id"]),
                 )
 
     # A fresh purchase starts a new shelf-life cycle, so both the "did it

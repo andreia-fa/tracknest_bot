@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 import sqlite3
 import time
 from datetime import datetime
@@ -61,6 +62,102 @@ def backup_db(label):
     return path
 
 
+def _inventory_items_sql(table, name_collation=" COLLATE NOCASE"):
+    """The inventory_items schema, with its rules enforced by the database itself.
+
+    treat_or_need and lasts are spelled out ('unknown' until answered), never
+    left blank, and shelf_life_days only holds a real number of days: it's
+    required when lasts = 'days' and refused otherwise — a bug or a bad
+    script can't store a value that means two things.
+    """
+    return f"""
+        CREATE TABLE {table} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE{name_collation},
+            quantity INTEGER NOT NULL,
+            unit TEXT,
+            category TEXT,
+            alert_threshold INTEGER,
+            image_path TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            treat_or_need TEXT NOT NULL DEFAULT 'unknown'
+                CHECK (treat_or_need IN ('treat', 'need', 'unknown')),
+            lasts TEXT NOT NULL DEFAULT 'unknown'
+                CHECK (lasts IN ('same_day', 'days', 'one_off', 'unknown')),
+            shelf_life_days INTEGER CHECK (shelf_life_days >= 2),
+            checkin_pending INTEGER NOT NULL DEFAULT 0,
+            par_level INTEGER,
+            spare_alert_pending INTEGER NOT NULL DEFAULT 0,
+            name_status TEXT,
+            product TEXT,
+            CHECK ((lasts = 'days') = (shelf_life_days IS NOT NULL))
+        )
+    """
+
+
+def _split_purchase_type(conn):
+    """Replace purchase_type with two separate answers: treat_or_need and lasts.
+
+    purchase_type ('luxury' / 'essential' / 'necessity') answered two
+    questions at once — whether it's a treat, and how long it lasts
+    ('necessity' meant gone the same day) — so a pretzel had to be either a
+    treat or same-day, never both. Mapping: luxury -> treat, essential ->
+    need, necessity -> lasts 'same_day' with treat_or_need still 'unknown'
+    (it never said which). shelf_life_days 1 becomes 'same_day', 0 ("doesn't
+    spoil") 'one_off', 2+ stays a number of days.
+
+    The table is rebuilt (the new rules can't be added to existing columns)
+    after a backup, in one transaction, with foreign keys off so no purchase
+    can cascade away; the row count is checked before committing.
+    """
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(inventory_items)")}
+    if "purchase_type" not in cols:
+        return
+    sql = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'inventory_items'"
+    ).fetchone()[0]
+    collation = " COLLATE NOCASE" if "COLLATE NOCASE" in sql else ""
+    conn.commit()
+    logger.info("Backed up to %s before splitting purchase_type.", backup_db("before-split-purchase-type"))
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.execute("BEGIN")
+        before = conn.execute("SELECT COUNT(*) FROM inventory_items").fetchone()[0]
+        conn.execute(_inventory_items_sql("inventory_items_new", collation))
+        conn.execute("""
+            INSERT INTO inventory_items_new (
+                id, name, quantity, unit, category, alert_threshold, image_path, created_at,
+                treat_or_need, lasts, shelf_life_days,
+                checkin_pending, par_level, spare_alert_pending, name_status, product
+            )
+            SELECT id, name, quantity, unit, category, alert_threshold, image_path, created_at,
+                   CASE purchase_type WHEN 'luxury' THEN 'treat' WHEN 'essential' THEN 'need' ELSE 'unknown' END,
+                   CASE WHEN purchase_type = 'necessity' OR shelf_life_days = 1 THEN 'same_day'
+                        WHEN shelf_life_days = 0 THEN 'one_off'
+                        WHEN shelf_life_days >= 2 THEN 'days'
+                        ELSE 'unknown' END,
+                   CASE WHEN COALESCE(purchase_type, '') != 'necessity' AND shelf_life_days >= 2
+                        THEN shelf_life_days END,
+                   checkin_pending, par_level, spare_alert_pending, name_status, product
+            FROM inventory_items
+        """)
+        after = conn.execute("SELECT COUNT(*) FROM inventory_items_new").fetchone()[0]
+        if after != before:
+            raise sqlite3.IntegrityError(f"row count changed: {before} -> {after}")
+        conn.execute("DROP TABLE inventory_items")
+        conn.execute("ALTER TABLE inventory_items_new RENAME TO inventory_items")
+        broken = conn.execute("PRAGMA foreign_key_check").fetchall()
+        if broken:
+            raise sqlite3.IntegrityError(f"foreign key check failed: {broken}")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+    logger.info("purchase_type split into treat_or_need and lasts.")
+
+
 def _make_item_names_case_insensitive(conn):
     """Rebuild inventory_items so item names ignore case ("pfefferbretzel" is "Pfefferbretzel").
 
@@ -83,7 +180,9 @@ def _make_item_names_case_insensitive(conn):
         logger.error("Item names differing only by case (%s) — merge them first; names stay case-sensitive.",
                      ", ".join(clashes))
         return
-    new_sql = sql.replace("CREATE TABLE inventory_items", "CREATE TABLE inventory_items_new", 1).replace(
+    # A table that was itself renamed into place is stored as
+    # CREATE TABLE "inventory_items", quoted.
+    new_sql = re.sub(r'CREATE TABLE "?inventory_items"?', "CREATE TABLE inventory_items_new", sql, count=1).replace(
         "name TEXT NOT NULL UNIQUE", "name TEXT NOT NULL UNIQUE COLLATE NOCASE", 1)
     if "inventory_items_new" not in new_sql or "COLLATE NOCASE" not in new_sql:
         logger.error("Unexpected inventory_items schema — case-insensitive names not applied.")
@@ -115,21 +214,15 @@ def init_db():
     """Create the required tables if they do not already exist (idempotent)."""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS inventory_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE COLLATE NOCASE,
-            quantity INTEGER NOT NULL,
-            unit TEXT,
-            category TEXT,
-            alert_threshold INTEGER,
-            image_path TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
+    has_inventory = cursor.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'inventory_items'"
+    ).fetchone()
+    if not has_inventory:
+        cursor.execute(_inventory_items_sql("inventory_items"))
     # shelf_life_days / is_luxury added after the initial schema — ALTER
     # instead of a fresh CREATE so existing databases keep their data.
-    # shelf_life_days: NULL = not yet asked, 0 = doesn't spoil / n/a.
+    # (Legacy meaning, before _split_purchase_type: NULL = not yet asked,
+    # 0 = doesn't spoil / n/a.)
     existing_inv_cols = {row[1] for row in cursor.execute("PRAGMA table_info(inventory_items)")}
     if "shelf_life_days" not in existing_inv_cols:
         cursor.execute("ALTER TABLE inventory_items ADD COLUMN shelf_life_days INTEGER")
@@ -139,7 +232,9 @@ def init_db():
     # its shelf life with "doesn't spoil" under shelf_life_days=0 was
     # wrong in the other direction. Migrate existing values once, then
     # drop the old column.
-    if "purchase_type" not in existing_inv_cols:
+    # (Only on databases from before treat_or_need/lasts replaced it — see
+    # _split_purchase_type.)
+    if "purchase_type" not in existing_inv_cols and "lasts" not in existing_inv_cols:
         cursor.execute("ALTER TABLE inventory_items ADD COLUMN purchase_type TEXT")
         if "is_luxury" in existing_inv_cols:
             cursor.execute("""
@@ -253,4 +348,5 @@ def init_db():
     conn.commit()
     cursor.close()
     _make_item_names_case_insensitive(conn)
+    _split_purchase_type(conn)
     conn.close()

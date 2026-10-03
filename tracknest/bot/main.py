@@ -74,16 +74,46 @@ def _category_keyboard(suggested: str | None) -> InlineKeyboardMarkup:
 
 
 def _shelf_keyboard(prefix: str) -> InlineKeyboardMarkup:
-    """The shelf-life choices, each button's callback data being prefix + its value."""
+    """The how-long-it-lasts choices, each button's callback data being prefix + its value.
+
+    Values: "same" (same day), a number of days, "oneoff", or "custom" (type it).
+    """
     def button(label: str, value: str) -> InlineKeyboardButton:
         return InlineKeyboardButton(label, callback_data=f"{prefix}{value}")
     return InlineKeyboardMarkup([
-        [button("1 day", "1"), button("4 days", "4")],
+        [button("Same day", "same"), button("4 days", "4")],
         [button("One week", "7"), button("Two weeks", "14")],
         [button("One month", "30"), button("Frozen (~3 months)", "90")],
-        [button("Doesn't spoil", "na")],
+        [button("🚫 One-off — don't remind me", "oneoff")],
         [button("Other: insert", "custom")],
     ])
+
+
+def _lasts_from_choice(value: str) -> tuple[str, int | None]:
+    """Turn a _shelf_keyboard value (other than "custom") into (lasts, days)."""
+    if value == "same":
+        return "same_day", None
+    if value == "oneoff":
+        return "one_off", None
+    return "days", int(value)
+
+
+_SAME_DAY_WORDS = {"same day", "same", "today", "1", "1 day"}
+_ONE_OFF_WORDS = {"one-off", "one off", "oneoff", "never", "no", "none", "n/a", "na", "doesn't spoil"}
+
+
+def _lasts_from_text(text: str) -> tuple[str, int | None] | None:
+    """Read a typed how-long-it-lasts answer as (lasts, days), or None if it isn't one."""
+    text = text.strip().lower()
+    if text in _SAME_DAY_WORDS:
+        return "same_day", None
+    if text in _ONE_OFF_WORDS:
+        return "one_off", None
+    try:
+        days = int(text)
+    except ValueError:
+        return None
+    return ("days", days) if days >= 2 else None
 
 
 def _shelf_change_keyboard(item_id: int) -> InlineKeyboardMarkup:
@@ -91,16 +121,20 @@ def _shelf_change_keyboard(item_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton("✏️ Change", callback_data=f"shelf_edit:{item_id}")]])
 
 
-def _describe_shelf_life(days: int) -> str:
-    return "doesn't spoil" if days == 0 else f"{days} day(s)"
+def _describe_lasts(lasts: str, days: int | None) -> str:
+    if lasts == "same_day":
+        return "used up the same day"
+    if lasts == "one_off":
+        return "one-off, no reminders"
+    return f"lasts {days} day(s)"
 
 
 _PROFILE_SHELF_KEYBOARD = _shelf_keyboard("profile_shelf:")
-_PROFILE_TYPE_KEYBOARD = InlineKeyboardMarkup([
-    [InlineKeyboardButton("Luxury / Treat", callback_data="profile_type:luxury")],
-    [InlineKeyboardButton("Essential", callback_data="profile_type:essential")],
-    [InlineKeyboardButton("Necessity (used up same-day)", callback_data="profile_type:necessity")],
-])
+_PROFILE_KIND_KEYBOARD = InlineKeyboardMarkup([[
+    InlineKeyboardButton("🍫 Treat", callback_data="profile_kind:treat"),
+    InlineKeyboardButton("🧺 Need", callback_data="profile_kind:need"),
+]])
+_KIND_LABELS = {"treat": "🍫 treat", "need": "🧺 need"}
 
 logging.basicConfig(
     format="%(asctime)s %(name)s %(levelname)s %(message)s",
@@ -260,11 +294,8 @@ async def handle_onboarding_choice(update: Update, context: ContextTypes.DEFAULT
         await _finish_onboarding(update, context)
 
 
-_SHELF_LIFE_NA_WORDS = {"n/a", "na", "no", "none", "never", "doesn't spoil", "does not spoil"}
-_LUXURY_WORDS = {"luxury", "lux", "treat", "l"}
-_ESSENTIAL_WORDS = {"essential", "regular", "basic", "e"}
-_NECESSITY_WORDS = {"necessity", "necessary", "n"}
-_NECESSITY_SHELF_LIFE_DAYS = 1
+_TREAT_WORDS = {"treat", "t", "luxury"}
+_NEED_WORDS = {"need", "n", "essential"}
 
 
 async def send_pending_profile_question(bot, chat_id: int):
@@ -307,17 +338,17 @@ async def send_pending_profile_question(bot, chat_id: int):
             f"Which category is {name}?",
             reply_markup=_category_keyboard(item["category"] if item else None),
         )
-    elif stage == "shelf_life":
+    elif stage == "lasts":
         await bot.send_message(
             chat_id,
-            f"Quick one — how many days does {name} usually last before it goes bad?",
+            f"Quick one — how long does {name} last before you'd buy it again?",
             reply_markup=_PROFILE_SHELF_KEYBOARD,
         )
     else:
         await bot.send_message(
             chat_id,
-            f"Got it. What kind of purchase is {name}?",
-            reply_markup=_PROFILE_TYPE_KEYBOARD,
+            f"Got it. Is {name} a treat or a need?",
+            reply_markup=_PROFILE_KIND_KEYBOARD,
         )
 
 
@@ -338,32 +369,25 @@ async def _handle_profile_answer(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text("Pick a category with the buttons above.")
         return
     text = update.message.text.strip().lower()
-    if stage == "shelf_life":
-        if text in _SHELF_LIFE_NA_WORDS:
-            days = 0
-        else:
-            try:
-                days = int(text)
-            except ValueError:
-                await update.message.reply_text("Reply with a number of days, or 'n/a'.")
-                return
-        crud.set_profile(name, shelf_life_days=days)
-        await _confirm_shelf_life(context.bot, update.effective_chat.id, name, days)
+    if stage == "lasts":
+        answer = _lasts_from_text(text)
+        if answer is None:
+            await update.message.reply_text("Reply with a number of days (2 or more), 'same day', or 'one-off'.")
+            return
+        crud.set_lasts(name, *answer)
+        await _confirm_lasts(context.bot, update.effective_chat.id, name, *answer)
         await send_pending_profile_question(context.bot, update.effective_chat.id)
         return
-    # stage == "purchase_type"
-    if text in _LUXURY_WORDS:
-        purchase_type = "luxury"
-    elif text in _ESSENTIAL_WORDS:
-        purchase_type = "essential"
-    elif text in _NECESSITY_WORDS:
-        purchase_type = "necessity"
+    # stage == "treat_or_need"
+    if text in _TREAT_WORDS:
+        kind = "treat"
+    elif text in _NEED_WORDS:
+        kind = "need"
     else:
-        await update.message.reply_text(
-            "Use the buttons above, or reply 'luxury', 'essential', or 'necessity'."
-        )
+        await update.message.reply_text("Use the buttons above, or reply 'treat' or 'need'.")
         return
-    await _set_purchase_type(context.bot, update.effective_chat.id, name, purchase_type)
+    crud.set_treat_or_need(name, kind)
+    await send_pending_profile_question(context.bot, update.effective_chat.id)
 
 
 async def _confirm_product(bot, chat_id: int, receipt_name: str, product: str) -> None:
@@ -380,7 +404,7 @@ async def _confirm_product(bot, chat_id: int, receipt_name: str, product: str) -
     item = crud.get_item(receipt_name) or {}
     guess = infer_category(product)
     category = guess if guess != "Other" else item.get("category")
-    if item.get("purchase_type") and category:
+    if _is_profiled(item) and category:
         # Already profiled (an existing item, or one that inherited its
         # product's profile): nothing left to ask.
         crud.set_item_category(receipt_name, category)
@@ -445,33 +469,29 @@ async def handle_name_category(update: Update, context: ContextTypes.DEFAULT_TYP
     await send_pending_profile_question(context.bot, update.effective_chat.id)
 
 
-async def _set_purchase_type(bot, chat_id: int, name: str, purchase_type: str) -> None:
-    """Save purchase_type, auto-filling shelf_life_days for a necessity item.
+def _is_profiled(item: dict) -> bool:
+    """Whether both profiling answers (treat or need, how long it lasts) are in."""
+    return item.get("treat_or_need", "unknown") != "unknown" and item.get("lasts", "unknown") != "unknown"
 
-    A necessity is used up the same day it's bought — there's no shelf-life
-    estimate to meaningfully ask for, so it's set to _NECESSITY_SHELF_LIFE_DAYS
-    directly rather than prompting a question with an implied answer.
+
+async def handle_profile_kind_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle a tap on the treat-or-need profiling keyboard.
+
+    Buttons from before the split ("profile_type:luxury" etc.) still in the
+    chat just get the current question re-sent.
     """
-    if purchase_type == "necessity":
-        crud.set_profile(name, purchase_type=purchase_type, shelf_life_days=_NECESSITY_SHELF_LIFE_DAYS)
-    else:
-        crud.set_profile(name, purchase_type=purchase_type)
-    await send_pending_profile_question(bot, chat_id)
-
-
-async def handle_profile_type_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle a button press on the purchase-type profiling keyboard."""
     query = update.callback_query
     await query.answer()
     pending = crud.get_pending_profile_item()
-    if not pending or pending[1] != "purchase_type":
-        await query.edit_message_text("Already answered.")
+    if query.data.startswith("profile_type:") or not pending or pending[1] != "treat_or_need":
+        await query.edit_message_text("That question changed — here's the current one.")
+        await send_pending_profile_question(context.bot, update.effective_chat.id)
         return
     name, _stage = pending
-    choice = query.data.split(":", 1)[1]
-    labels = {"luxury": "Luxury / Treat", "essential": "Essential", "necessity": "Necessity"}
-    await query.edit_message_text(f"{name}: {labels[choice]}.")
-    await _set_purchase_type(context.bot, update.effective_chat.id, name, choice)
+    kind = query.data.split(":", 1)[1]
+    crud.set_treat_or_need(name, kind)
+    await query.edit_message_text(f"{name}: {_KIND_LABELS[kind]}.")
+    await send_pending_profile_question(context.bot, update.effective_chat.id)
 
 
 async def handle_profile_shelf_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -479,7 +499,7 @@ async def handle_profile_shelf_choice(update: Update, context: ContextTypes.DEFA
     query = update.callback_query
     await query.answer()
     pending = crud.get_pending_profile_item()
-    if not pending or pending[1] != "shelf_life":
+    if not pending or pending[1] != "lasts":
         await query.edit_message_text("Already answered.")
         return
     name, _stage = pending
@@ -487,26 +507,26 @@ async def handle_profile_shelf_choice(update: Update, context: ContextTypes.DEFA
     if choice == "custom":
         await query.edit_message_text(f"How many days does {name} usually last? Reply with a number.")
         return
-    days = 0 if choice == "na" else int(choice)
-    crud.set_profile(name, shelf_life_days=days)
+    lasts, days = _lasts_from_choice(choice)
+    crud.set_lasts(name, lasts, days)
     item = crud.get_item(name)
     await query.edit_message_text(
-        f"{name}: {_describe_shelf_life(days)}.", reply_markup=_shelf_change_keyboard(item["id"])
+        f"{name}: {_describe_lasts(lasts, days)}.", reply_markup=_shelf_change_keyboard(item["id"])
     )
     await send_pending_profile_question(context.bot, update.effective_chat.id)
 
 
-async def _confirm_shelf_life(bot, chat_id: int, name: str, days: int) -> None:
-    """Echo a typed shelf-life answer back with a button to change it."""
+async def _confirm_lasts(bot, chat_id: int, name: str, lasts: str, days: int | None) -> None:
+    """Echo a typed how-long-it-lasts answer back with a button to change it."""
     item = crud.get_item(name)
     await bot.send_message(
-        chat_id, f"{name}: {_describe_shelf_life(days)}.", reply_markup=_shelf_change_keyboard(item["id"])
+        chat_id, f"{name}: {_describe_lasts(lasts, days)}.", reply_markup=_shelf_change_keyboard(item["id"])
     )
 
 
-def _apply_shelf_edit(name: str, days: int) -> None:
-    """Save a corrected shelf life and restart that item's alerts from the new estimate."""
-    crud.set_profile(name, shelf_life_days=days)
+def _apply_shelf_edit(name: str, lasts: str, days: int | None) -> None:
+    """Save a corrected how-long-it-lasts and restart that item's alerts from it."""
+    crud.set_lasts(name, lasts, days)
     crud.mark_spare_alert_pending(name, pending=False)
     crud.mark_checkin_pending(name, pending=False)
 
@@ -538,10 +558,10 @@ async def handle_shelf_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.chat_data["shelf_edit_item"] = item["id"]
         await query.edit_message_text(f"How many days does {item['name']} usually last? Reply with a number.")
         return
-    days = 0 if choice == "na" else int(choice)
-    _apply_shelf_edit(item["name"], days)
+    lasts, days = _lasts_from_choice(choice)
+    _apply_shelf_edit(item["name"], lasts, days)
     await query.edit_message_text(
-        f"{item['name']}: {_describe_shelf_life(days)}.", reply_markup=_shelf_change_keyboard(item["id"])
+        f"{item['name']}: {_describe_lasts(lasts, days)}.", reply_markup=_shelf_change_keyboard(item["id"])
     )
 
 
@@ -551,19 +571,14 @@ async def _handle_shelf_edit_answer(update: Update, context: ContextTypes.DEFAUL
     if not item:
         await update.message.reply_text("That item no longer exists.")
         return
-    text = update.message.text.strip().lower()
-    if text in _SHELF_LIFE_NA_WORDS:
-        days = 0
-    else:
-        try:
-            days = int(text)
-        except ValueError:
-            context.chat_data["shelf_edit_item"] = item_id
-            await update.message.reply_text("Reply with a number of days, or 'n/a'.")
-            return
-    _apply_shelf_edit(item["name"], days)
+    answer = _lasts_from_text(update.message.text)
+    if answer is None:
+        context.chat_data["shelf_edit_item"] = item_id
+        await update.message.reply_text("Reply with a number of days (2 or more), 'same day', or 'one-off'.")
+        return
+    _apply_shelf_edit(item["name"], *answer)
     await update.message.reply_text(
-        f"{item['name']}: {_describe_shelf_life(days)}.", reply_markup=_shelf_change_keyboard(item_id)
+        f"{item['name']}: {_describe_lasts(*answer)}.", reply_markup=_shelf_change_keyboard(item_id)
     )
 
 
@@ -617,8 +632,8 @@ def _pending_question(context: ContextTypes.DEFAULT_TYPE) -> tuple[str, object, 
         name, stage = profile
         what = {
             "name": f'what "{name}" is',
-            "shelf_life": f"how many days {name} lasts",
-        }.get(stage, f"what kind of purchase {name} is")
+            "lasts": f"how long {name} lasts",
+        }.get(stage, f"whether {name} is a treat or a need")
         return "profile", profile, what
     checkin = crud.get_pending_checkin_item()
     if checkin:
@@ -1003,11 +1018,11 @@ async def cleared_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def remind_pending_profile(context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Re-send the current item-profiling question, at most once a day.
 
-    A newly-bought item's profile (purchase type, and for luxury/essential
-    items, shelf life) is asked once right after logging it — but a message
+    A newly-bought item's profile (treat or need, and how long it lasts) is
+    asked once right after logging it — but a message
     sent once is easy to miss or dismiss, and an unanswered item silently
     stays unprofiled forever otherwise (excluded from check-ins, "running
-    out soon", and the treats/essentials/necessities split). One nudge a day
+    out soon", and the treats/needs split). One nudge a day
     gets it answered eventually without turning into a stream of messages.
 
     Returns:
@@ -1025,11 +1040,11 @@ async def remind_pending_profile(context: ContextTypes.DEFAULT_TYPE) -> bool:
 
 
 async def check_expiring_items(context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Ask about the first essential item past its estimated shelf life, if any.
+    """Ask about the first need past its estimated shelf life, if any.
 
     One item per call — the rest stay due and come up in later rounds.
-    Luxury items are excluded entirely (see get_checkin_candidates) — a
-    treat bought on mood/budget doesn't follow a consumption schedule.
+    Treats are excluded entirely (see get_checkin_candidates) — a treat
+    bought on mood/budget doesn't follow a consumption schedule.
 
     Returns:
         True if a check-in was sent.
@@ -1379,24 +1394,23 @@ async def report(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if pace["projected"] > budget["budget"]:
                 budget_line += (
                     f" — on pace for €{pace['projected']:.0f}, cut treats "
-                    f"(€{spending['luxury']:.2f} so far) to land under."
+                    f"(€{spending['treat']:.2f} so far) to land under."
                 )
             else:
                 budget_line += " — well under pace, nice work 🎉"
         lines.append(budget_line)
 
-    # The split the user's own luxury/essential/necessity answers add up
-    # to — nobody totals this for themselves, and it reframes the month
-    # more than the headline number does.
-    if spending["total"] > 0 and (spending["luxury"] or spending["essential"] or spending["necessity"]):
-        luxury_pct = spending["luxury"] / spending["total"] * 100
+    # The split the user's own treat/need answers add up to — nobody
+    # totals this for themselves, and it reframes the month more than the
+    # headline number does.
+    if spending["total"] > 0 and (spending["treat"] or spending["need"]):
+        treat_pct = spending["treat"] / spending["total"] * 100
         lines.append(
-            f"Treats €{spending['luxury']:.2f} ({luxury_pct:.0f}%) · "
-            f"Essential €{spending['essential']:.2f} · "
-            f"Necessity €{spending['necessity']:.2f}"
+            f"Treats €{spending['treat']:.2f} ({treat_pct:.0f}%) · "
+            f"Needs €{spending['need']:.2f}"
         )
-    if spending["unclassified"]:
-        lines.append(f"Unclassified: €{spending['unclassified']:.2f}")
+    if spending["unknown"]:
+        lines.append(f"Not sorted yet: €{spending['unknown']:.2f}")
     if spending["top_categories"]:
         lines.append("Top: " + ", ".join(
             f"{c['category']} €{c['total']:.2f}" for c in spending["top_categories"]
@@ -1572,7 +1586,7 @@ async def main():
     app.add_handler(CommandHandler("dashboard", dashboard_cmd))
     app.add_handler(CallbackQueryHandler(handle_goal_date_choice, pattern=r"^goal_date:"))
     app.add_handler(CallbackQueryHandler(handle_onboarding_choice, pattern=r"^onboard_"))
-    app.add_handler(CallbackQueryHandler(handle_profile_type_choice, pattern=r"^profile_type:"))
+    app.add_handler(CallbackQueryHandler(handle_profile_kind_choice, pattern=r"^profile_(kind|type):"))
     app.add_handler(CallbackQueryHandler(handle_product_ok, pattern=r"^product_ok$"))
     app.add_handler(CallbackQueryHandler(handle_restore, pattern=r"^restore:"))
     app.add_handler(CallbackQueryHandler(handle_name_category, pattern=r"^name_cat:"))

@@ -45,11 +45,10 @@ def get_spending_summary(year=None, month=None, top_n=3):
 
     Returns:
         Dict with keys: total (float), top_items (list of {name, total}),
-        top_categories (list of {category, total}), luxury (float spent on
-        items flagged as treats), essential (float spent on items flagged as
-        essentials), necessity (float spent on same-day-consumed items), and
-        unclassified (float spent on items never profiled — kept separate so
-        an unanswered question never masquerades as an essential).
+        top_categories (list of {category, total}), treat (float spent on
+        items flagged as treats), need (float spent on needs), and unknown
+        (float spent on items not sorted yet — kept separate so an
+        unanswered question never masquerades as a need).
     """
     now = datetime.now(tz=timezone.utc)
     year = year or now.year
@@ -66,14 +65,14 @@ def get_spending_summary(year=None, month=None, top_n=3):
     total = float(cursor.fetchone()[0])
 
     cursor.execute("""
-        SELECT i.purchase_type AS purchase_type,
+        SELECT i.treat_or_need AS treat_or_need,
                SUM(e.quantity_purchased * e.unit_price) AS total
         FROM item_expenses e
         JOIN inventory_items i ON i.id = e.item_id
         WHERE e.purchase_date LIKE ?
-        GROUP BY i.purchase_type
+        GROUP BY i.treat_or_need
     """, (f"{prefix}%",))
-    by_tier = {row["purchase_type"]: float(row["total"]) for row in cursor.fetchall()}
+    by_kind = {row["treat_or_need"]: float(row["total"]) for row in cursor.fetchall()}
 
     cursor.execute("""
         SELECT i.name AS name, SUM(e.quantity_purchased * e.unit_price) AS total
@@ -104,10 +103,9 @@ def get_spending_summary(year=None, month=None, top_n=3):
         "total": total,
         "top_items": top_items,
         "top_categories": top_categories,
-        "luxury": by_tier.get("luxury", 0.0),
-        "essential": by_tier.get("essential", 0.0),
-        "necessity": by_tier.get("necessity", 0.0),
-        "unclassified": by_tier.get(None, 0.0),
+        "treat": by_kind.get("treat", 0.0),
+        "need": by_kind.get("need", 0.0),
+        "unknown": by_kind.get("unknown", 0.0),
     }
 
 
@@ -148,13 +146,12 @@ def get_month_pace(year=None, month=None):
 
 
 def get_running_low(days_ahead=7):
-    """Return essentials whose estimated run-out date falls within the next few days.
+    """Return needs whose estimated run-out date falls within the next few days.
 
     Forward-looking counterpart to the shelf-life check-in, which only speaks
-    up once an item is already due. Luxury items are excluded (a treat
-    running out isn't a restocking need), and so are necessity items
-    (same-day-consumed, never actually stocked — there's nothing to run low
-    on).
+    up once an item is already due. Treats are excluded (a treat running out
+    isn't a restocking need), and so are same-day and one-off items (never
+    actually stocked — there's nothing to run low on).
 
     Args:
         days_ahead: How far ahead to look.
@@ -171,7 +168,7 @@ def get_running_low(days_ahead=7):
                (SELECT COALESCE(MAX(e.logged_at), MAX(e.purchase_date))
                 FROM item_expenses e WHERE e.item_id = i.id) AS last_purchase
         FROM inventory_items i
-        WHERE i.purchase_type = 'essential' AND i.shelf_life_days > 0
+        WHERE i.treat_or_need = 'need' AND i.lasts = 'days'
     """)
     rows = cursor.fetchall()
     cursor.close()
@@ -217,7 +214,8 @@ def get_daily_cost(top_n=3):
     Returns:
         Dict with keys:
         - items: list of {name, cost_per_day, unit_price, shelf_life_days,
-          purchase_type}, most expensive per day first (at most top_n).
+          treat_or_need}, most expensive per day first (at most top_n). A
+          same-day item counts as lasting 1 day.
         - ready: how many items currently qualify.
         - tracked: how many items have a shelf-life estimate at all, so a
           caller can say what it's still waiting on rather than silently
@@ -226,14 +224,15 @@ def get_daily_cost(top_n=3):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT i.name AS name, i.shelf_life_days AS shelf_life_days,
-               i.purchase_type AS purchase_type,
+        SELECT i.name AS name,
+               CASE i.lasts WHEN 'same_day' THEN 1 ELSE i.shelf_life_days END AS shelf_life_days,
+               i.treat_or_need AS treat_or_need,
                (SELECT e.unit_price FROM item_expenses e
                 WHERE e.item_id = i.id ORDER BY e.id DESC LIMIT 1) AS unit_price,
                (SELECT COUNT(*) FROM item_expenses e
                 WHERE e.item_id = i.id) AS purchase_count
         FROM inventory_items i
-        WHERE i.shelf_life_days IS NOT NULL AND i.shelf_life_days > 0
+        WHERE i.lasts IN ('same_day', 'days')
     """)
     rows = cursor.fetchall()
     cursor.close()
@@ -245,7 +244,7 @@ def get_daily_cost(top_n=3):
             "cost_per_day": row["unit_price"] / row["shelf_life_days"],
             "unit_price": row["unit_price"],
             "shelf_life_days": row["shelf_life_days"],
-            "purchase_type": row["purchase_type"],
+            "treat_or_need": row["treat_or_need"],
         }
         for row in rows
         if row["unit_price"] and row["purchase_count"] >= _MIN_PURCHASES_FOR_SHELF_LIFE_TRUST
@@ -355,8 +354,8 @@ def get_inventory_health():
 
     Returns:
         Dict with keys checkin_pending, spare_alert_pending, unprofiled
-        (items never asked about purchase type, or shelf life where that
-        still applies) — each a list of item names needing that kind of
+        (items whose treat-or-need or how-long-it-lasts is still unknown)
+        — each a list of item names needing that kind of
         attention. An empty list means nothing of that kind needs attention
         right now.
     """
@@ -368,8 +367,7 @@ def get_inventory_health():
     spare_alert_pending = [row["name"] for row in cursor.fetchall()]
     cursor.execute("""
         SELECT name FROM inventory_items
-        WHERE purchase_type IS NULL
-           OR (purchase_type IN ('luxury', 'essential') AND shelf_life_days IS NULL)
+        WHERE treat_or_need = 'unknown' OR lasts = 'unknown'
     """)
     unprofiled = [row["name"] for row in cursor.fetchall()]
     cursor.close()

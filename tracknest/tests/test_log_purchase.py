@@ -116,7 +116,7 @@ async def test_naming_leaves_unrelated_list_entries_alone(mock_crud, mock_list, 
 @patch("bot.main.shopping_list")
 @patch("bot.main.crud")
 async def test_confirming_an_already_profiled_item_asks_nothing_more(mock_crud, mock_list, _next_question):
-    mock_crud.get_item.return_value = {"category": "Dairy", "purchase_type": "essential"}
+    mock_crud.get_item.return_value = {"category": "Dairy", "treat_or_need": "need", "lasts": "days"}
     mock_list.get_all_items.return_value = []
     bot = MagicMock()
     bot.send_message = AsyncMock()
