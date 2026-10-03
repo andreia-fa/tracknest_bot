@@ -111,7 +111,11 @@ duplicating the DDL here. `item_aliases` maps a receipt's wording (e.g. "BIO aln
 name and category the user gave it, so each abbreviation is asked about
 only once; `inventory_items.name_status` marks an item still waiting for
 that answer. Notable `inventory_items` columns beyond the
-obvious: `shelf_life_days`/`is_luxury` (item profile, asked conversationally),
+obvious: the item profile — `treat_or_need` (`treat`/`need`/`unknown`) and
+`lasts` (`same_day`/`days`/`one_off`/`unknown`), with `shelf_life_days` holding
+a number of days only when `lasts = 'days'` (all three enforced by CHECK
+constraints: nothing blank that means "not asked", no magic 0/1); `notes` (the
+user's own remark on an item, e.g. a size — NULL or real text, never blank);
 `checkin_pending` (awaiting a "did it run out" reply), `par_level` (per-item
 override of the household's replenishment policy — NULL defers to the
 `default_par_level` household setting), and `spare_alert_pending` (awaiting a

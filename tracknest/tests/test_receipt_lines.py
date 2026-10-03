@@ -32,3 +32,9 @@ def test_clean_name_keeps_real_numbers_and_letters():
     assert clean_name("Pampers 4") == "Pampers 4"
     assert clean_name("7Up") == "7Up"
     assert clean_name("5") == "5"
+
+
+def test_till_codes_are_not_product_names():
+    from bot.receipt_lines import is_code_only
+    assert all(is_code_only(code) for code in ("X01", "B", "59618", " A "))
+    assert not any(is_code_only(name) for name in ("BANANE", "TS CR. ROSM.", "Pampers 4", "EIER MARM."))

@@ -73,3 +73,26 @@ async def test_profile_reminder_once_a_day(mock_crud, mock_settings, mock_dateti
     assert await main.remind_pending_profile(_context()) is True
     send_question.assert_awaited_once()
     mock_settings.set_profile_reminded_on.assert_called_once_with(NOW.date().isoformat())
+
+
+@pytest.mark.asyncio
+@patch("bot.main.settings")
+@patch("bot.main.crud")
+async def test_open_question_is_not_sent_again(mock_crud, mock_settings):
+    """Four receipts in a row used to send the same unanswered question four times."""
+    mock_crud.get_pending_profile_item.return_value = ("X01", "treat_or_need")
+    mock_settings.get_open_question.return_value = None
+    bot = MagicMock()
+    bot.send_message = AsyncMock()
+
+    await main.send_pending_profile_question(bot, 1)
+    mock_settings.get_open_question.return_value = "X01|treat_or_need"
+    await main.send_pending_profile_question(bot, 1)
+    await main.send_pending_profile_question(bot, 1)
+    assert bot.send_message.await_count == 1
+
+    await main.send_pending_profile_question(bot, 1, force=True)  # the daily reminder
+    assert bot.send_message.await_count == 2
+    mock_crud.get_pending_profile_item.return_value = ("BANANE", "lasts")  # answered -> next one goes out
+    await main.send_pending_profile_question(bot, 1)
+    assert bot.send_message.await_count == 3

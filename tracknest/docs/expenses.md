@@ -31,9 +31,12 @@ and clears them off the shopping list.
   is flagged as a jump instead of a plain parenthetical. This must run before
   `log_expense()` inserts the new row, or the average would include the very
   price being compared.
-- `log_expense()` also auto-corrects a non-luxury item's `shelf_life_days`
-  estimate down to the real gap when a repurchase comes sooner than expected —
+- `log_expense()` also auto-corrects a need's `shelf_life_days` estimate
+  down towards the real gap when a repurchase comes sooner than expected —
   real repurchase timing is a better signal than the original guess.
+- A receipt is logged on its **printed date** (`purchased_at`), not the day
+  it's processed, so a batch of old receipts lands in the right month; the
+  duplicate check then means "same item and price on the same receipt date".
 
 ## Data Model
 
@@ -84,9 +87,9 @@ each:
 | Line | Function | Why it earns its place |
 |------|----------|------------------------|
 | Spent + month-end pace | `get_month_pace()` | Straight-line projection (spend/day × days in month). Withheld before `_MIN_DAYS_FOR_PROJECTION` days, since extrapolating from 2 days is noise. |
-| Treats vs. essentials | `get_spending_summary()` (`luxury`/`essential`/`unclassified`) | The user's own luxury/essential answers, totalled — nobody sums this for themselves, and it reframes the month harder than the headline number. `unclassified` stays separate so an unanswered question never masquerades as an essential. |
+| Treats vs. needs | `get_spending_summary()` (`treat`/`need`/`unknown`) | The user's own treat/need answers, totalled — nobody sums this for themselves, and it reframes the month harder than the headline number. `unknown` stays separate so an unanswered question never masquerades as a need. |
 | Cost per day you own it | `get_daily_cost()` | Latest unit price ÷ shelf life. Separates "expensive to buy" from "expensive to keep around" — invisible on a receipt. Treats included; that's where the spread usually is. |
-| Running out soon | `get_running_low()` | Forward-looking counterpart to the check-in, which only speaks up once an item is *already* due. Essentials only, 7-day window, so one shopping trip can replace three. |
+| Running out soon | `get_running_low()` | Forward-looking counterpart to the check-in, which only speaks up once an item is *already* due. Needs lasting a number of days only, 7-day window, so one shopping trip can replace three. |
 | Creeping up | `get_price_trends()` | Inflation per item vs. its own history. |
 | Goal pace | `get_goal_status()` | Honest anchor, not a fake progress bar (no savings ledger exists). |
 | Green light / needs you | `get_inventory_health()` | Named items and what they need, or a single 🟢 line. |
@@ -141,9 +144,13 @@ goal, each via inline-keyboard buttons with a "Skip for now" option — no
 question is required, and none of it is asked again on a later `/start`.
 `/setup` re-runs the same questionnaire manually any time (e.g. to fill in
 something skipped). This is deliberately the only place these three
-questions are asked upfront; everything else in the bot (shelf-life,
-luxury/essential) stays reactive — asked the first time an item is actually
-purchased, since there's no meaningful answer before then.
+questions are asked upfront; everything else in the bot (treat or need,
+how long it lasts) stays reactive — settled the first time an item is
+actually purchased, since there's no meaningful answer before then. Even
+then it's guessed before it's asked: the same product bought under another
+name lends its answers, then a category default (`bot/profile_guess.py`);
+the guess is shown with a ✏️ button, and only what neither covers becomes a
+question — one at a time, the next only after the last is answered.
 
 ## Related: Household Replenishment Policy (`db/settings.py`, `db/crud.py`)
 

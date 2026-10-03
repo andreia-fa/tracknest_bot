@@ -119,3 +119,13 @@ def get_profile_reminded_on():
 def set_profile_reminded_on(day):
     """Remember the date (YYYY-MM-DD) a profiling reminder went out, so it's once a day at most."""
     _set_setting("profile_reminded_on", day)
+
+
+def get_open_question():
+    """Return the profiling question last sent and not yet answered, as "name|stage", or None."""
+    return _get_setting("open_question")
+
+
+def set_open_question(key):
+    """Remember which profiling question is waiting for the user ("name|stage")."""
+    _set_setting("open_question", key)

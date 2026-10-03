@@ -129,8 +129,10 @@ async def test_confirming_an_already_profiled_item_asks_nothing_more(mock_crud, 
 
 
 @pytest.mark.asyncio
+@patch("bot.main.settings")
 @patch("bot.main.crud")
-async def test_new_receipt_item_question_offers_the_models_guess(mock_crud):
+async def test_new_receipt_item_question_offers_the_models_guess(mock_crud, mock_settings):
+    mock_settings.get_open_question.return_value = None
     mock_crud.get_pending_profile_item.return_value = ("LEERDAMMER CAR", "name")
     mock_crud.get_item.return_value = {"product": "cheese"}
     bot = MagicMock()

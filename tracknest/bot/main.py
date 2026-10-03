@@ -14,6 +14,7 @@ from bot.categorize import CATEGORY_NAMES, infer_category
 from bot.list_match import choose_list_match
 from bot.parser import parse_line
 from bot.profile_guess import guess_profile
+from bot.receipt_lines import is_code_only
 from bot.tunnel import CloudflareTunnel
 from config import BOT_TOKEN
 from db import crud, expenses, metrics, receipt_queue, settings, shopping_list
@@ -300,8 +301,13 @@ _TREAT_WORDS = {"treat", "t", "luxury"}
 _NEED_WORDS = {"need", "n", "essential"}
 
 
-async def send_pending_profile_question(bot, chat_id: int):
-    """Send the next item-profiling question, if any item still needs one.
+async def send_pending_profile_question(bot, chat_id: int, force: bool = False):
+    """Send the next item-profiling question, if any item still needs one — one at a time.
+
+    The question already waiting for an answer is never sent again (four
+    receipts in a row used to repeat it four times, on top of new ones):
+    the next one only goes out once this one is answered. force re-sends it
+    anyway — the once-a-day reminder.
 
     Reads state from the DB (crud.get_pending_profile_item) rather than
     per-chat memory, so it works the same whether called from a live update
@@ -315,6 +321,10 @@ async def send_pending_profile_question(bot, chat_id: int):
     if not pending:
         return
     name, stage = pending
+    key = f"{name}|{stage}"
+    if not force and settings.get_open_question() == key:
+        return
+    settings.set_open_question(key)
     if stage == "name":
         item = crud.get_item(name)
         guess = item.get("product") if item else None
@@ -1178,6 +1188,8 @@ async def process_receipt_result(parsed: dict) -> tuple[str, InlineKeyboardMarku
             store=store, category=category, product=product, matched_list_item=list_match, ask_name=ask_name,
             clear_reason="receipt", source=item["name"], receipt_date=receipt_date,
         )
+        if is_code_only(item["name"]):
+            line += " ⚠️ no readable name on the receipt — check this one"
         replies.append(line)
         if cleared_id:
             cleared.append((cleared_id, list_match))
@@ -1254,7 +1266,7 @@ async def remind_pending_profile(context: ContextTypes.DEFAULT_TYPE) -> bool:
     if settings.get_profile_reminded_on() == today:
         return False
     settings.set_profile_reminded_on(today)
-    await send_pending_profile_question(context.bot, chat_id)
+    await send_pending_profile_question(context.bot, chat_id, force=True)
     return True
 
 
