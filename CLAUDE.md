@@ -39,7 +39,8 @@ tracknest/
                          functions above rather than building SQL remotely
     metrics.py          — read-only aggregates for /report and alerts
     settings.py         — household settings (chat id, par level, budget)
-  tests/                — one test_*.py per db/ and bot/ module above (mocked DB / mocked Bot)
+  tests/                — one test_*.py per db/ and bot/ module above (mocked Bot; mocked or
+                         throwaway-SQLite DB, see Development Rules)
 .github/workflows/ci_cd.yml  — CI runs tests; CD placeholder
 requirements.txt             — python-telegram-bot, pytest, ruff
 ```
@@ -134,7 +135,17 @@ and `DEPLOY_STRATEGY.md`) with `docker exec` permission on the VM (the
 ## Development Rules
 - **Always read the relevant source files before making changes.** Never assume structure.
 - Follow Python best practices: type hints where meaningful, no unnecessary comments.
-- Tests mock DB connections — keep it that way. Do not introduce real DB calls in tests.
+- Tests: mock by default for logic (handlers, parsing, message text). Where the
+  SQL itself is what's under test — schema rules (CHECK constraints),
+  migrations, non-trivial queries — use a real throwaway SQLite file
+  (`tmp_path` + `patch.object(database, "DB_PATH", ...)` + `init_db()`), never
+  a mock: a mock only proves the code matches our own assumption of SQLite.
+  `tests/conftest.py` points every test at an empty temp DB, so no test can
+  ever read the real one (a test that touched it by accident once passed
+  locally and failed in CI).
+- Follow established best practice everywhere (testing, security, schema
+  design, deploys) — user's standing rule. If a rule in this file conflicts
+  with best practice, say so and propose the fix rather than following it.
 - `config/__init__.py` uses `os.environ[]` for required vars — it will raise on startup if any are missing. This is intentional.
 - After every task: tests + lint must pass. The Stop hook handles this automatically and will block completion if they fail.
 
