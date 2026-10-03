@@ -57,7 +57,7 @@ FIXES = {
     "Wrap 190g (Leerdammer cheese)": ("wrap", "Ready Meals"),
     "Pizza Margherita": ("pizza", None),
     "LAUGENBREZEL": ("pretzel", None),
-    "TWISTER KAKAO": ("cocoa pastry", "Bread/Bakery"),
+    "TWISTER KAKAO": ("cinnamon roll", "Bread/Bakery"),  # a Zimtschnecke rung up wrong at the till
     "JA! MIWA STILL": ("still water", None),
 }
 
