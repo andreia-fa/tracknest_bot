@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import signal
+from types import SimpleNamespace
 from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -592,43 +593,85 @@ async def _handle_checkin_answer(update: Update, context: ContextTypes.DEFAULT_T
     crud.mark_checkin_pending(item_name, pending=True)
 
 
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle plain-text messages: one shopping list entry (or purchase) per line.
+def _pending_question(context: ContextTypes.DEFAULT_TYPE) -> tuple[str, object, str] | None:
+    """The open question a typed message could be answering, as (kind, key, description).
 
-    A line starting with "-" (e.g. "- bananas") removes that item from the
-    shopping list instead of adding it. A line that includes a price (e.g.
-    "Matcha 2.50") is treated as a purchase you're logging right now — no
-    receipt needed — rather than a shopping-list addition; see
-    bot.parser.parse_line for exactly what counts as a price.
-
-    If onboarding, a /set_goal conversation, item-profiling, or shelf-life
-    check-in question is pending for this chat, the message is treated as
-    the answer to that instead of new shopping-list entries.
+    key identifies the exact question (so a confirmation tapped after the
+    question changed is caught), description says it in words for the
+    confirmation prompt. A category question is buttons-only, so text never
+    answers it.
     """
-    pending_onboarding = context.chat_data.get("onboarding")
-    if pending_onboarding:
-        await _handle_onboarding_text(update, context, pending_onboarding)
-        return
-    pending_goal = context.chat_data.get("awaiting_goal")
-    if pending_goal:
-        await _handle_goal_answer(update, context, pending_goal)
-        return
-    shelf_edit_item = context.chat_data.pop("shelf_edit_item", None)
+    onboarding = context.chat_data.get("onboarding")
+    if onboarding:
+        return "onboarding", onboarding.get("stage"), "your monthly budget"
+    goal = context.chat_data.get("awaiting_goal")
+    if goal:
+        what = {"name": "what you're saving for", "amount": "how much you need"}.get(goal["stage"], "the goal date")
+        return "goal", goal["stage"], what
+    shelf_edit_item = context.chat_data.get("shelf_edit_item")
     if shelf_edit_item:
-        await _handle_shelf_edit_answer(update, context, shelf_edit_item)
-        return
-    pending_profile = crud.get_pending_profile_item()
-    if pending_profile:
-        await _handle_profile_answer(update, context, pending_profile)
-        return
-    pending_checkin = crud.get_pending_checkin_item()
-    if pending_checkin:
-        await _handle_checkin_answer(update, context, pending_checkin)
-        return
-    lines = [line for line in update.message.text.splitlines() if line.strip()]
+        item = crud.get_item_by_id(shelf_edit_item) or {}
+        return "shelf_edit", shelf_edit_item, f"how many days {item.get('name', 'that item')} lasts"
+    profile = crud.get_pending_profile_item()
+    if profile and profile[1] != "category":
+        name, stage = profile
+        what = {
+            "name": f'what "{name}" is',
+            "shelf_life": f"how many days {name} lasts",
+        }.get(stage, f"what kind of purchase {name} is")
+        return "profile", profile, what
+    checkin = crud.get_pending_checkin_item()
+    if checkin:
+        return "checkin", checkin, f"whether you still have {checkin}"
+    return None
+
+
+async def _answer_pending_question(update, context: ContextTypes.DEFAULT_TYPE, kind: str) -> None:
+    """Hand a confirmed typed answer to the handler for that kind of question."""
+    if kind == "onboarding":
+        await _handle_onboarding_text(update, context, context.chat_data["onboarding"])
+    elif kind == "goal":
+        await _handle_goal_answer(update, context, context.chat_data["awaiting_goal"])
+    elif kind == "shelf_edit":
+        await _handle_shelf_edit_answer(update, context, context.chat_data.pop("shelf_edit_item"))
+    elif kind == "profile":
+        await _handle_profile_answer(update, context, crud.get_pending_profile_item())
+    else:
+        await _handle_checkin_answer(update, context, crud.get_pending_checkin_item())
+
+
+def _preview_list_lines(text: str) -> list[str]:
+    """Describe what _apply_list_lines would do with each line, without writing anything."""
+    preview = []
+    for line in (line.strip() for line in text.splitlines()):
+        if not line:
+            continue
+        if line.startswith("-"):
+            name = line[1:].strip()
+            preview.append(f"• remove {name} from your shopping list" if name else f"• skip '{line}' (not understood)")
+            continue
+        try:
+            name, qty, unit_price = parse_line(line)
+        except ValueError:
+            preview.append(f"• skip '{line}' (not understood)")
+            continue
+        if unit_price is not None:
+            preview.append(f"• log a purchase: {qty}x {name} at €{unit_price:.2f} each")
+        else:
+            preview.append(f"• add {qty}x {name} to your shopping list")
+    return preview
+
+
+def _apply_list_lines(text: str) -> tuple[list[str], bool]:
+    """Apply typed lines to the shopping list (or log priced lines as purchases).
+
+    Returns:
+        (replies, logged_a_purchase): one reply line per input line, and
+        whether any line was logged as a purchase.
+    """
     replies = []
     logged_a_purchase = False
-    for line in lines:
+    for line in (line for line in text.splitlines() if line.strip()):
         stripped = line.strip()
         if stripped.startswith("-"):
             name = stripped[1:].strip()
@@ -655,9 +698,94 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             continue
         shopping_list.add_item(name, qty, category=infer_category(name))
         replies.append(f"Added {qty}x {name} to your shopping list.")
-    await update.message.reply_text("\n".join(replies))
+    return replies, logged_a_purchase
+
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle plain-text messages: show what they'd change, and wait for a tap to do it.
+
+    Nothing typed is written to the DB straight away. Each line is a
+    shopping-list entry ("bananas"), a removal ("- bananas"), or a purchase
+    when it includes a price ("Matcha 2.50", see bot.parser.parse_line); the
+    bot lists what it would do and asks to confirm. If a question is open
+    (onboarding, /set_goal, item profiling, a shelf-life check-in), the
+    message might be the answer to it instead, so both options are offered
+    rather than guessing — typing "bananas" while a question was open used
+    to silently become its answer.
+
+    Only the latest typed message can be confirmed; tapping an older one's
+    buttons says it expired.
+    """
+    text = update.message.text
+    pending = _pending_question(context)
+    preview = _preview_list_lines(text)
+    actionable = any(not line.startswith("• skip") for line in preview)
+    token = context.chat_data.get("typed_token", 0) + 1
+    context.chat_data["typed_token"] = token
+    context.chat_data["typed"] = {"token": token, "text": text, "pending": pending[:2] if pending else None}
+    buttons = []
+    if pending:
+        body = f"Is this your answer to {pending[2]}?"
+        if actionable:
+            body += "\n\nOr should I:\n" + "\n".join(preview)
+        buttons.append([InlineKeyboardButton("💬 Yes, it's my answer", callback_data=f"typed:answer:{token}")])
+        if actionable:
+            buttons.append([InlineKeyboardButton("🛒 No, do the list changes", callback_data=f"typed:list:{token}")])
+    elif actionable:
+        body = "Just to be sure, I'll:\n" + "\n".join(preview)
+        buttons.append([InlineKeyboardButton("✅ Yes, do it", callback_data=f"typed:list:{token}")])
+    else:
+        context.chat_data.pop("typed", None)
+        await update.message.reply_text("\n".join(f"Couldn't understand: '{line.strip()}'"
+                                                 for line in text.splitlines() if line.strip()))
+        return
+    buttons.append([InlineKeyboardButton("❌ Cancel", callback_data=f"typed:cancel:{token}")])
+    await update.message.reply_text(body, reply_markup=InlineKeyboardMarkup(buttons))
+
+
+def _replayed_update(query, text: str):
+    """A stand-in for the original text update, so answer handlers run unchanged on confirm.
+
+    The handlers only read message.text, call message.reply_text and use
+    effective_chat.id; replies go to the chat as new messages.
+    """
+    chat_id = query.message.chat_id
+    bot = query.get_bot()
+
+    async def reply_text(reply, **kwargs):
+        return await bot.send_message(chat_id, reply, **kwargs)
+
+    return SimpleNamespace(
+        message=SimpleNamespace(text=text, reply_text=reply_text),
+        effective_chat=SimpleNamespace(id=chat_id),
+    )
+
+
+async def handle_typed_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Carry out (or drop) a typed message once its confirmation button is tapped."""
+    query = update.callback_query
+    await query.answer()
+    _prefix, action, token = query.data.split(":", 2)
+    typed = context.chat_data.get("typed")
+    if not typed or typed["token"] != int(token):
+        await query.edit_message_text("That one expired — nothing was saved. Send it again if you still want it.")
+        return
+    context.chat_data.pop("typed")
+    if action == "cancel":
+        await query.edit_message_text("Cancelled — nothing saved.")
+        return
+    if action == "answer":
+        pending = _pending_question(context)
+        if not pending or pending[:2] != typed["pending"]:
+            await query.edit_message_text("That question changed in the meantime — nothing was saved.")
+            return
+        await query.edit_message_text(f"💬 Answering {pending[2]}: {typed['text']}")
+        await _answer_pending_question(_replayed_update(query, typed["text"]), context, pending[0])
+        return
+    replies, logged_a_purchase = _apply_list_lines(typed["text"])
+    await query.edit_message_text("\n".join(replies))
     if logged_a_purchase:
-        await send_pending_profile_question(context.bot, update.effective_chat.id)
+        await send_pending_profile_question(context.bot, query.message.chat_id)
 
 
 async def show_shopping_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1442,6 +1570,7 @@ async def main():
     app.add_handler(CallbackQueryHandler(handle_shelf_edit, pattern=r"^shelf_edit:"))
     app.add_handler(CallbackQueryHandler(handle_shelf_set, pattern=r"^shelf_set:"))
     app.add_handler(CallbackQueryHandler(handle_spare_alert_choice, pattern=r"^spare_(add|plenty|stop):"))
+    app.add_handler(CallbackQueryHandler(handle_typed_choice, pattern=r"^typed:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_error_handler(handle_error)

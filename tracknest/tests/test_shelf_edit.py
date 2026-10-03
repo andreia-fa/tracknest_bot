@@ -78,12 +78,16 @@ async def test_changed_answer_can_be_typed(mock_crud):
     context.chat_data = {}
 
     await main.handle_shelf_set(_callback_update("shelf_set:7:custom"), context)
-    update = _text_update("45")
-    await main.handle_text(update, context)
+    await main.handle_text(_text_update("45"), context)
+    mock_crud.set_profile.assert_not_called()  # nothing saved before the confirmation tap
+    confirm = _callback_update("typed:answer:1")
+    confirm.callback_query.get_bot.return_value.send_message = AsyncMock()
+    await main.handle_typed_choice(confirm, context)
 
     mock_crud.set_profile.assert_called_once_with("Berida Garnele", shelf_life_days=45)
     assert "shelf_edit_item" not in context.chat_data
-    assert "45 day(s)" in update.message.reply_text.call_args.args[0]
+    send_message = confirm.callback_query.get_bot.return_value.send_message
+    assert "45 day(s)" in send_message.call_args.args[1]
 
 
 @pytest.mark.asyncio
