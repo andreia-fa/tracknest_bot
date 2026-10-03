@@ -10,6 +10,9 @@ Brotstücker and Kuchenbeleg were both €3.18 on the same REWE receipt,
 logged in the same second — most likely one line read twice. The user
 wasn't sure, so Brotstücker (and its one purchase) goes.
 
+Also the first item note: the bra size, so its 4-monthly reminder says
+which size to buy again. Needs the deploy that adds inventory_items.notes.
+
 Backs the DB up first and applies everything in one transaction. Run inside the bot container:
     ssh oracle-tracknest docker exec -i tracknest-bot python - < deploy/treat_or_need_2026_10_03.py
 """
@@ -22,6 +25,7 @@ TREATS = [
 ]
 NEEDS = ["Water Bottle", "JA! MIWA STILL"]
 DELETE = "Brotstücker"
+NOTES = {"Push Up Bra": "UK/USA 34B"}
 
 print(f"Backup: {backup_db('before-treat-or-need')}")
 conn = get_connection()
@@ -37,6 +41,9 @@ with conn:  # one transaction: commits on success, rolls back on any error
         print(f"  deleted {DELETE} and its {gone} purchase(s)")
     else:
         print(f"  skipped (not found): {DELETE}")
+    for name, note in NOTES.items():
+        n = conn.execute("UPDATE inventory_items SET notes = ? WHERE name = ?", (note, name)).rowcount
+        print(f"  {name}: 📝 {note}" if n else f"  skipped (not found): {name}")
     left = [r["name"] for r in conn.execute(
         "SELECT name FROM inventory_items WHERE treat_or_need = 'unknown' OR lasts = 'unknown'")]
     print(f"  still unsorted: {', '.join(left) if left else 'nothing'}")

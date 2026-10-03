@@ -76,7 +76,7 @@ async def test_alert_near_run_out_comes_with_buttons(mock_crud, mock_settings, m
 
     mock_crud.mark_spare_alert_pending.assert_called_once_with("LEERDAMMER CAR")
     markup = context.bot.send_message.call_args.kwargs["reply_markup"]
-    assert _buttons(markup) == ["spare_add:4", "spare_plenty:4", "shelf_edit:4", "spare_stop:4"]
+    assert _buttons(markup) == ["spare_add:4", "spare_plenty:4", "shelf_edit:4", "spare_stop:4", "note:4"]
 
 
 @pytest.mark.asyncio

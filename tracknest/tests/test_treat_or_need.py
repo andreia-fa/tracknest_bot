@@ -32,7 +32,7 @@ def test_new_items_start_unknown_not_blank(db):
 ])
 def test_database_refuses_values_that_mean_two_things(db, sql):
     crud.add_item("Brezel", 1)
-    conn = sqlite3.connect(db)
+    conn = sqlite3.connect(db, isolation_level=None)  # autocommit: a refused write leaves no lock
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute(sql)
 

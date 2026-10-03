@@ -158,6 +158,27 @@ def set_lasts(name, lasts, days=None):
     return affected > 0
 
 
+def set_item_note(name, note):
+    """Save the user's note on an item (a size, a brand, ...), or clear it.
+
+    Args:
+        name: Item name.
+        note: The note; blank or None clears it.
+
+    Returns:
+        True if the item was found and updated, False otherwise.
+    """
+    note = (note or "").strip() or None
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE inventory_items SET notes = ? WHERE name = ?", (note, name))
+    affected = cursor.rowcount
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return affected > 0
+
+
 def set_par_level(name, level):
     """Set a per-item par-level override (1 or 2), superseding the household default.
 
@@ -212,15 +233,16 @@ def get_par_alert_candidates(default_par_level):
             item without a per-item override.
 
     Returns:
-        List of dicts: id, name, product, category, shelf_life_days,
+        List of dicts: id, name, product, category, shelf_life_days, notes,
         last_purchase (ISO datetime of the product's most recent expense, or
-        None if never purchased) and last_quantity (units bought that time).
+        None if never purchased), last_quantity (units bought that time) and
+        last_store (where, if known).
     """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(f"""
-        SELECT i.id, i.name, i.product, i.category, i.shelf_life_days,
-               e.logged_at AS last_purchase, e.quantity_purchased AS last_quantity
+        SELECT i.id, i.name, i.product, i.category, i.shelf_life_days, i.notes,
+               e.logged_at AS last_purchase, e.quantity_purchased AS last_quantity, e.store AS last_store
         FROM inventory_items i
         {_LATEST_PRODUCT_PURCHASE_JOIN}
         WHERE i.treat_or_need = 'need'
@@ -276,14 +298,14 @@ def get_checkin_candidates():
     about, timed from that purchase.
 
     Returns:
-        List of dicts: name, product, shelf_life_days, last_purchase (ISO
-        datetime of the product's most recent expense, or None if never
-        purchased).
+        List of dicts: name, product, shelf_life_days, notes, last_purchase
+        (ISO datetime of the product's most recent expense, or None if never
+        purchased) and last_store (where, if known).
     """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(f"""
-        SELECT i.name, i.product, i.shelf_life_days, e.logged_at AS last_purchase
+        SELECT i.name, i.product, i.shelf_life_days, i.notes, e.logged_at AS last_purchase, e.store AS last_store
         FROM inventory_items i
         {_LATEST_PRODUCT_PURCHASE_JOIN}
         WHERE i.treat_or_need = 'need'

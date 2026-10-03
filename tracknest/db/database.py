@@ -90,6 +90,7 @@ def _inventory_items_sql(table, name_collation=" COLLATE NOCASE"):
             spare_alert_pending INTEGER NOT NULL DEFAULT 0,
             name_status TEXT,
             product TEXT,
+            notes TEXT CHECK (notes IS NULL OR length(trim(notes)) > 0),
             CHECK ((lasts = 'days') = (shelf_life_days IS NOT NULL))
         )
     """
@@ -156,6 +157,21 @@ def _split_purchase_type(conn):
     finally:
         conn.execute("PRAGMA foreign_keys = ON")
     logger.info("purchase_type split into treat_or_need and lasts.")
+
+
+def _add_notes_column(conn):
+    """Add inventory_items.notes: the user's own remarks on an item (a size, a brand).
+
+    NULL means no note; a blank one is refused, so "empty" never has to be
+    told apart from "nothing to say". Runs after _split_purchase_type, whose
+    rebuild already includes the column for databases it migrates.
+    """
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(inventory_items)")}
+    if "notes" not in cols:
+        conn.execute(
+            "ALTER TABLE inventory_items ADD COLUMN notes TEXT CHECK (notes IS NULL OR length(trim(notes)) > 0)"
+        )
+        conn.commit()
 
 
 def _make_item_names_case_insensitive(conn):
@@ -349,4 +365,5 @@ def init_db():
     cursor.close()
     _make_item_names_case_insensitive(conn)
     _split_purchase_type(conn)
+    _add_notes_column(conn)
     conn.close()

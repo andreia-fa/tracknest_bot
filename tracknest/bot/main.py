@@ -178,6 +178,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "  /par_level [item_name] <1|2> — 1 = replace when low, 2 = always "
         "keep a spare. No item name sets the household default.\n"
         "  /rename <old name> = <new name> — Give an item a readable name\n"
+        "  /note — Remember something about an item (e.g. a size)\n"
         "  /set_budget <amount> — Set a monthly spending budget\n"
         "  /set_goal — Optional: walks you through setting a savings goal "
         "(name, amount, date), shown in /report\n"
@@ -510,12 +511,79 @@ def _fix_buttons(item_ids: list[int]) -> list[list[InlineKeyboardButton]]:
 
 
 def _fix_keyboard(item_id: int) -> InlineKeyboardMarkup:
-    """Treat/need plus the how-long-it-lasts choices, for correcting one item."""
+    """Treat/need plus the how-long-it-lasts choices, for correcting one item, and its note."""
     kind_row = [
         InlineKeyboardButton("🍫 Treat", callback_data=f"kind_set:{item_id}:treat"),
         InlineKeyboardButton("🧺 Need", callback_data=f"kind_set:{item_id}:need"),
     ]
-    return InlineKeyboardMarkup([kind_row, *_shelf_keyboard(f"shelf_set:{item_id}:").inline_keyboard])
+    note_row = [InlineKeyboardButton("📝 Note", callback_data=f"note:{item_id}")]
+    return InlineKeyboardMarkup([kind_row, *_shelf_keyboard(f"shelf_set:{item_id}:").inline_keyboard, note_row])
+
+
+def _note_line(item: dict | None) -> str:
+    """"\n📝 <note>" for an item with a note — e.g. the size to buy again — else ""."""
+    return f"\n📝 {item['notes']}" if item and item.get("notes") else ""
+
+
+async def _ask_for_note(reply, context: ContextTypes.DEFAULT_TYPE, item: dict) -> None:
+    """Start waiting for the typed note on an item (confirmed like any typed message)."""
+    context.chat_data.pop("note_pick", None)
+    context.chat_data["note_item"] = item["id"]
+    current = f"\nRight now: {item['notes']}" if item.get("notes") else ""
+    await reply(
+        f"What should I remember about {item['name']}? E.g. a size or a brand. "
+        f"Send '-' to remove the note.{current}"
+    )
+
+
+async def handle_note_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle "📝 Note" under an item: ask for the note."""
+    query = update.callback_query
+    await query.answer()
+    item = crud.get_item_by_id(int(query.data.split(":", 1)[1]))
+    if not item:
+        await query.message.reply_text("That item no longer exists.")
+        return
+    await _ask_for_note(query.message.reply_text, context, item)
+
+
+async def note_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /note [item] — write down something to remember about an item (a size, a brand)."""
+    name = " ".join(context.args).strip()
+    if name:
+        item = crud.get_item(name)
+        if not item:
+            await update.message.reply_text(f"I don't have an item called '{name}' yet.")
+            return
+        await _ask_for_note(update.message.reply_text, context, item)
+        return
+    context.chat_data.pop("note_item", None)
+    context.chat_data["note_pick"] = True
+    await update.message.reply_text("Which item is the note for? Type its name.")
+
+
+async def _handle_note_pick(update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """A confirmed typed item name after /note: ask for the note on it."""
+    name = update.message.text.strip()
+    item = crud.get_item(name)
+    if not item:
+        await update.message.reply_text(f"I don't have an item called '{name}'. Type its name as on /list_items.")
+        return
+    await _ask_for_note(update.message.reply_text, context, item)
+
+
+async def _handle_note_answer(update, context: ContextTypes.DEFAULT_TYPE, item_id: int) -> None:
+    """A confirmed typed note: save it ('-' removes it)."""
+    item = crud.get_item_by_id(item_id)
+    if not item:
+        await update.message.reply_text("That item no longer exists.")
+        return
+    text = update.message.text.strip()
+    note = None if text == "-" else text
+    crud.set_item_note(item["name"], note)
+    await update.message.reply_text(
+        f"📝 Saved for {item['name']}: {note}" if note else f"Note removed from {item['name']}."
+    )
 
 
 async def handle_fix(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -705,6 +773,12 @@ def _pending_question(context: ContextTypes.DEFAULT_TYPE) -> tuple[str, object, 
     confirmation prompt. A category question is buttons-only, so text never
     answers it.
     """
+    note_item = context.chat_data.get("note_item")
+    if note_item:
+        item = crud.get_item_by_id(note_item) or {}
+        return "note", note_item, f"the note for {item.get('name', 'that item')}"
+    if context.chat_data.get("note_pick"):
+        return "note_pick", True, "which item the note is for"
     onboarding = context.chat_data.get("onboarding")
     if onboarding:
         return "onboarding", onboarding.get("stage"), "your monthly budget"
@@ -732,7 +806,12 @@ def _pending_question(context: ContextTypes.DEFAULT_TYPE) -> tuple[str, object, 
 
 async def _answer_pending_question(update, context: ContextTypes.DEFAULT_TYPE, kind: str) -> None:
     """Hand a confirmed typed answer to the handler for that kind of question."""
-    if kind == "onboarding":
+    if kind == "note":
+        await _handle_note_answer(update, context, context.chat_data.pop("note_item"))
+    elif kind == "note_pick":
+        context.chat_data.pop("note_pick", None)
+        await _handle_note_pick(update, context)
+    elif kind == "onboarding":
         await _handle_onboarding_text(update, context, context.chat_data["onboarding"])
     elif kind == "goal":
         await _handle_goal_answer(update, context, context.chat_data["awaiting_goal"])
@@ -750,12 +829,19 @@ def _typed_purchase_store(name: str, unit_price: float) -> str | None:
     return expenses.guess_store(name, item.get("product") if item else None, unit_price)
 
 
+def _split_note(line: str) -> tuple[str, str | None]:
+    """Split "Push Up Bra 35.90 // UK/USA 34B" into the line and its note (None without "//")."""
+    line, sep, note = line.partition("//")
+    return line.strip(), (note.strip() or None) if sep else None
+
+
 def _preview_list_lines(text: str) -> list[str]:
     """Describe what _apply_list_lines would do with each line, without writing anything."""
     preview = []
     for line in (line.strip() for line in text.splitlines()):
         if not line:
             continue
+        line, note = _split_note(line)
         if line.startswith("-"):
             name = line[1:].strip()
             preview.append(f"• remove {name} from your shopping list" if name else f"• skip '{line}' (not understood)")
@@ -771,6 +857,10 @@ def _preview_list_lines(text: str) -> list[str]:
             preview.append(f"• log a purchase: {qty}x {name} at €{unit_price:.2f} each{where}")
         else:
             preview.append(f"• add {qty}x {name} to your shopping list")
+        if note:
+            preview[-1] += f"\n  📝 new note: {note}"
+        else:
+            preview[-1] += _note_line(crud.get_item(name)).replace("\n", "\n  ")
     return preview
 
 
@@ -785,6 +875,7 @@ def _apply_list_lines(text: str) -> tuple[list[str], list[int] | None]:
     replies = []
     new_item_ids = None
     for line in (line for line in text.splitlines() if line.strip()):
+        line, note = _split_note(line)
         stripped = line.strip()
         if stripped.startswith("-"):
             name = stripped[1:].strip()
@@ -807,13 +898,21 @@ def _apply_list_lines(text: str) -> tuple[list[str], list[int] | None]:
                 name, qty, unit_price, store=_typed_purchase_store(name, unit_price),
                 category=infer_category(name), matched_list_item=name,
             )
+            if note:
+                crud.set_item_note(name, note)
+                line += f"\n  📝 {note}"
             replies.append(line)
             new_item_ids = new_item_ids or []
             if is_new and (logged := crud.get_item(name)):
                 new_item_ids.append(logged["id"])
             continue
         shopping_list.add_item(name, qty, category=infer_category(name))
-        replies.append(f"Added {qty}x {name} to your shopping list.")
+        reply = f"Added {qty}x {name} to your shopping list."
+        if note:
+            # Notes live on the item, which exists once it's been bought.
+            reply += (f"\n  📝 {note}" if crud.set_item_note(name, note)
+                      else "\n  (note not saved — I can keep notes once you've bought it)")
+        replies.append(reply)
     return replies, new_item_ids
 
 
@@ -921,7 +1020,8 @@ async def show_shopping_list(update: Update, context: ContextTypes.DEFAULT_TYPE)
         by_category.setdefault(category, []).append(item)
     sections = []
     for category in sorted(by_category, key=lambda c: (c == "Other", c)):
-        lines = [f"• {i['name']} ({i['quantity']}x)" for i in by_category[category]]
+        lines = [f"• {i['name']} ({i['quantity']}x){_note_line(crud.get_item(i['name']))}"
+                 for i in by_category[category]]
         sections.append(f"{category}:\n" + "\n".join(lines))
     await update.message.reply_text("Shopping list:\n\n" + "\n\n".join(sections))
 
@@ -1168,7 +1268,7 @@ async def check_expiring_items(context: ContextTypes.DEFAULT_TYPE) -> bool:
             await context.bot.send_message(
                 chat_id=chat_id,
                 text=f"Quick check — do you still have {_need_name(item)} ({item['name']}), or did it "
-                     "run out? Reply 'yes' or 'no'.",
+                     f"run out? Reply 'yes' or 'no'.{_note_line(item)}",
             )
             return True
     return False
@@ -1202,11 +1302,12 @@ def _spare_alert_text(item: dict, now: datetime) -> str:
     bought = "today" if days_ago == 0 else f"{days_ago} day{'s' if days_ago != 1 else ''} ago"
     qty = item.get("last_quantity") or 1
     need = _need_name(item)
+    store = f" at {item['last_store']}" if item.get("last_store") else ""
     return (
-        f"{need.capitalize()} — you last bought {qty}x {item['name']} {bought}, and one "
+        f"{need.capitalize()} — you last bought {qty}x {item['name']}{store} {bought}, and one "
         f"usually lasts about {item['shelf_life_days']} days, so you're about to be down to "
         "your last one.\n"
-        f"You keep a spare of {need}. Add it to the shopping list?"
+        f"You keep a spare of {need}. Add it to the shopping list?{_note_line(item)}"
     )
 
 
@@ -1216,6 +1317,7 @@ def _spare_alert_keyboard(item_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("👍 Still have plenty", callback_data=f"spare_plenty:{item_id}")],
         [InlineKeyboardButton("✏️ It lasts longer than that", callback_data=f"shelf_edit:{item_id}")],
         [InlineKeyboardButton("🔕 Stop spare alerts for this", callback_data=f"spare_stop:{item_id}")],
+        [InlineKeyboardButton("📝 Note", callback_data=f"note:{item_id}")],
     ])
 
 
@@ -1685,6 +1787,7 @@ async def main():
     app.add_handler(CommandHandler("total_spent", total_spent))
     app.add_handler(CommandHandler("par_level", par_level_cmd))
     app.add_handler(CommandHandler("rename", rename_cmd))
+    app.add_handler(CommandHandler("note", note_cmd))
     app.add_handler(CommandHandler("set_budget", set_budget_cmd))
     app.add_handler(CommandHandler("set_goal", set_goal_cmd))
     app.add_handler(CommandHandler("report", report))
@@ -1698,6 +1801,7 @@ async def main():
     app.add_handler(CallbackQueryHandler(handle_fix, pattern=r"^fix:"))
     app.add_handler(CallbackQueryHandler(handle_fix_ok, pattern=r"^fixok$"))
     app.add_handler(CallbackQueryHandler(handle_kind_set, pattern=r"^kind_set:"))
+    app.add_handler(CallbackQueryHandler(handle_note_button, pattern=r"^note:"))
     app.add_handler(CallbackQueryHandler(handle_name_category, pattern=r"^name_cat:"))
     app.add_handler(CallbackQueryHandler(handle_profile_shelf_choice, pattern=r"^profile_shelf:"))
     app.add_handler(CallbackQueryHandler(handle_shelf_edit, pattern=r"^shelf_edit:"))
