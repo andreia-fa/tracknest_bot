@@ -309,14 +309,14 @@ def get_checkin_candidates():
     about, timed from that purchase.
 
     Returns:
-        List of dicts: name, product, shelf_life_days, notes, last_purchase
+        List of dicts: id, name, product, shelf_life_days, notes, last_purchase
         (ISO datetime of the product's most recent expense, or None if never
         purchased) and last_store (where, if known).
     """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(f"""
-        SELECT i.name, i.product, i.shelf_life_days, i.notes, e.logged_at AS last_purchase, e.store AS last_store
+        SELECT i.id, i.name, i.product, i.shelf_life_days, i.notes, e.logged_at AS last_purchase, e.store AS last_store
         FROM inventory_items i
         {_LATEST_PRODUCT_PURCHASE_JOIN}
         WHERE i.treat_or_need = 'need'

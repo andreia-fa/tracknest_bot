@@ -1,7 +1,6 @@
 """Item notes (e.g. a bra size to buy again), on a real SQLite file."""
 
 import sqlite3
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -78,7 +77,7 @@ async def test_note_typed_with_a_purchase(db):
 
 
 @pytest.mark.asyncio
-async def test_list_and_reminders_show_the_note(db):
+async def test_list_shows_the_note(db):
     crud.set_item_note("Push Up Bra", "UK/USA 34B")
     shopping_list.add_item("push up bra", 1, category="Clothing")
     update = _text("/list")
@@ -86,10 +85,6 @@ async def test_list_and_reminders_show_the_note(db):
     await main.show_shopping_list(update, _context())
 
     assert "• push up bra (1x)\n  📝 Push Up Bra — UK/USA 34B" in update.message.reply_text.call_args.args[0]
-    item = {"name": "Push Up Bra", "product": "bra", "shelf_life_days": 120, "last_quantity": 1,
-            "last_purchase": "2026-09-23T17:32:26+00:00", "last_store": "Intimissimi", "notes": "UK/USA 34B"}
-    text = main._spare_alert_text(item, datetime(2026, 10, 3, tzinfo=timezone.utc))
-    assert "Intimissimi" not in text and text.endswith("📝 Push Up Bra — UK/USA 34B")
 
 
 @pytest.mark.asyncio
@@ -136,20 +131,22 @@ def test_a_dont_buy_cheese_never_lends_its_no_reminders_profile(db):
 
 
 @pytest.mark.asyncio
-async def test_cheese_reminders_name_the_product_and_every_cheese_note(db):
+async def test_checkin_asks_about_the_product_with_buttons(db):
     _cheeses()
-    leerdammer = {**crud.get_item("LEERDAMMER CAR."), "last_quantity": 1, "last_store": "Lidl",
-                  "last_purchase": "2026-09-01T10:00:00+00:00"}
-    spare = main._spare_alert_text(leerdammer, datetime(2026, 10, 3, tzinfo=timezone.utc))
+    leerdammer = {**crud.get_item("LEERDAMMER CAR."), "last_purchase": "2026-09-01T10:00:00+00:00"}
     context = _context()
     with patch("bot.main.settings.get_chat_id", return_value=1), \
-            patch("bot.main.crud.get_checkin_candidates", return_value=[leerdammer]), \
-            patch("bot.main.crud.mark_checkin_pending"):
+            patch("bot.main.crud.get_checkin_candidates", return_value=[leerdammer]):
         await main.check_expiring_items(context)
-    checkin = context.bot.send_message.call_args.kwargs["text"]
 
-    for text in (spare, checkin):
-        assert "LEERDAMMER CAR. —" in text  # only as one of the notes to pick by
-        assert text.split("\n")[0].count("LEERDAMMER") == 0
-        assert "Milram Käse Scheiben — ⭐ Favourite" in text and "J.Tag Emmental" in text
-        assert "Lidl" not in text
+    sent = context.bot.send_message.call_args.kwargs
+    assert sent["text"] == "Do you still have cheese?"  # no brand, no notes
+    buttons = [b.callback_data for row in sent["reply_markup"].inline_keyboard for b in row]
+    assert buttons == [f"checkin:yes:{leerdammer['id']}", f"checkin:no:{leerdammer['id']}"]
+
+    await main.handle_checkin_choice(tap := _tap(f"checkin:no:{leerdammer['id']}"), context)
+    assert tap.callback_query.edit_message_text.call_args.args[0] == "Noted — cheese ran out."
+    assert crud.get_item("LEERDAMMER CAR.")["checkin_pending"] == 0
+
+    await main.handle_checkin_choice(again := _tap(f"checkin:yes:{leerdammer['id']}"), context)
+    again.callback_query.edit_message_text.assert_called_once_with("Already answered — thanks.")

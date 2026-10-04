@@ -36,14 +36,9 @@ def test_alert_waits_for_spares_already_bought():
     assert main._spare_alert_at(last, 20, 3) == last + timedelta(days=37)
 
 
-@patch("bot.main.crud")
-def test_alert_text_shows_its_reasoning(mock_crud):
-    mock_crud.get_noted_items.return_value = []
-    text = main._spare_alert_text(_candidate(days_ago=18), NOW)
-    assert text.startswith("Cheese — you last bought some 18 days ago")
-    assert "LEERDAMMER" not in text  # the product to buy, not the brand last bought
-    assert "spare of cheese" in text
-    assert "20 days" in text
+def test_alert_text_names_the_product_not_the_brand():
+    text = main._spare_alert_text(_candidate(days_ago=18))
+    assert text == "Running low on cheese — you'll be on your last one soon. Add cheese to the shopping list?"
 
 
 @pytest.mark.asyncio

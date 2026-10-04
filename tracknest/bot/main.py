@@ -604,11 +604,6 @@ def _related_notes(entry: str) -> str:
     return "".join(lines)
 
 
-def _note_line(item: dict | None) -> str:
-    """"\n📝 <note>" for an item with a note — e.g. the size to buy again — else ""."""
-    return f"\n📝 {item['notes']}" if item and item.get("notes") else ""
-
-
 async def _ask_for_note(reply, context: ContextTypes.DEFAULT_TYPE, item: dict) -> None:
     """Start waiting for the typed note on an item (confirmed like any typed message)."""
     context.chat_data.pop("note_pick", None)
@@ -828,25 +823,50 @@ _CHECKIN_YES_WORDS = {"yes", "y", "still good", "still lasts", "still have it"}
 _CHECKIN_EXTEND_DAYS = 3
 
 
-async def _handle_checkin_answer(update: Update, context: ContextTypes.DEFAULT_TYPE, item_name: str):
-    """Interpret a plain-text reply to a pending shelf-life check-in.
+def _apply_checkin_answer(item: dict, still_have: bool) -> tuple[str, InlineKeyboardMarkup | None]:
+    """Record a check-in answer and say what happened, in product terms ("cheese", not the brand).
 
-    A "still good" answer means the estimate was too short — push it out a
-    few days so the next check-in isn't immediate, while a real early
+    A "still have it" answer means the estimate was too short — push it out
+    a few days so the next check-in isn't immediate, while a real early
     repurchase (if one happens) will keep correcting it down via the usual
-    signal in expenses.log_expense.
+    signal in expenses.log_expense. A "no" offers to put it on the list.
     """
+    crud.mark_checkin_pending(item["name"], pending=False)
+    need = _need_name(item)
+    if still_have:
+        crud.bump_shelf_life(item["name"], _CHECKIN_EXTEND_DAYS)
+        return f"Good — I'll ask about {need} again later.", None
+    return f"Noted — {need} ran out.", InlineKeyboardMarkup(
+        [[InlineKeyboardButton(f"🛒 Add {need} to list", callback_data=f"spare_add:{item['id']}")]]
+    )
+
+
+async def _handle_checkin_answer(update: Update, context: ContextTypes.DEFAULT_TYPE, item_name: str):
+    """Interpret a typed reply to a pending check-in (the ✅/❌ buttons are the usual way)."""
     text = update.message.text.strip().lower()
-    crud.mark_checkin_pending(item_name, pending=False)
+    item = crud.get_item(item_name)
     if text in _CHECKIN_NO_WORDS or "no" in text.split():
-        await update.message.reply_text(f"Thanks — noted {item_name} ran out.")
+        still_have = False
+    elif text in _CHECKIN_YES_WORDS or "yes" in text.split():
+        still_have = True
+    else:
+        await update.message.reply_text("Reply 'yes' or 'no'.")
         return
-    if text in _CHECKIN_YES_WORDS or "yes" in text.split():
-        crud.bump_shelf_life(item_name, _CHECKIN_EXTEND_DAYS)
-        await update.message.reply_text(f"Good to know — I'll check back on {item_name} again later.")
+    reply, markup = _apply_checkin_answer(item, still_have)
+    await update.message.reply_text(reply, reply_markup=markup)
+
+
+async def handle_checkin_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle ✅/❌ under "Do you still have cheese?"."""
+    query = update.callback_query
+    await query.answer()
+    _prefix, answer, item_id = query.data.split(":", 2)
+    item = crud.get_item_by_id(int(item_id))
+    if not item or not item["checkin_pending"]:
+        await query.edit_message_text("Already answered — thanks.")
         return
-    await update.message.reply_text("Reply 'yes' or 'no'.")
-    crud.mark_checkin_pending(item_name, pending=True)
+    reply, markup = _apply_checkin_answer(item, answer == "yes")
+    await query.edit_message_text(reply, reply_markup=markup)
 
 
 def _pending_question(context: ContextTypes.DEFAULT_TYPE) -> tuple[str, object, str] | None:
@@ -1380,8 +1400,11 @@ async def check_expiring_items(context: ContextTypes.DEFAULT_TYPE) -> bool:
             crud.mark_checkin_pending(item["name"])
             await context.bot.send_message(
                 chat_id=chat_id,
-                text=f"Quick check — do you still have {_need_name(item)}, or did it "
-                     f"run out? Reply 'yes' or 'no'.{_kind_notes(item)}",
+                text=f"Do you still have {_need_name(item)}?",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("✅ Yes", callback_data=f"checkin:yes:{item['id']}"),
+                    InlineKeyboardButton("❌ No", callback_data=f"checkin:no:{item['id']}"),
+                ]]),
             )
             return True
     return False
@@ -1410,28 +1433,9 @@ def _need_name(item: dict) -> str:
     return item.get("product") or item["name"]
 
 
-def _kind_notes(item: dict) -> str:
-    """Notes to pick by in the store: every item of this product's kind, or the item's own note.
-
-    A reminder is about the product (cheese), not the brand last bought
-    (LEERDAMMER CAR.) — so it shows the favourites and don't-buys across
-    brands rather than one brand's note.
-    """
-    if not item.get("product"):
-        return _note_line(item)
-    notes = _related_notes(item["product"])
-    return f"\n{notes.lstrip(chr(10))}" if notes else ""
-
-
-def _spare_alert_text(item: dict, now: datetime) -> str:
-    days_ago = (now - datetime.fromisoformat(item["last_purchase"])).days
-    bought = "today" if days_ago == 0 else f"{days_ago} day{'s' if days_ago != 1 else ''} ago"
+def _spare_alert_text(item: dict) -> str:
     need = _need_name(item)
-    return (
-        f"{need.capitalize()} — you last bought some {bought}, and one usually lasts about "
-        f"{item['shelf_life_days']} days, so you're about to be down to your last one.\n"
-        f"You keep a spare of {need}. Add it to the shopping list?{_kind_notes(item)}"
-    )
+    return f"Running low on {need} — you'll be on your last one soon. Add {need} to the shopping list?"
 
 
 def _spare_alert_keyboard(item_id: int) -> InlineKeyboardMarkup:
@@ -1468,7 +1472,7 @@ async def check_spare_stock_alerts(context: ContextTypes.DEFAULT_TYPE) -> bool:
             crud.mark_spare_alert_pending(item["name"])
             await context.bot.send_message(
                 chat_id=chat_id,
-                text=_spare_alert_text(item, now),
+                text=_spare_alert_text(item),
                 reply_markup=_spare_alert_keyboard(item["id"]),
             )
             return True
@@ -1938,6 +1942,7 @@ async def main():
     app.add_handler(CallbackQueryHandler(handle_shelf_set, pattern=r"^shelf_set:"))
     app.add_handler(CallbackQueryHandler(handle_spare_alert_choice, pattern=r"^spare_(add|plenty|stop):"))
     app.add_handler(CallbackQueryHandler(handle_typed_choice, pattern=r"^typed:"))
+    app.add_handler(CallbackQueryHandler(handle_checkin_choice, pattern=r"^checkin:(yes|no):"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_error_handler(handle_error)
