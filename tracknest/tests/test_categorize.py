@@ -105,3 +105,7 @@ def test_pastries_are_pastries_whatever_the_filling(name):
 def test_a_pizza_place_is_fast_food_whatever_it_sold():
     from bot.categorize import is_fast_food
     assert is_fast_food("Giulia Pizza GmbH", "Margherita")
+
+
+def test_a_plant_based_burger_is_a_ready_meal_not_meat():
+    assert infer_category("Plant-Based Hamburger Remove Mustard Extra Plant-Based Patty") == "Ready Meals"

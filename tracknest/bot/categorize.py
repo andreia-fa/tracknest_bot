@@ -36,7 +36,8 @@ _CATEGORIES: list[tuple[str, list[str]]] = [
     ("Ready Meals", [
         "ready meal", "fertiggericht", "refeição pronta", "refeicao pronta",
         "prato pronto", "sushi", "maki", "nigiri", "california", "calif",
-        "pizza", "lasagne", "lasagna", "sandwich",
+        "pizza", "lasagne", "lasagna", "sandwich", "burger", "whopper", "patty",
+        "nuggets", "döner", "doner", "kebab",
     ]),
     ("Fruits/Veg", [
         "banana", "banane", "apple", "apfel", "maçã", "maca", "tomato", "tomate",
