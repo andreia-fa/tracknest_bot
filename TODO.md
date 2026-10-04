@@ -1,5 +1,26 @@
 # TODO
 
+## 💡 Design (2026-10-04) — favourites nudge, NOT built yet: agree the design first
+User: reminders say just the product ("Do you still have cheese?" — done,
+`5f46abf`); favourites stay with the bot and come back as a separate, smart
+nudge. User wants both kinds ("Isn't it time to treat yourself with …?" and
+"you haven't bought your favourite in a while, still your favourite?"),
+alternating, and said "favourite changes… marks offer different things… we
+have to cleverly think about this feature." Proposal, waiting for feedback:
+- **Trigger by purchases, not days:** count how many times that product
+  (cheese) was bought since the favourite last was. "Cheese 5 times since
+  your last Milram" adapts to how often you buy it; a fixed 45 days doesn't.
+- **First nudge = treat:** "Isn't it time for Milram again? ⭐" →
+  🛒 add the product to the list (with "Milram" as a hint) / not now.
+- **Ignored or skipped twice → ask if it's still a favourite**, and if one
+  other brand of that product dominates since, suggest it: "You mostly buy
+  Leerdammer now — make it your favourite?" (moves the ⭐).
+- **Offers:** no offer data without an API (no paid APIs). What we can do:
+  when a receipt shows a favourite cheaper than its usual price, say so on
+  that receipt ("Milram €0.60 below usual at Lidl"). Reactive, no extra msg.
+- **Frequency:** lowest priority in `proactive_round`, one favourite nudge
+  per week max, never for 🚫 items.
+
 ## 💡 Idea (2026-10-03) — travel trips, later
 User: "maybe in the future we will also count trips? for now, i don't have
 any." Shopping trips (to buy what's needed, incl. Intimissimi) are counted
