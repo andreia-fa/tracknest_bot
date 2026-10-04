@@ -485,6 +485,46 @@ def get_shopping_trips(year=None, month=None):
     }
 
 
+def get_fast_food(year=None, month=None):
+    """Return a month's fast-food meals — counted per trip, so burger, fries and a drink are one meal.
+
+    What counts as fast food is categorize.is_fast_food (the store or the
+    product). Trips group like get_shopping_trips: by trip_key, else one per
+    store per day.
+
+    Args:
+        year: Calendar year. Defaults to the current month.
+        month: Calendar month (1-12). Defaults to the current month.
+
+    Returns:
+        Dict with keys meals (int), total (euros) and last_day (ISO date of
+        the most recent fast-food meal ever, not just this month; None if
+        there's never been one).
+    """
+    from bot.categorize import is_fast_food
+
+    now = datetime.now(tz=timezone.utc)
+    prefix = f"{year or now.year:04d}-{month or now.month:02d}"
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT COALESCE(e.trip_key, e.purchase_date || '|' || COALESCE(e.store, '')) AS trip,
+               e.purchase_date AS day, e.store AS store, i.name AS name, i.product AS product,
+               e.quantity_purchased * e.unit_price AS total
+        FROM item_expenses e
+        JOIN inventory_items i ON i.id = e.item_id
+    """)
+    rows = [r for r in cursor.fetchall() if is_fast_food(r["store"], r["name"], r["product"])]
+    cursor.close()
+    conn.close()
+    in_month = [r for r in rows if r["day"].startswith(prefix)]
+    return {
+        "meals": len({r["trip"] for r in in_month}),
+        "total": sum(float(r["total"]) for r in in_month),
+        "last_day": max((r["day"] for r in rows), default=None),
+    }
+
+
 def get_daily_spend(year=None, month=None):
     """Return spend per calendar day of a month, zero-filled.
 

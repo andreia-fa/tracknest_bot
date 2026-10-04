@@ -40,6 +40,7 @@ def sample_data(**overrides) -> dict:
 @patch("bot.dashboard.metrics.get_price_trends", return_value=[])
 @patch("bot.dashboard.metrics.get_running_low", return_value=[])
 @patch("bot.dashboard.metrics.get_daily_spend", return_value=[0.0] * 30)
+@patch("bot.dashboard.metrics.get_fast_food", return_value={"meals": 0, "total": 0.0, "last_day": None})
 @patch("bot.dashboard.metrics.get_shopping_trips")
 @patch("bot.dashboard.metrics.get_budget_status", return_value=None)
 @patch("bot.dashboard.metrics.get_month_pace")
@@ -185,3 +186,21 @@ def test_each_trip_dot_says_which_trip_it_is():
     assert 'title="21 Sep · Yormas · €1.00 · top-up"' in html
     shared = re.findall(r'<div class="shared">(.*?)</div></section>', html, re.S)[0]
     assert 'title="21 Sep · Yormas · top-up"' in shared and "€" not in shared
+
+
+def test_fast_food_tile_counts_meals_against_last_month():
+    august = sample_data(month_label="August 2026", is_current=False,
+                         fast_food={"meals": 3, "total": 30.0, "last_day": "2026-08-30"})
+    september = sample_data(fast_food={"meals": 1, "total": 12.5, "last_day": "2026-09-20"})
+    html = dashboard._tiles(september, august, amounts=True)
+    assert "Fast food" in html
+    assert "1<span class=\"of\"> meal</span>" in html
+    assert "3 in Aug" in html
+    assert "12.50" in html
+    assert "12.50" not in dashboard._tiles(september, august, amounts=False)
+
+
+def test_fast_food_tile_without_any_yet():
+    html = dashboard._tiles(sample_data(), None, amounts=True)
+    assert "0<span class=\"of\"> meals</span>" in html
+    assert "None logged yet" in html

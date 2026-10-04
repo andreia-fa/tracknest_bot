@@ -315,3 +315,18 @@ def test_an_unanswered_what_is_it_question_needs_attention(db):
     crud.set_lasts("Koreanische Alge", "days", 14)
     crud.mark_name_pending("Koreanische Alge")  # guessed, but "what is it?" still open
     assert metrics.get_inventory_health()["unprofiled"] == ["Koreanische Alge"]
+
+
+def test_fast_food_is_one_meal_per_trip_by_store_or_product(db):
+    _visit([("Whopper", 6.99, "Other"), ("Cola", 2.99, "Beverages")], "Burger King", 3, trip_key="receipt:1")
+    _visit([("Steinofen Pizza", 2.49, "Ready Meals"), ("Banane", 1.20, "Fruits/Veg")], "REWE", 10, trip_key="receipt:2")
+    _visit([("Brokkoli", 1.50, "Fruits/Veg")], "REWE", 12, trip_key="receipt:3")
+    food = metrics.get_fast_food(2026, 9)
+    assert food["meals"] == 2
+    assert food["total"] == pytest.approx(6.99 + 2.99 + 2.49)
+    assert food["last_day"] == "2026-09-10"
+
+
+def test_fast_food_last_day_looks_past_the_month(db):
+    _visit([("Big Mac", 5.49, "Other")], "McDonald's", 28, trip_key="typed:a")
+    assert metrics.get_fast_food(2026, 10) == {"meals": 0, "total": 0.0, "last_day": "2026-09-28"}

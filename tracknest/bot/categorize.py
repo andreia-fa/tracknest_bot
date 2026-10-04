@@ -136,6 +136,28 @@ PURPOSES: dict[str, tuple[str, ...]] = {
 }
 
 
+# Fast food is meant to stay rare, so it's counted on its own — across
+# categories, since a Burger King receipt says "Whopper", not "Ready Meals".
+# Recognised by the store (any purchase there) or by the product, wherever
+# it was bought. Substring match, so "Cheeseburger" and "Pizzeria" count.
+_FAST_FOOD_STORES = (
+    "burger king", "mcdonald", "mc donald", "kfc", "subway", "domino",
+    "pizza hut", "five guys", "popeyes", "taco bell", "wendy's",
+    "pizzeria", "döner", "doner", "kebab", "imbiss",
+)
+_FAST_FOOD_PRODUCTS = (
+    "pizza", "burger", "whopper", "big mac", "nugget", "pommes", "fries",
+    "döner", "doner", "kebab", "hot dog", "hotdog", "currywurst",
+)
+
+
+def is_fast_food(store: str | None, name: str, product: str | None = None) -> bool:
+    """Whether a purchase is fast food: bought at a fast-food place, or a fast-food product anywhere."""
+    where = (store or "").lower()
+    what = f"{name} {product or ''}".lower()
+    return any(k in where for k in _FAST_FOOD_STORES) or any(k in what for k in _FAST_FOOD_PRODUCTS)
+
+
 def purpose_of(category: str | None) -> str:
     """The purpose ("Food", "Leisure", ...) a category belongs to; "Other" if it's unknown."""
     return next((p for p, cats in PURPOSES.items() if category in cats), "Other")

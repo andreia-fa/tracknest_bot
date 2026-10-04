@@ -46,7 +46,7 @@ def build_month_data(year: int, month: int) -> dict:
         Dict with keys: key ("YYYY-MM"), is_current, month_label, day,
         days_in_month, spent, projected, budget (dict or None), mix ({need,
         treat, unknown} in euros), categories (list of {name, total}), trips
-        and daily (euros per day).
+        fast_food ({meals, total, last_day}) and daily (euros per day).
     """
     now = datetime.now(tz=timezone.utc)
     is_current = (year, month) == (now.year, now.month)
@@ -76,6 +76,7 @@ def build_month_data(year: int, month: int) -> dict:
         "categories": categories,
         "purposes": _purposes(spending["top_categories"]),
         "trips": metrics.get_shopping_trips(year, month),
+        "fast_food": metrics.get_fast_food(year, month),
         "daily": metrics.get_daily_spend(year, month),
     }
 
@@ -262,8 +263,25 @@ def _trips_per_week(month: dict | None) -> float | None:
     return month["trips"]["count"] / max(month["day"] - first, 1) * 7
 
 
+def _fast_food_tile(month: dict, previous: dict | None, amounts: bool) -> str:
+    """Fast-food meals this month against last month, and how long since the last one — meant to stay rare."""
+    food = month.get("fast_food") or {"meals": 0, "total": 0.0, "last_day": None}
+    before = (previous or {}).get("fast_food")
+    parts = []
+    if before is not None:
+        parts.append(f'{before["meals"]} in {previous["month_label"][:3]}')
+    if amounts and food["meals"]:
+        parts.append(_eur(food["total"]))
+    if month.get("is_current", True) and food["last_day"]:
+        days = (datetime.now(tz=timezone.utc).date() - datetime.fromisoformat(food["last_day"]).date()).days
+        parts.append("last one today" if days <= 0 else f'last one {days} day{"s" if days != 1 else ""} ago')
+    note = " · ".join(parts) or "None logged yet"
+    unit = "meal" if food["meals"] == 1 else "meals"
+    return _tile("Fast food", f'{food["meals"]}<span class="of"> {unit}</span>', note)
+
+
 def _tiles(month: dict, previous: dict | None, amounts: bool) -> str:
-    """Treats share, trips per week (against last month) and top-up trips — the three numbers to steer by."""
+    """Treats share, trips per week (against last month), top-up trips and fast food — the numbers to steer by."""
     total = month["spent"]
     mix = month["mix"]
     treat_pct = _share(mix["treat"], total)
@@ -297,7 +315,7 @@ def _tiles(month: dict, previous: dict | None, amounts: bool) -> str:
         top = _tile("Top-up trips", f'{len(top_ups)}<span class="of"> of {trips["count"]}</span>', top_note)
     else:
         top = _tile("Top-up trips", "—", "No shopping trips yet")
-    return f'<div class="tiles">{treats}{per_week}{top}</div>'
+    return f'<div class="tiles">{treats}{per_week}{top}{_fast_food_tile(month, previous, amounts)}</div>'
 
 
 def _timeline(month: dict, amounts: bool) -> str:
@@ -563,7 +581,7 @@ _STYLE = """
   .legend-list .lg-name { color: var(--ink-2); }
   .legend-list .lg-amt { grid-column: 2 / 4; font-size: 11px; color: var(--ink-muted); }
   .swatch { width: 10px; height: 10px; border-radius: 2px; }
-  .tiles { display: grid; grid-template-rows: repeat(3, 1fr); gap: 14px; flex: 1; }
+  .tiles { display: grid; grid-template-rows: repeat(4, 1fr); gap: 14px; flex: 1; }
   .tile { padding: 12px 16px; display: flex; flex-direction: column; justify-content: center; }
   .tile-value { font-size: 26px; font-weight: 700; line-height: 1.2; }
   .tile-value .of { font-size: 14px; font-weight: 500; color: var(--ink-muted); }
@@ -619,7 +637,7 @@ _STYLE = """
   @media (max-width: 899px) {
     .grid { grid-template-columns: minmax(0, 1fr); }
     .span-4, .span-6, .span-8, .span-12 { grid-column: auto; }
-    .tiles { grid-template-rows: none; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .tiles { grid-template-rows: none; grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .tile { padding: 10px 12px; }
     .tile h3 { font-size: 11px; }
     .tile-value { font-size: 22px; }

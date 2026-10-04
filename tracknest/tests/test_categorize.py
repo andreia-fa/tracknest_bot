@@ -1,4 +1,6 @@
-from bot.categorize import infer_category
+import pytest
+
+from bot.categorize import infer_category, is_fast_food
 
 
 def test_fruit_veg_matches_across_languages():
@@ -78,3 +80,15 @@ def test_ready_meals():
     assert infer_category("Sushi box") == "Ready Meals"
     assert infer_category("Tiefkühlpizza") == "Ready Meals"
     assert infer_category("Fertiggericht Lasagne") == "Ready Meals"
+
+
+@pytest.mark.parametrize("store, name, expected", [
+    ("Burger King", "Cola", True),
+    ("MCDONALD'S", "Pommes", True),
+    ("REWE", "Steinofen Pizza Salame", True),
+    ("Lidl", "Cheeseburger", True),
+    ("REWE", "Brokkoli", False),
+    (None, "Sushi", False),
+])
+def test_is_fast_food(store, name, expected):
+    assert is_fast_food(store, name) is expected
