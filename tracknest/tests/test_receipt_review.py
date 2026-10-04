@@ -109,3 +109,28 @@ async def test_change_a_price(db):
     reply = await _type("€5,49", context)
     assert "1. 1x Whopper — €5.49" in reply and "Lines add up to €9.48, the receipt says €10.98" in reply
     assert "receipt_edit" not in context.chat_data
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_line_must_be_named_before_saving(db):
+    receipt_id = receipt_queue.queue_receipt(1, "file")
+    receipt_queue.hold_for_review(receipt_id, {
+        "store": "Burger King", "purchase_date": "2026-10-03", "total_paid": 10.98, "items_total": 10.98,
+        "reconciled": True, "items": [
+            {"name": "Whopper", "unsure": True, "quantity": 1, "unit_price": 6.99, "category": "Other", "product": "burger"},
+            {"name": "", "unsure": True, "quantity": 1, "unit_price": 3.99, "category": "Other", "product": ""},
+        ]})
+    text, markup = main.receipt_review(receipt_id, receipt_queue.get_review(receipt_id))
+    assert "1. 1x Whopper — €6.99 ⚠️ hard to read" in text and "❓ couldn't read the name" in text
+    assert "before I can save" in text
+    assert all(b.callback_data != f"rcpt:ok:{receipt_id}" for row in markup.inline_keyboard for b in row)
+
+    context = _context()
+    await _tap(f"rcpt:ok:{receipt_id}", context)  # an old ✅ can't sneak it through
+    assert crud.get_item_names() == []
+
+    await _tap(f"rcpt:rename:{receipt_id}:1", context)
+    reply = await _type("Pommes", context)
+    assert "❓" not in reply and "2. 1x Pommes — €3.99" in reply
+    await _tap(f"rcpt:ok:{receipt_id}", context)
+    assert sorted(crud.get_item_names()) == ["Pommes", "Whopper"]

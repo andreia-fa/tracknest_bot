@@ -50,7 +50,15 @@ _RESPONSE_SCHEMA = {
                             "Item name as printed on the receipt, cleaned up into a "
                             "readable product name. Only the product itself — never "
                             "the quantity, price, or tax-code digit/letter printed "
-                            "beside it."
+                            "beside it. Empty string if you can't read it — never "
+                            "guess or invent a name."
+                        ),
+                    },
+                    "unsure": {
+                        "type": "boolean",
+                        "description": (
+                            "True if any part of this line (name, quantity or price) "
+                            "was hard to read, so the shopper should check it."
                         ),
                     },
                     "quantity": {"type": "integer", "description": "Units purchased"},
@@ -87,7 +95,7 @@ _RESPONSE_SCHEMA = {
                         ),
                     },
                 },
-                "required": ["name", "quantity", "unit_price", "category", "product"],
+                "required": ["name", "unsure", "quantity", "unit_price", "category", "product"],
             },
         },
         "total_paid": {
@@ -246,6 +254,10 @@ def parse_receipt(image_bytes: bytes) -> dict:
         "€4.45 is the total for both units, not €4.45 each). Find the "
         "mismatched line and correct it so the numbers reconcile before "
         "giving your final answer.\n\n"
+        "Only write what is printed on this receipt. If you can't read a "
+        "line's name, leave the name empty; if any part of a line is hard to "
+        "read, set unsure to true. Never guess or fill in — the shopper will "
+        "be asked about those lines.\n\n"
         "For each item, also say what it generically is (product): use what "
         "you know about brands and German/Portuguese/English grocery names, so "
         "a brand-only line like 'LEERDAMMER CAR' still becomes 'cheese'."

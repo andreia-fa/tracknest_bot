@@ -1593,10 +1593,14 @@ def receipt_review(receipt_id: int, parsed: dict) -> tuple[str, InlineKeyboardMa
         datetime.fromisoformat(parsed["purchase_date"]).strftime("%-d %b") if parsed.get("purchase_date") else None,
     ) if part)
     lines = [f"🧾 Receipt read{f' ({where})' if where else ''} — check it before I save anything:"]
+    unnamed = 0
     for i, item in enumerate(items):
         line = _line_text(i, item)
         if is_code_only(item["name"]):
-            line += " ⚠️ no readable name"
+            unnamed += 1
+            line += " ❓ couldn't read the name"
+        elif item.get("unsure"):
+            line += " ⚠️ hard to read — check it"
         lines.append(line)
     if not items:
         lines.append("(no lines left)")
@@ -1608,7 +1612,13 @@ def receipt_review(receipt_id: int, parsed: dict) -> tuple[str, InlineKeyboardMa
         lines.append(f"\nTotal €{total:.2f}" + (" ✓ matches the receipt" if paid is not None else ""))
     if not parsed.get("purchase_date"):
         lines.append("⚠️ No date read — it'll be logged as bought today.")
-    buttons = [[InlineKeyboardButton("✅ Save all", callback_data=f"rcpt:ok:{receipt_id}")]] if items else []
+    if unnamed:
+        # Never saved under a made-up name: the user names or removes it first.
+        which = "the line" if unnamed == 1 else f"the {unnamed} lines"
+        lines.append(f"❓ Tell me what {which} without a name {'is' if unnamed == 1 else 'are'} "
+                     "(✏️ Fix a line) before I can save.")
+    buttons = ([[InlineKeyboardButton("✅ Save all", callback_data=f"rcpt:ok:{receipt_id}")]]
+               if items and not unnamed else [])
     if items:
         buttons.append([InlineKeyboardButton("✏️ Fix a line", callback_data=f"rcpt:fix:{receipt_id}")])
     buttons.append([InlineKeyboardButton("❌ Discard the whole receipt", callback_data=f"rcpt:cancel:{receipt_id}")])
@@ -1638,6 +1648,8 @@ async def handle_receipt_review(update: Update, context: ContextTypes.DEFAULT_TY
     i = int(index) if index else None
     if i is not None and not 0 <= i < len(items):
         action = "back"
+    if action == "ok" and any(is_code_only(item["name"]) for item in items):
+        action = "back"  # an old preview's ✅ — a line still needs its name
     if action == "ok":
         context.chat_data.pop("receipt_edit", None)
         reply, markup = await process_receipt_result(parsed, receipt_id=receipt_id)
@@ -1711,6 +1723,7 @@ async def _edit_receipt_line(message, context: ContextTypes.DEFAULT_TYPE) -> Non
         item["name"] = name
         # The model's product was read for the wrong name.
         item["product"] = ""
+    item["unsure"] = False
     context.chat_data.pop("receipt_edit")
     _set_review(target["receipt_id"], parsed)
     text, markup = receipt_review(target["receipt_id"], parsed)
