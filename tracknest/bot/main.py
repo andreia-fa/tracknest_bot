@@ -1413,7 +1413,7 @@ async def handle_typed_choice(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 def _shopping_list_text() -> str:
-    """The current shopping list, grouped by category, as one message."""
+    """The current shopping list as a short bullet list, grouped by category."""
     items = shopping_list.get_all_items()
     if not items:
         return "Your shopping list is empty."
@@ -1425,12 +1425,14 @@ def _shopping_list_text() -> str:
             # items that were stored as "Other" before them.
             category = infer_category(item["name"])
         by_category.setdefault(category, []).append(item)
-    sections = []
+    # Kept short on purpose (user, 2026-10-05): a bullet per item under its
+    # category, the count only when it's more than one, notes left to /item.
+    lines = []
     for category in sorted(by_category, key=lambda c: (c == "Other", c)):
-        lines = [f"• {i['name']} ({i['quantity']}x){_related_notes(i['name'])}"
-                 for i in by_category[category]]
-        sections.append(f"{category}:\n" + "\n".join(lines))
-    return "Shopping list:\n\n" + "\n\n".join(sections)
+        lines.append(category)
+        lines += [f"• {i['quantity']}x {i['name']}" if i["quantity"] > 1 else f"• {i['name']}"
+                  for i in by_category[category]]
+    return "\n".join(lines)
 
 
 async def show_shopping_list(update: Update, context: ContextTypes.DEFAULT_TYPE):

@@ -87,7 +87,7 @@ async def test_add_to_list(mock_crud, mock_list):
     context.bot.send_message = AsyncMock()
     await main.handle_spare_alert_choice(_callback_update("spare_add:4"), context)
     mock_list.add_item.assert_called_once_with("cheese", 1, category="Dairy")
-    assert "• cheese (1x)" in context.bot.send_message.call_args.args[1]
+    assert "• cheese" in context.bot.send_message.call_args.args[1]
 
 
 @pytest.mark.asyncio

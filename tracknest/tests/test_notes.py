@@ -77,14 +77,16 @@ async def test_note_typed_with_a_purchase(db):
 
 
 @pytest.mark.asyncio
-async def test_list_shows_the_note(db):
+async def test_the_list_is_short_bullets_by_category(db):
+    # User, 2026-10-05: bullets by category, no notes — they live in /item.
     crud.set_item_note("Push Up Bra", "UK/USA 34B")
     shopping_list.add_item("push up bra", 1, category="Clothing")
+    shopping_list.add_item("frozen strawberries", 2, category="Fruits/Veg")
     update = _text("/list")
 
     await main.show_shopping_list(update, _context())
 
-    assert "• push up bra (1x)\n  📝 Push Up Bra — UK/USA 34B" in update.message.reply_text.call_args.args[0]
+    assert update.message.reply_text.call_args.args[0] == "Clothing\n• push up bra\nFruits/Veg\n• 2x frozen strawberries"
 
 
 @pytest.mark.asyncio

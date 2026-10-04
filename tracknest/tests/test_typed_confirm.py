@@ -55,7 +55,7 @@ async def test_list_lines_wait_for_confirmation(mock_crud, mock_list):
     mock_list.add_item.assert_called_once()
     mock_list.remove_item.assert_called_once_with("bananas", reason="manual")
     # The updated list follows right away, without needing /list.
-    assert context.bot.send_message.call_args.args[1].startswith("Shopping list:")
+    context.bot.send_message.assert_awaited_once()
 
 
 @pytest.mark.asyncio
