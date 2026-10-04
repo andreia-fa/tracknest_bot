@@ -10,6 +10,10 @@ Direction agreed so far:
   (a few months — data starts 2026-09). Favourites change on their own as
   the shares shift; the user's ⭐ notes are their own and stay untouched.
 - Reminders stay product-only ("Do you still have cheese?", `5f46abf`).
+- **A shift in a long habit → ASK once, don't assume** (user, 2026-10-04):
+  ~15 weeks of Milram then ~15 weeks of Leerdammer → "You've been buying
+  Leerdammer lately — is it your favourite cheese now?" One question after
+  a long buffer is fine; silently re-deciding is not.
 - Still open, decide when there's data: what (if anything) the bot SAYS
   with it — e.g. a dashboard insight, or noticing a favourite cheaper than
   usual on a receipt (no offer data otherwise; no paid APIs). Keep it quiet
