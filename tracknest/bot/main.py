@@ -1146,8 +1146,11 @@ def _preview_list_lines(text: str) -> list[str]:
     return preview
 
 
-def _apply_list_lines(text: str) -> tuple[list[str], list[int] | None, bool]:
+def _apply_list_lines(text: str, purchase_date: str | None = None) -> tuple[list[str], list[int] | None, bool]:
     """Apply typed lines to the shopping list (or log priced lines as purchases).
+
+    purchase_date (ISO date) logs the purchases on an earlier day — "📅 it
+    was yesterday" — instead of now.
 
     Returns:
         (replies, new_item_ids, list_changed): one reply line per input
@@ -1183,6 +1186,7 @@ def _apply_list_lines(text: str) -> tuple[list[str], list[int] | None, bool]:
             line, _cleared_id = _log_purchase(
                 name, qty, unit_price, store=_typed_purchase_store(name, unit_price),
                 category=infer_category(name), matched_list_item=name, trip_key=trip_key,
+                receipt_date=purchase_date,
             )
             if note:
                 crud.set_item_note(name, note)
@@ -1203,6 +1207,29 @@ def _apply_list_lines(text: str) -> tuple[list[str], list[int] | None, bool]:
     return replies, new_item_ids, list_changed
 
 
+def _could_be_an_answer(text: str, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Whether a typed message could answer an open question at all.
+
+    A line with a price ("sesame ring 1,49") is always a purchase — no
+    question is answered with a name and a price — and a message of several
+    lines is a list. A note the user just asked to write can be anything.
+    Asking "is this your answer to what SCHLAGCREME VEGA is?" there only
+    put a real expense at risk of being lost.
+    """
+    if context.chat_data.get("note_item") or context.chat_data.get("note_pick"):
+        return True  # a note can say anything, prices included
+    lines = [line for line in text.splitlines() if line.strip()]
+    if len(lines) > 1:
+        return False
+    for line in lines:
+        try:
+            if parse_line(_split_note(line)[0])[2] is not None:
+                return False
+        except ValueError:
+            pass
+    return True
+
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle plain-text messages: show what they'd change, and wait for a tap to do it.
 
@@ -1219,7 +1246,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     buttons says it expired.
     """
     text = update.message.text
-    pending = _pending_question(context)
+    pending = _pending_question(context) if _could_be_an_answer(text, context) else None
     preview = _preview_list_lines(text)
     actionable = any(not line.startswith("• skip") for line in preview)
     token = context.chat_data.get("typed_token", 0) + 1
@@ -1236,6 +1263,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif actionable:
         body = "Just to be sure, I'll:\n" + "\n".join(preview)
         buttons.append([InlineKeyboardButton("✅ Yes, do it", callback_data=f"typed:list:{token}")])
+        if any(line.startswith("• log a purchase") for line in preview):
+            # Expenses without a receipt are often typed in the day after.
+            buttons.append([InlineKeyboardButton("📅 Yes — it was yesterday",
+                                                 callback_data=f"typed:yesterday:{token}")])
     else:
         context.chat_data.pop("typed", None)
         await update.message.reply_text("\n".join(f"Couldn't understand: '{line.strip()}'"
@@ -1284,7 +1315,12 @@ async def handle_typed_choice(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.edit_message_text(f"💬 Answering {pending[2]}: {typed['text']}")
         await _answer_pending_question(_replayed_update(query, typed["text"]), context, pending[0])
         return
-    replies, new_item_ids, list_changed = _apply_list_lines(typed["text"])
+    purchase_date = None
+    if action == "yesterday":
+        purchase_date = (datetime.now(tz=_LOCAL_TZ).date() - timedelta(days=1)).isoformat()
+    replies, new_item_ids, list_changed = _apply_list_lines(typed["text"], purchase_date)
+    if purchase_date:
+        replies.insert(0, f"📅 Logged for yesterday, {datetime.fromisoformat(purchase_date).strftime('%-d %b')}:")
     rows = _fix_buttons(new_item_ids or [])
     await query.edit_message_text("\n".join(replies), reply_markup=InlineKeyboardMarkup(rows) if rows else None)
     if list_changed:

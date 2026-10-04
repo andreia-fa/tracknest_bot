@@ -167,3 +167,40 @@ async def test_category_question_never_takes_text(mock_crud):
     await main.handle_text(update, _context())
 
     assert _buttons(update) == ["typed:list:1", "typed:cancel:1"]
+
+
+@pytest.mark.asyncio
+@patch("bot.main.shopping_list")
+@patch("bot.main.crud")
+@patch("bot.main.expenses")
+async def test_a_priced_line_is_never_taken_as_an_answer(mock_expenses, mock_crud, mock_list):
+    # "sesame ring 1,49" while "what is SCHLAGCREME VEGA?" was open was offered as its answer.
+    mock_crud.get_pending_profile_item.return_value = ("SCHLAGCREME VEGA", "name")
+    mock_expenses.guess_store.return_value = None
+    for text in ("sesame ring 1,49", "milk\nbread"):
+        update = _text_update(text)
+        await main.handle_text(update, _context())
+        prompt = update.message.reply_text.call_args.args[0]
+        assert "SCHLAGCREME" not in prompt and prompt.startswith("Just to be sure, I'll:")
+        assert _buttons(update)[0] == "typed:list:1"
+
+
+@pytest.mark.asyncio
+async def test_typed_purchase_can_be_logged_for_yesterday(tmp_path):
+    from datetime import datetime, timedelta
+    from db import crud, database, expenses
+    with patch.object(database, "DB_PATH", str(tmp_path / "test.db")):
+        database.init_db()
+        context = _context()
+        update = _text_update("sesame ring 1,49")
+        await main.handle_text(update, context)
+        assert _buttons(update) == ["typed:list:1", "typed:yesterday:1", "typed:cancel:1"]
+
+        tap = _callback_update("typed:yesterday:1")
+        with patch("bot.main.send_pending_profile_question", AsyncMock()):
+            await main.handle_typed_choice(tap, context)
+
+        yesterday = (datetime.now(tz=main._LOCAL_TZ).date() - timedelta(days=1)).isoformat()
+        assert expenses.get_expenses("sesame ring")[0]["purchase_date"] == yesterday
+        assert crud.get_item("sesame ring") is not None
+        assert tap.callback_query.edit_message_text.call_args.args[0].startswith("📅 Logged for yesterday")
