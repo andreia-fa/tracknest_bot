@@ -15,7 +15,7 @@ import sys
 sys.path.insert(0, "/app")
 
 from db import crud  # noqa: E402
-from db.database import backup_db  # noqa: E402
+from db.database import backup_db, get_connection  # noqa: E402
 
 MERGES = {
     "Pfefferbreze": "Pfefferbretzel",
@@ -39,6 +39,10 @@ for old, keep in MERGES.items():
     crud.save_alias(old, keep, crud.get_item(keep).get("category"), crud.get_item(keep).get("product"))
     print(f"{old!r} → {final!r}")
 
+conn = get_connection()
 for keep in sorted(set(MERGES.values())):
-    print(keep, "purchases:", len(crud.get_item(keep) and __import__("db.expenses", fromlist=["x"])
-                                  .get_expenses(keep) or []))
+    count = conn.execute(
+        "SELECT COUNT(*) FROM item_expenses e JOIN inventory_items i ON i.id = e.item_id WHERE i.name = ?", (keep,)
+    ).fetchone()[0]
+    print(keep, "purchases:", count)
+conn.close()
