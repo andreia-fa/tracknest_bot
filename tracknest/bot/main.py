@@ -1380,8 +1380,8 @@ async def check_expiring_items(context: ContextTypes.DEFAULT_TYPE) -> bool:
             crud.mark_checkin_pending(item["name"])
             await context.bot.send_message(
                 chat_id=chat_id,
-                text=f"Quick check — do you still have {_need_name(item)} ({item['name']}), or did it "
-                     f"run out? Reply 'yes' or 'no'.{_note_line(item)}",
+                text=f"Quick check — do you still have {_need_name(item)}, or did it "
+                     f"run out? Reply 'yes' or 'no'.{_kind_notes(item)}",
             )
             return True
     return False
@@ -1410,17 +1410,27 @@ def _need_name(item: dict) -> str:
     return item.get("product") or item["name"]
 
 
+def _kind_notes(item: dict) -> str:
+    """Notes to pick by in the store: every item of this product's kind, or the item's own note.
+
+    A reminder is about the product (cheese), not the brand last bought
+    (LEERDAMMER CAR.) — so it shows the favourites and don't-buys across
+    brands rather than one brand's note.
+    """
+    if not item.get("product"):
+        return _note_line(item)
+    notes = _related_notes(item["product"])
+    return f"\n{notes.lstrip(chr(10))}" if notes else ""
+
+
 def _spare_alert_text(item: dict, now: datetime) -> str:
     days_ago = (now - datetime.fromisoformat(item["last_purchase"])).days
     bought = "today" if days_ago == 0 else f"{days_ago} day{'s' if days_ago != 1 else ''} ago"
-    qty = item.get("last_quantity") or 1
     need = _need_name(item)
-    store = f" at {item['last_store']}" if item.get("last_store") else ""
     return (
-        f"{need.capitalize()} — you last bought {qty}x {item['name']}{store} {bought}, and one "
-        f"usually lasts about {item['shelf_life_days']} days, so you're about to be down to "
-        "your last one.\n"
-        f"You keep a spare of {need}. Add it to the shopping list?{_note_line(item)}"
+        f"{need.capitalize()} — you last bought some {bought}, and one usually lasts about "
+        f"{item['shelf_life_days']} days, so you're about to be down to your last one.\n"
+        f"You keep a spare of {need}. Add it to the shopping list?{_kind_notes(item)}"
     )
 
 

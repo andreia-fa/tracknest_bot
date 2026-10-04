@@ -89,7 +89,7 @@ async def test_list_and_reminders_show_the_note(db):
     item = {"name": "Push Up Bra", "product": "bra", "shelf_life_days": 120, "last_quantity": 1,
             "last_purchase": "2026-09-23T17:32:26+00:00", "last_store": "Intimissimi", "notes": "UK/USA 34B"}
     text = main._spare_alert_text(item, datetime(2026, 10, 3, tzinfo=timezone.utc))
-    assert "at Intimissimi" in text and text.endswith("📝 UK/USA 34B")
+    assert "Intimissimi" not in text and text.endswith("📝 Push Up Bra — UK/USA 34B")
 
 
 @pytest.mark.asyncio
@@ -133,3 +133,23 @@ def test_a_dont_buy_cheese_never_lends_its_no_reminders_profile(db):
     crud.add_item("Gouda jung", 1, category="Dairy", product="cheese")
     crud.copy_product_profile("Gouda jung", "cheese")
     assert crud.get_item("Gouda jung")["lasts"] == "days"  # from Leerdammer, not one-off from J.Tag Emmental
+
+
+@pytest.mark.asyncio
+async def test_cheese_reminders_name_the_product_and_every_cheese_note(db):
+    _cheeses()
+    leerdammer = {**crud.get_item("LEERDAMMER CAR."), "last_quantity": 1, "last_store": "Lidl",
+                  "last_purchase": "2026-09-01T10:00:00+00:00"}
+    spare = main._spare_alert_text(leerdammer, datetime(2026, 10, 3, tzinfo=timezone.utc))
+    context = _context()
+    with patch("bot.main.settings.get_chat_id", return_value=1), \
+            patch("bot.main.crud.get_checkin_candidates", return_value=[leerdammer]), \
+            patch("bot.main.crud.mark_checkin_pending"):
+        await main.check_expiring_items(context)
+    checkin = context.bot.send_message.call_args.kwargs["text"]
+
+    for text in (spare, checkin):
+        assert "LEERDAMMER CAR. —" in text  # only as one of the notes to pick by
+        assert text.split("\n")[0].count("LEERDAMMER") == 0
+        assert "Milram Käse Scheiben — ⭐ Favourite" in text and "J.Tag Emmental" in text
+        assert "Lidl" not in text
