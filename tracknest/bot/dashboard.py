@@ -132,7 +132,7 @@ _CARD_ICONS = {
     "Action items": "💬", "Price changes": "📈", "Cost per day of use": "⏳",
 }
 _CATEGORY_ICONS = {
-    "Snacks": "🍫", "Ready Meals": "🍱", "Fruits/Veg": "🥦", "Dairy": "🧀", "Bread/Bakery": "🥨",
+    "Snacks": "🍫", "Ready Meals": "🍱", "Fruits/Veg": "🥦", "Dairy": "🧀", "Bread/Bakery": "🥨", "Pastries": "🥐",
     "Meat/Fish": "🐟", "Pantry": "🍚", "Beverages": "🥤", "Hygiene/Personal Care": "🧴",
     "Household": "🧽", "Clothing": "👕", "Leisure": "🎟️", "Other": "📦",
 }

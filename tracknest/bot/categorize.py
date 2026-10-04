@@ -16,6 +16,14 @@ _MIN_TRUNCATED_WORD_LEN = 5
 # Checked in this order — first matching keyword wins. Order only matters
 # for words that could plausibly belong to more than one bucket.
 _CATEGORIES: list[tuple[str, list[str]]] = [
+    # First: a filled pastry is named after its filling ("croissant with
+    # strawberry filling" once landed in Fruits/Veg, guessed a week-long need).
+    ("Pastries", [
+        "croissant", "pastry", "pastries", "gebäck", "gebaeck", "plunder", "berliner",
+        "krapfen", "muffin", "donut", "doughnut", "zimtschnecke", "franzbrötchen",
+        "franzbroetchen", "teilchen", "danish", "eclair", "éclair", "pastel de nata",
+        "pastéis", "pasteis", "bola de berlim", "folhado",
+    ]),
     # Before Fruits/Veg so a flavoured treat ("schoko. Himbeeren") counts
     # as a snack, not fruit.
     ("Snacks", [
@@ -129,7 +137,8 @@ NOT_SHOPPING = ("Leisure",)
 # What the money went to, one level above categories — the headline split
 # on the dashboard. Every category belongs to exactly one purpose.
 PURPOSES: dict[str, tuple[str, ...]] = {
-    "Food": ("Fruits/Veg", "Dairy", "Bread/Bakery", "Meat/Fish", "Pantry", "Snacks", "Ready Meals", "Beverages"),
+    "Food": ("Fruits/Veg", "Dairy", "Bread/Bakery", "Pastries", "Meat/Fish", "Pantry", "Snacks", "Ready Meals",
+             "Beverages"),
     "Personal & home": ("Hygiene/Personal Care", "Household", "Clothing"),
     "Leisure": ("Leisure",),
     "Other": ("Other",),

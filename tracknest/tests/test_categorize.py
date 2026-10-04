@@ -92,3 +92,11 @@ def test_ready_meals():
 ])
 def test_is_fast_food(store, name, expected):
     assert is_fast_food(store, name) is expected
+
+
+@pytest.mark.parametrize("name", [
+    "croissant with strawberry filling (fruit-filled pastry)", "Schoko Croissant", "Berliner Himbeere",
+    "Zimtschnecke", "Pastel de nata",
+])
+def test_pastries_are_pastries_whatever_the_filling(name):
+    assert infer_category(name) == "Pastries"
