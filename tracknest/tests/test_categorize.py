@@ -100,3 +100,8 @@ def test_is_fast_food(store, name, expected):
 ])
 def test_pastries_are_pastries_whatever_the_filling(name):
     assert infer_category(name) == "Pastries"
+
+
+def test_a_pizza_place_is_fast_food_whatever_it_sold():
+    from bot.categorize import is_fast_food
+    assert is_fast_food("Giulia Pizza GmbH", "Margherita")

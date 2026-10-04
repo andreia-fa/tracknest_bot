@@ -152,7 +152,7 @@ PURPOSES: dict[str, tuple[str, ...]] = {
 _FAST_FOOD_STORES = (
     "burger king", "mcdonald", "mc donald", "kfc", "subway", "domino",
     "pizza hut", "five guys", "popeyes", "taco bell", "wendy's",
-    "pizzeria", "döner", "doner", "kebab", "imbiss",
+    "pizza", "pizzeria", "döner", "doner", "kebab", "imbiss",
 )
 _FAST_FOOD_PRODUCTS = (
     "pizza", "burger", "whopper", "big mac", "nugget", "pommes", "fries",
