@@ -59,6 +59,7 @@ async def test_list_lines_wait_for_confirmation(mock_crud, mock_list):
 
 
 @pytest.mark.asyncio
+@patch("bot.main.expenses.names_bought_at", new=lambda price: set())
 @patch("bot.main._typed_purchase_store", return_value=None)
 @patch("bot.main.shopping_list")
 @patch("bot.main.crud")

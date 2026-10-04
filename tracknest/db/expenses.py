@@ -170,6 +170,21 @@ def guess_store(item_name, product, unit_price):
     return stores[0] if len(stores) == 1 else None
 
 
+def names_bought_at(unit_price):
+    """Return the item names ever bought at exactly this unit price (shares of a typed total don't count)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT DISTINCT i.name FROM item_expenses e
+        JOIN inventory_items i ON i.id = e.item_id
+        WHERE e.price_kind = 'unit' AND ROUND(e.unit_price, 2) = ROUND(?, 2)
+    """, (unit_price,))
+    names = {row["name"] for row in cursor.fetchall()}
+    cursor.close()
+    conn.close()
+    return names
+
+
 def get_price_delta(item_name, new_price, min_history=1, store=None):
     """Compare a new price against an item's purchase history.
 

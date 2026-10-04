@@ -1145,10 +1145,15 @@ def _split_note(line: str) -> tuple[str, str | None]:
     return line.strip(), (note.strip() or None) if sep else None
 
 
-def _known_item_name(name: str) -> str:
-    """The item this typed name means — an existing one despite typos and spacing, else the name tidied up."""
+def _known_item_name(name: str, unit_price: float | None = None) -> str:
+    """The item this typed name means — an existing one despite typos and spacing, else the name tidied up.
+
+    A unit price, when known, lets a slightly further-off spelling count if
+    that item was bought at exactly this price before.
+    """
     name = clean_name(name)
-    return match_known(name, crud.get_item_names()) or name
+    same_price = expenses.names_bought_at(unit_price) if unit_price is not None else frozenset()
+    return match_known(name, crud.get_item_names(), same_price) or name
 
 
 def _list_entry_name(name: str) -> str:
@@ -1180,7 +1185,7 @@ def _preview_list_lines(text: str) -> list[str]:
             where = (f" at {store}" if typed else f" at {store} (same price as before)") if store else ""
             when = (f" on {date.fromisoformat(purchase.purchase_date).strftime('%-d %b')}"
                     if purchase.purchase_date else "")
-            items = [(_known_item_name(n), q) for n, q in purchase.items]
+            items = [(_known_item_name(n, None if purchase.shared else purchase.price), q) for n, q in purchase.items]
             if purchase.shared:
                 names = ", ".join(f"{q}x {n}" if q > 1 else n for n, q in items)
                 preview.append(f"• log a purchase{where}{when}: {names} — €{purchase.price:.2f} together")
@@ -1241,7 +1246,7 @@ def _apply_list_lines(text: str, purchase_date: str | None = None) -> tuple[list
             shares = _shares(purchase.price, len(purchase.items)) if purchase.shared else None
             new_item_ids = new_item_ids or []
             for i, (typed, qty) in enumerate(purchase.items):
-                name = _known_item_name(typed)
+                name = _known_item_name(typed, None if shares else purchase.price)
                 is_new = crud.get_item(name) is None
                 unit_price = shares[i] / qty if shares else purchase.price
                 reply, _cleared_id = _log_purchase(
@@ -1536,7 +1541,9 @@ def _resolve_receipt_name(item: dict) -> tuple[str, str | None, str | None, bool
         return alias["canonical_name"], alias["category"], alias.get("product") or model_product, False
     # The same thing spelled a little differently ("Laugenbreze" for
     # "LAUGENBREZEL") is the item already known, not a new one to ask about.
-    known = match_known(item["name"], crud.get_item_names())
+    price = item.get("unit_price")
+    same_price = expenses.names_bought_at(price) if price is not None else frozenset()
+    known = match_known(item["name"], crud.get_item_names(), same_price)
     if known and (existing := crud.get_item(known)):
         return known, existing.get("category"), existing.get("product") or model_product, False
     keyword = infer_category(item["name"])

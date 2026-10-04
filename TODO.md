@@ -8,9 +8,9 @@ old ones are still separate items in the live DB:
 - `Laugenbreze` (1) → `LAUGENBREZEL` (1)
 Script: `deploy/merge_pretzel_typos_2026_10_04.py`. It backs the DB up, then
 merges with `crud.rename_item`, so purchases and price history move over.
-**Before running:** replace the clumsy purchase-count print at the end of
-the script (it calls `expenses.get_expenses`, which may not exist) with a
-plain SQL count. Then:
+Count print fixed and dry-run on a throwaway DB (2026-10-04, `a4bb05d`).
+User approved the merge 2026-10-04; the permission check blocked it again,
+so the user runs it:
 `ssh oracle-tracknest docker exec -i tracknest-bot python - < deploy/merge_pretzel_typos_2026_10_04.py`
 The auto-mode permission check blocked this on 2026-10-04 (it changes live
 data), so expect a prompt the user has to approve. Afterwards, check that

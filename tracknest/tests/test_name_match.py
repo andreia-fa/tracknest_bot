@@ -104,3 +104,18 @@ async def test_list_lines_reuse_the_spelling_already_used(db):
 def test_a_receipt_spelling_of_a_known_item_is_not_new(db):
     crud.add_item("LAUGENBREZEL", 0, category="Bread/Bakery", product="pretzel")
     assert main._resolve_receipt_name({"name": "Laugenbreze"}) == ("LAUGENBREZEL", "Bread/Bakery", "pretzel", False)
+
+
+def test_the_same_price_forgives_a_bit_more():
+    # 0.79 alike: too far on spelling alone, the same thing at the same price.
+    assert match_known("Kaesestange", ["Käse-Laugenstange"]) is None
+    assert match_known("Kaesestange", ["Käse-Laugenstange"], {"Käse-Laugenstange"}) == "Käse-Laugenstange"
+    # Same-brand neighbours often share a price and must stay apart.
+    assert match_known("Milram Edamer", ["Milram Gouda"], {"Milram Gouda"}) is None
+
+
+def test_a_receipt_line_at_a_known_price_lands_on_that_item(db):
+    crud.add_item("Käse-Laugenstange", 0, category="Bread/Bakery", product="cheese pretzel stick")
+    expenses.log_expense("Käse-Laugenstange", 1, 1.49, store="Yormas")
+    assert main._resolve_receipt_name({"name": "Kaesestange", "unit_price": 1.49})[0] == "Käse-Laugenstange"
+    assert main._resolve_receipt_name({"name": "Kaesestange", "unit_price": 1.99})[0] == "Kaesestange"
