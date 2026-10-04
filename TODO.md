@@ -1,5 +1,19 @@
 # TODO
 
+
+## 💡 Idea (2026-10-04) — predict WHEN to go shopping and WHAT to buy
+User's goal, once there's enough data (a few months, data starts 2026-09):
+suggest the next shopping day and the list for it, so one trip covers
+everything that would otherwise run out (fewest trips — see memory).
+Building blocks that exist: per-item `shelf_life_days` (self-correcting on
+early repurchase), `/stock` (runs out in 7 days), proactive reminders.
+Missing: pick the day that bundles the most run-outs; suggest it in the
+10:00/18:00 round. User's example: coloured eggs, pack of 10, 2 a day →
+5 days — very predictable. Open question: shelf life is per purchase,
+not per unit, so a different pack size (6 vs 10) breaks it — consider
+consumption per unit (eggs/day) for countable items. Ask the user before
+building.
+
 ## ✅ Done (2026-10-04) — merged the pretzel duplicates
 `Pfefferbreze` + `pfefferbretzel,` → `Pfefferbretzel`, `Laugenbreze` →
 `LAUGENBREZEL` (user ran `deploy/merge_pretzel_typos_2026_10_04.py`).
