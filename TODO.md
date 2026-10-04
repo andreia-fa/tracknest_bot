@@ -1,5 +1,21 @@
 # TODO
 
+## 🔴 FIRST TASK next session (added 2026-10-04) — merge the pretzel duplicates
+Ask the user to confirm, then run it. The user agreed to do this first thing.
+Typo matching (`bot/name_match.py`, `414a03e`) stops new duplicates, but the
+old ones are still separate items in the live DB:
+- `Pfefferbreze` (1 purchase) and `pfefferbretzel,` (1) → `Pfefferbretzel` (2)
+- `Laugenbreze` (1) → `LAUGENBREZEL` (1)
+Script: `deploy/merge_pretzel_typos_2026_10_04.py`. It backs the DB up, then
+merges with `crud.rename_item`, so purchases and price history move over.
+**Before running:** replace the clumsy purchase-count print at the end of
+the script (it calls `expenses.get_expenses`, which may not exist) with a
+plain SQL count. Then:
+`ssh oracle-tracknest docker exec -i tracknest-bot python - < deploy/merge_pretzel_typos_2026_10_04.py`
+The auto-mode permission check blocked this on 2026-10-04 (it changes live
+data), so expect a prompt the user has to approve. Afterwards, check that
+`pfefer bretzl` resolves to `Pfefferbretzel`, then mark this done.
+
 ## ✅ Done (2026-10-04) — split /report into /finance and /stock
 User: /report is "just too big and too messy". Agreed split:
 - `/finance` — money only, ~6 lines: spent + projection, budget %, most-spent
