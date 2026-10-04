@@ -122,7 +122,24 @@ _PURPOSE_COLORS = {"Food": "var(--p-food)", "Personal & home": "var(--p-home)",
                    "Leisure": "var(--p-leisure)", "Other": "var(--mix-none)"}
 
 
+# Illustrations: emoji rather than drawn icons — full colour, no image files,
+# and every phone already has them.
+_CARD_ICONS = {
+    "Overview": "🧾", "Spending breakdown": "🍩", "Daily spending &amp; trips": "📅",
+    "Spending by category": "🏷️", "Spending by store": "🏪", "Shopping list &amp; restock": "🛒",
+    "Action items": "💬", "Price changes": "📈", "Cost per day of use": "⏳",
+}
+_CATEGORY_ICONS = {
+    "Snacks": "🍫", "Ready Meals": "🍱", "Fruits/Veg": "🥦", "Dairy": "🧀", "Bread/Bakery": "🥨",
+    "Meat/Fish": "🐟", "Pantry": "🍚", "Beverages": "🥤", "Hygiene/Personal Care": "🧴",
+    "Household": "🧽", "Clothing": "👕", "Leisure": "🎟️", "Other": "📦",
+}
+_MAX_SLICES = 8
+
+
 def _card(title: str, body: str, sub: str = "", cls: str = "") -> str:
+    icon = _CARD_ICONS.get(title)
+    title = f'<span class="h-icon" aria-hidden="true">{icon}</span>{title}' if icon else title
     sub_html = f'<p class="sub">{sub}</p>' if sub else ""
     return f'<section class="card {cls}"><h2>{title}</h2>{sub_html}{body}</section>'
 
@@ -249,8 +266,10 @@ def _donut(month: dict, amounts: bool) -> str:
     return _card("Spending breakdown", body)
 
 
-def _tile(label: str, value: str, note: str = "", extra: str = "") -> str:
-    return f'<div class="card tile"><h3>{label}</h3><div class="tile-value">{value}</div>{extra}<p class="note">{note}</p></div>'
+def _tile(label: str, value: str, note: str = "", extra: str = "", icon: str = "") -> str:
+    art = f'<span class="tile-icon" aria-hidden="true">{icon}</span>' if icon else ""
+    return (f'<div class="card tile">{art}<h3>{label}</h3><div class="tile-value">{value}</div>{extra}'
+            f'<p class="note">{note}</p></div>')
 
 
 def _trips_per_week(month: dict | None) -> float | None:
@@ -277,7 +296,11 @@ def _fast_food_tile(month: dict, previous: dict | None, amounts: bool) -> str:
         parts.append("last one today" if days <= 0 else f'last one {days} day{"s" if days != 1 else ""} ago')
     note = " · ".join(parts) or "None logged yet"
     unit = "meal" if food["meals"] == 1 else "meals"
-    return _tile("Fast food", f'{food["meals"]}<span class="of"> {unit}</span>', note)
+    meals = food["meals"]
+    slices = "🍕" * min(meals, _MAX_SLICES) + (f'<span class="of"> +{meals - _MAX_SLICES}</span>' if meals > _MAX_SLICES else "")
+    row = (f'<div class="slices" aria-label="{meals} fast-food {unit}">{slices}</div>' if meals
+           else '<div class="slices none" aria-hidden="true">🍕</div>')
+    return _tile("Fast food", f'{meals}<span class="of"> {unit}</span>', note, extra=row, icon="🍔")
 
 
 def _tiles(month: dict, previous: dict | None, amounts: bool) -> str:
@@ -292,7 +315,7 @@ def _tiles(month: dict, previous: dict | None, amounts: bool) -> str:
         "Treats share", f"{treat_pct:.0f}%" if total else "—",
         (f'Needs {need_pct:.0f}% · Treats {treat_pct:.0f}%' + (f' · {_eur(mix["treat"])}' if amounts else ""))
         if total else "Nothing logged yet",
-        split,
+        split, icon="🍫",
     )
     trips = month["trips"]
     rate, before = _trips_per_week(month), _trips_per_week(previous)
@@ -307,14 +330,14 @@ def _tiles(month: dict, previous: dict | None, amounts: bool) -> str:
         note = f'{trips["count"]} trips · {delta}'
     else:
         note = f'{trips["count"]} trips this month' if trips["count"] else "No shopping trips yet"
-    per_week = _tile("Trips per week", f"{rate:.1f}" if rate is not None else "—", note)
+    per_week = _tile("Trips per week", f"{rate:.1f}" if rate is not None else "—", note, icon="🛒")
     top_ups = trips.get("top_ups", [])
     if trips["count"]:
         top_note = (f'{_eur(sum(t["total"] for t in top_ups))} in trips under €5' if amounts
                     else "trips were small top-ups") if top_ups else "Every trip was a proper shop"
-        top = _tile("Top-up trips", f'{len(top_ups)}<span class="of"> of {trips["count"]}</span>', top_note)
+        top = _tile("Top-up trips", f'{len(top_ups)}<span class="of"> of {trips["count"]}</span>', top_note, icon="🛍️")
     else:
-        top = _tile("Top-up trips", "—", "No shopping trips yet")
+        top = _tile("Top-up trips", "—", "No shopping trips yet", icon="🛍️")
     return f'<div class="tiles">{treats}{per_week}{top}{_fast_food_tile(month, previous, amounts)}</div>'
 
 
@@ -383,7 +406,8 @@ def _categories(month: dict, amounts: bool) -> str:
         return ""
     peak = max(c["total"] for c in categories) or 1.0
     rows = "".join(
-        f'<div class="bar-row"><span class="bar-name">{escape(c["name"])}</span>'
+        f'<div class="bar-row"><span class="bar-name"><span class="cat-icon" aria-hidden="true">'
+        f'{_CATEGORY_ICONS.get(c["name"], "📦")}</span>{escape(c["name"])}</span>'
         f'<div class="bar-track"><div class="bar-fill" style="width:{c["total"] / peak * 100:.1f}%"></div></div>'
         f'<span class="bar-value">{_share(c["total"], total):.0f}%'
         + (f'<span class="bar-amt">{_eur(c["total"])}</span>' if amounts else "") + "</span></div>"
@@ -582,7 +606,14 @@ _STYLE = """
   .legend-list .lg-amt { grid-column: 2 / 4; font-size: 11px; color: var(--ink-muted); }
   .swatch { width: 10px; height: 10px; border-radius: 2px; }
   .tiles { display: grid; grid-template-rows: repeat(4, 1fr); gap: 14px; flex: 1; }
-  .tile { padding: 12px 16px; display: flex; flex-direction: column; justify-content: center; }
+  .tile { position: relative; padding: 12px 16px; display: flex; flex-direction: column; justify-content: center; }
+  .tile-icon { position: absolute; top: 10px; right: 12px; width: 34px; height: 34px; border-radius: 10px;
+               display: grid; place-items: center; font-size: 19px; background: var(--surface-2); }
+  .h-icon { margin-right: 6px; font-size: 14px; letter-spacing: 0; }
+  .cat-icon { margin-right: 6px; }
+  .slices { font-size: 18px; letter-spacing: 1px; line-height: 1.2; margin-top: 2px; }
+  .slices.none { filter: grayscale(1); opacity: 0.35; }
+  .tile h3, .tile .tile-value { padding-right: 40px; }
   .tile-value { font-size: 26px; font-weight: 700; line-height: 1.2; }
   .tile-value .of { font-size: 14px; font-weight: 500; color: var(--ink-muted); }
   .tile .note { margin-top: 2px; }
@@ -640,6 +671,7 @@ _STYLE = """
     .tiles { grid-template-rows: none; grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .tile { padding: 10px 12px; }
     .tile h3 { font-size: 11px; }
+    .tile-icon { width: 28px; height: 28px; font-size: 16px; top: 8px; right: 8px; }
     .tile-value { font-size: 22px; }
     .hero-value { font-size: 40px; }
     .bar-row { grid-template-columns: minmax(0, 104px) 1fr 70px; }
