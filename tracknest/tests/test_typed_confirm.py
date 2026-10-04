@@ -113,6 +113,7 @@ async def test_open_question_offers_both_meanings(mock_crud, mock_list):
 @pytest.mark.asyncio
 @patch("bot.main._confirm_product", new_callable=AsyncMock)
 @patch("bot.main.crud")
+@patch("bot.main.shopping_list.get_all_items", new=lambda: [])
 async def test_answer_is_used_only_after_the_tap(mock_crud, confirm_product):
     mock_crud.get_pending_profile_item.return_value = ("HAPPY CALIF. VEG", "name")
     context = _context()
@@ -127,6 +128,7 @@ async def test_answer_is_used_only_after_the_tap(mock_crud, confirm_product):
 @pytest.mark.asyncio
 @patch("bot.main._confirm_product", new_callable=AsyncMock)
 @patch("bot.main.crud")
+@patch("bot.main.shopping_list.get_all_items", new=lambda: [])
 async def test_answer_refused_if_the_question_changed(mock_crud, confirm_product):
     mock_crud.get_pending_profile_item.return_value = ("HAPPY CALIF. VEG", "name")
     context = _context()
@@ -159,6 +161,7 @@ async def test_only_the_latest_message_can_be_confirmed(mock_crud, mock_list):
 
 @pytest.mark.asyncio
 @patch("bot.main.crud")
+@patch("bot.main.shopping_list.get_all_items", new=lambda: [])
 async def test_category_question_never_takes_text(mock_crud):
     mock_crud.get_pending_profile_item.return_value = ("BANANE", "category")
     mock_crud.get_pending_checkin_item.return_value = None

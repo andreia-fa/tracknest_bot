@@ -12,6 +12,7 @@ from aiohttp import web
 from bot import dashboard
 from bot.categorize import CATEGORY_NAMES, infer_category
 from bot.list_match import canonical_product, choose_list_match, same_kind
+from bot.name_match import clean_name, match_known, name_key
 from bot.parser import TypedPurchase, parse_line, parse_purchase
 from bot.profile_guess import guess_profile
 from bot.receipt_lines import is_code_only
@@ -1144,6 +1145,24 @@ def _split_note(line: str) -> tuple[str, str | None]:
     return line.strip(), (note.strip() or None) if sep else None
 
 
+def _known_item_name(name: str) -> str:
+    """The item this typed name means — an existing one despite typos and spacing, else the name tidied up."""
+    name = clean_name(name)
+    return match_known(name, crud.get_item_names()) or name
+
+
+def _list_entry_name(name: str) -> str:
+    """The shopping-list entry this typed name means: one already listed, else an item's own name, else as typed."""
+    name = clean_name(name)
+    listed = [entry["name"] for entry in shopping_list.get_all_items()]
+    return match_known(name, listed) or match_known(name, crud.get_item_names()) or name
+
+
+def _read_as(typed: str, name: str) -> str:
+    """A "(you typed …)" note when a typo was read as a known name, so a wrong match shows; empty otherwise."""
+    return f" (you typed '{clean_name(typed)}')" if name_key(typed) != name_key(name) else ""
+
+
 def _preview_list_lines(text: str) -> list[str]:
     """Describe what _apply_list_lines would do with each line, without writing anything."""
     preview = []
@@ -1152,7 +1171,7 @@ def _preview_list_lines(text: str) -> list[str]:
             continue
         line, note = _split_note(line)
         if line.startswith("-"):
-            name = line[1:].strip()
+            name = _list_entry_name(line[1:]) if line[1:].strip() else ""
             preview.append(f"• remove {name} from your shopping list" if name else f"• skip '{line}' (not understood)")
             continue
         purchase = parse_purchase(line, _today())
@@ -1161,12 +1180,14 @@ def _preview_list_lines(text: str) -> list[str]:
             where = (f" at {store}" if typed else f" at {store} (same price as before)") if store else ""
             when = (f" on {date.fromisoformat(purchase.purchase_date).strftime('%-d %b')}"
                     if purchase.purchase_date else "")
+            items = [(_known_item_name(n), q) for n, q in purchase.items]
             if purchase.shared:
-                names = ", ".join(f"{q}x {n}" if q > 1 else n for n, q in purchase.items)
+                names = ", ".join(f"{q}x {n}" if q > 1 else n for n, q in items)
                 preview.append(f"• log a purchase{where}{when}: {names} — €{purchase.price:.2f} together")
             else:
-                name, qty = purchase.items[0]
-                preview.append(f"• log a purchase{when}: {qty}x {name} at €{purchase.price:.2f} each{where}")
+                name, qty = items[0]
+                preview.append(f"• log a purchase{when}: {qty}x {name} at €{purchase.price:.2f} each{where}"
+                               + _read_as(purchase.items[0][0], name))
             if note:
                 preview[-1] += f"\n  📝 new note: {note}"
             continue
@@ -1175,6 +1196,7 @@ def _preview_list_lines(text: str) -> list[str]:
         except ValueError:
             preview.append(f"• skip '{line}' (not understood)")
             continue
+        name = _list_entry_name(name)
         preview.append(f"• add {qty}x {name} to your shopping list")
         if note:
             preview[-1] += f"\n  📝 new note: {note}"
@@ -1203,7 +1225,7 @@ def _apply_list_lines(text: str, purchase_date: str | None = None) -> tuple[list
         line, note = _split_note(line)
         stripped = line.strip()
         if stripped.startswith("-"):
-            name = stripped[1:].strip()
+            name = _list_entry_name(stripped[1:]) if stripped[1:].strip() else ""
             if not name:
                 replies.append(f"Couldn't understand: '{line}'")
                 continue
@@ -1218,14 +1240,17 @@ def _apply_list_lines(text: str, purchase_date: str | None = None) -> tuple[list
             store, _typed = _typed_store(purchase)
             shares = _shares(purchase.price, len(purchase.items)) if purchase.shared else None
             new_item_ids = new_item_ids or []
-            for i, (name, qty) in enumerate(purchase.items):
+            for i, (typed, qty) in enumerate(purchase.items):
+                name = _known_item_name(typed)
                 is_new = crud.get_item(name) is None
                 unit_price = shares[i] / qty if shares else purchase.price
                 reply, _cleared_id = _log_purchase(
-                    name, qty, unit_price, store=store, category=infer_category(name), matched_list_item=name,
+                    name, qty, unit_price, store=store, category=infer_category(name),
+                    matched_list_item=_list_entry_name(name),
                     trip_key=trip_key, receipt_date=purchase.purchase_date or purchase_date,
                     share_of=purchase.price if shares else None,
                 )
+                reply += _read_as(typed, name)
                 if note and not shares:
                     crud.set_item_note(name, note)
                     reply += f"\n  📝 {note}"
@@ -1240,6 +1265,7 @@ def _apply_list_lines(text: str, purchase_date: str | None = None) -> tuple[list
         except ValueError:
             replies.append(f"Couldn't understand: '{line}'")
             continue
+        name = _list_entry_name(name)
         shopping_list.add_item(name, qty, category=infer_category(name))
         list_changed = True
         reply = f"Added {qty}x {name} to your shopping list."
@@ -1508,6 +1534,11 @@ def _resolve_receipt_name(item: dict) -> tuple[str, str | None, str | None, bool
     alias = crud.get_alias(item["name"])
     if alias:
         return alias["canonical_name"], alias["category"], alias.get("product") or model_product, False
+    # The same thing spelled a little differently ("Laugenbreze" for
+    # "LAUGENBREZEL") is the item already known, not a new one to ask about.
+    known = match_known(item["name"], crud.get_item_names())
+    if known and (existing := crud.get_item(known)):
+        return known, existing.get("category"), existing.get("product") or model_product, False
     keyword = infer_category(item["name"])
     if keyword != "Other":
         return item["name"], keyword, model_product, True

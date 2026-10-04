@@ -50,6 +50,17 @@ def get_item(name):
     return dict(item) if item else None
 
 
+def get_item_names():
+    """Return every inventory item's name."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM inventory_items")
+    names = [row["name"] for row in cursor.fetchall()]
+    cursor.close()
+    conn.close()
+    return names
+
+
 def get_item_by_id(item_id):
     """Return a single inventory item by id, or None if not found."""
     conn = get_connection()

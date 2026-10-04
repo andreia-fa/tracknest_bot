@@ -38,18 +38,21 @@ def test_known_receipt_wording_maps_to_the_users_name(_alias):
 
 
 @patch("bot.main.crud.get_alias", return_value=None)
+@patch("bot.main.crud.get_item_names", new=lambda: [])
 def test_keyword_category_beats_the_models_guess(_alias):
     item = {"name": "Käsescheiben", "category": "Snack"}
     assert main._resolve_receipt_name(item) == ("Käsescheiben", "Dairy", None, True)
 
 
 @patch("bot.main.crud.get_alias", return_value=None)
+@patch("bot.main.crud.get_item_names", new=lambda: [])
 def test_models_category_is_the_fallback(_alias):
     item = {"name": "BIO aln.pfanne", "category": "Fruits/Veg"}
     assert main._resolve_receipt_name(item) == ("BIO aln.pfanne", "Fruits/Veg", None, True)
 
 
 @patch("bot.main.crud.get_alias", return_value=None)
+@patch("bot.main.crud.get_item_names", new=lambda: [])
 def test_vat_code_is_never_taken_as_a_category(_alias):
     item = {"name": "VOLVIC NATURELLE", "category": "A"}
     assert main._resolve_receipt_name(item) == ("VOLVIC NATURELLE", None, None, True)
@@ -60,6 +63,7 @@ def test_vat_code_is_never_taken_as_a_category(_alias):
 @patch("bot.main.crud.get_item", return_value=None)
 @patch("bot.main.crud.get_alias", return_value=None)
 @patch("bot.main.shopping_list.get_all_items", return_value=[{"name": "Salmon"}, {"name": "morangos"}])
+@patch("bot.main.crud.get_item_names", new=lambda: [])
 def test_receipt_uses_the_synonym_matcher_not_the_model_alone(_list, _alias, _item, mock_log):
     import asyncio
     parsed = {

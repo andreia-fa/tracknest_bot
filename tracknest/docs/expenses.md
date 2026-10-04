@@ -51,6 +51,16 @@ trends, cost per day and store guessing only use real `'unit'` prices.
 - `log_expense()` also auto-corrects a need's `shelf_life_days` estimate
   down towards the real gap when a repurchase comes sooner than expected —
   real repurchase timing is a better signal than the original guess.
+- **Typos never create a new item** (`bot/name_match.py`, 2026-10-04). Before
+  a typed purchase, a shopping-list line, a `- remove` line or an un-aliased
+  receipt line is used, its name is matched against the items (and list
+  entries) already known. Case, spacing, edge punctuation and umlaut/ß
+  spellings never matter ("Pfeffer  Bretzel," is "Pfefferbretzel"); beyond
+  that, names of 5+ letters within a 0.85 similarity ratio match, but only if
+  the numbers in them agree ("Milch 1,5%" ≠ "Milch 3,5%") and no second
+  candidate is about as close. Kept strict on purpose: a wrong merge mixes
+  two items' prices, a miss only costs a question. When a typo was read as a
+  known name, the reply says "(you typed '…')" so a wrong match is visible.
 - A receipt is logged on its **printed date** (`purchased_at`), not the day
   it's processed, so a batch of old receipts lands in the right month; the
   duplicate check then means "same item and price on the same receipt date".

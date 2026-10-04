@@ -72,6 +72,7 @@ async def test_changed_answer_is_saved_and_alerts_restart(mock_crud):
 
 @pytest.mark.asyncio
 @patch("bot.main.crud")
+@patch("bot.main.shopping_list.get_all_items", new=lambda: [])
 async def test_changed_answer_can_be_typed(mock_crud):
     mock_crud.get_item_by_id.return_value = PRAWNS
     context = MagicMock()

@@ -16,6 +16,8 @@ tracknest/
                          Normalpreis, Summe...) — pure regex, no model
   bot/list_match.py    — which shopping-list entry a receipt line clears: a
                          multilingual synonym list vetoes/fills in the model's match
+  bot/name_match.py    — recognises a typed/receipt name as an item already
+                         known despite typos, spacing, punctuation, umlauts
   bot/receipt.py       — receipt photo parsing via local Ollama vision model
                          (only ever called by receipt_worker.py now)
   bot/dashboard.py     — password-gated aiohttp web app (month-at-a-glance
