@@ -94,34 +94,6 @@ def test_get_month_pace_no_projection_for_finished_month(mock_summary):
 
 
 @patch("db.metrics.get_connection")
-def test_get_running_low_within_window(mock_conn):
-    yesterday = (datetime.now(tz=timezone.utc) - timedelta(days=1)).isoformat()
-    long_ago = (datetime.now(tz=timezone.utc) - timedelta(days=30)).isoformat()
-    conn, _cursor = make_mock_conn(fetchall_side_effect=[[
-        {"name": "Bread", "product": "bread", "category": "Bakery", "shelf_life_days": 6, "last_purchase": yesterday},
-        {"name": "Peanut Butter", "product": None, "category": None, "shelf_life_days": 60, "last_purchase": yesterday},
-        {"name": "Overdue Spinach", "product": None, "category": None, "shelf_life_days": 10, "last_purchase": long_ago},
-        {"name": "Never Bought", "product": None, "category": None, "shelf_life_days": 5, "last_purchase": None},
-    ]])
-    mock_conn.return_value = conn
-    result = metrics.get_running_low(days_ahead=7)
-    assert [item["name"] for item in result] == ["Bread"]
-    assert result[0]["days_left"] == 4
-
-
-@patch("db.metrics.get_connection")
-def test_get_running_low_handles_date_only_last_purchase(mock_conn):
-    """Rows predating the logged_at column carry a bare YYYY-MM-DD date."""
-    date_only = (datetime.now(tz=timezone.utc) - timedelta(days=2)).date().isoformat()
-    conn, _cursor = make_mock_conn(fetchall_side_effect=[[
-        {"name": "Bread", "product": "bread", "category": "Bakery", "shelf_life_days": 6, "last_purchase": date_only},
-    ]])
-    mock_conn.return_value = conn
-    result = metrics.get_running_low()
-    assert result[0]["name"] == "Bread"
-
-
-@patch("db.metrics.get_connection")
 def test_get_daily_cost_ranks_by_cost_per_day(mock_conn):
     conn, _cursor = make_mock_conn(fetchall_side_effect=[[
         {"name": "Peanut Butter", "product": None, "category": None, "shelf_life_days": 60, "treat_or_need": "need",

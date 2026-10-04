@@ -6,7 +6,13 @@
 overdue ones asked about (✅/❌), the list, grouped by usual store, fresh
 items flagged, unknown lifespans one "Ask me now" tap away. Per-pack
 lifespan stays (user: eggs = pack of 10 lasts 5 days; cheese is "less
-mathematic" — leave it to the self-correction). Still open: pick the day.
+mathematic" — leave it to the self-correction).
+✅ 2026-10-05: /shop SUGGESTS the day (user: suggest, not choose) = the day
+the first need runs out; the week is counted from that day. Run-out now
+counts packs (2 packs of eggs = 10 days) and only the latest brand of a
+product — fixed in /stock and the check-ins too. Next, once data allows:
+put the suggestion in the 10:00/18:00 round (ask the user first — it's a
+new kind of proactive message).
 
 ### Original idea (2026-10-04) — predict WHEN to go shopping and WHAT to buy
 User's goal, once there's enough data (a few months, data starts 2026-09):

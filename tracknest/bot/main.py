@@ -1874,7 +1874,8 @@ async def check_expiring_items(context: ContextTypes.DEFAULT_TYPE) -> bool:
         if not item["last_purchase"]:
             continue
         last = datetime.fromisoformat(item["last_purchase"])
-        if now >= last + timedelta(days=item["shelf_life_days"]):
+        # shelf_life_days is per pack: two packs of eggs last twice as long.
+        if now >= last + timedelta(days=item["shelf_life_days"] * max(1, item.get("last_quantity") or 1)):
             crud.mark_checkin_pending(item["name"])
             await context.bot.send_message(
                 chat_id=chat_id,
@@ -2259,36 +2260,56 @@ _SHOP_COVER_DAYS = 7  # one shop a week — the user's choice (2026-10-04)
 _SHOP_MAX_CHECKS = 5
 
 
-def _shop_plan() -> tuple[list[dict], list[dict], int]:
-    """(to buy, to check, unknown count) for a shop covering the next week, one entry per product.
+def _shop_plan() -> dict:
+    """The suggested shop: which day, what to buy for the week after it, what to ask first.
 
-    to check = needs that should already have run out: asked about, never
+    The day is the one the first need runs out — a suggestion, the user
+    decides. The week is counted from that day, so the shop lasts until the
+    next one. Needs that should already have run out are asked about, never
     assumed gone.
+
+    Returns:
+        Dict with keys day_offset (days from today to the suggested shop,
+        None when nothing predicted runs out), first (the product driving
+        that day), to_buy and to_check (one entry per product, soonest
+        first, each with "need" = the product's name) and unknown (count of
+        needs the bot can't predict yet).
     """
-    plan = metrics.get_shop_plan(_SHOP_COVER_DAYS)
+    plan = metrics.get_shop_plan(_SHOP_COVER_DAYS * 2)
     by_need: dict[str, dict] = {}
     for item in plan["items"]:
         key = _need_name(item).casefold()
         if key not in by_need or item["days_left"] < by_need[key]["days_left"]:
             by_need[key] = {**item, "need": _need_name(item)}
     entries = sorted(by_need.values(), key=lambda item: item["days_left"])
-    return ([e for e in entries if e["days_left"] >= 0], [e for e in entries if e["days_left"] < 0],
-            plan["unknown"])
+    upcoming = [e for e in entries if e["days_left"] >= 0]
+    day_offset = upcoming[0]["days_left"] if upcoming else None
+    until = (day_offset or 0) + _SHOP_COVER_DAYS
+    return {
+        "day_offset": day_offset,
+        "first": upcoming[0]["need"] if upcoming else None,
+        "to_buy": [e for e in upcoming if e["days_left"] <= until],
+        "to_check": [e for e in entries if e["days_left"] < 0],
+        "unknown": plan["unknown"],
+    }
 
 
 def _shop_text_and_buttons() -> tuple[str, InlineKeyboardMarkup | None]:
-    """The /shop message: what to buy this week, by store, and what the bot needs to ask first."""
-    to_buy, to_check, unknown = _shop_plan()
+    """The /shop message: the suggested day, what to buy for the week after it by store, and what to ask first."""
+    plan = _shop_plan()
+    to_buy, to_check, unknown = plan["to_buy"], plan["to_check"], plan["unknown"]
     listed = shopping_list.get_all_items()
     listed_keys = {entry["name"].casefold() for entry in listed}
-    end = (datetime.now(tz=_LOCAL_TZ) + timedelta(days=_SHOP_COVER_DAYS)).strftime("%a %-d %b")
+    today = datetime.now(tz=_LOCAL_TZ).date()
     by_store: dict[str, list[str]] = {}
     for item in to_buy:
         line = f"• {item['need']} — runs out {'today' if item['days_left'] == 0 else 'in ' + _days_left_text(item['days_left'])}"
         if item["need"].casefold() in listed_keys:
             line += " (on your list)"
         if item["shelf_life_days"] < _SHOP_COVER_DAYS:
-            line += f" ⏳ lasts {_days_left_text(item['shelf_life_days'])} — won't make it to the next shop"
+            packs = -(-_SHOP_COVER_DAYS // item["shelf_life_days"])
+            line += (f" ⏳ one lasts {_days_left_text(item['shelf_life_days'])} — "
+                     f"{packs} would last until the next shop")
         by_store.setdefault(item["store"] or "Store not known yet", []).append(line)
     predicted = {item["need"].casefold() for item in to_buy}
     for entry in listed:
@@ -2297,11 +2318,19 @@ def _shop_text_and_buttons() -> tuple[str, InlineKeyboardMarkup | None]:
             store = metrics.get_usual_store(known.get("product") or entry["name"])
             by_store.setdefault(store or "Store not known yet", []).append(
                 f"• {entry['name']}" + (f" ({entry['quantity']}x)" if entry["quantity"] > 1 else "") + " — on your list")
-    lines = [f"🛒 Your shop, to last until {end}:"]
+    if plan["day_offset"] is not None:
+        day = today + timedelta(days=plan["day_offset"])
+        until = day + timedelta(days=_SHOP_COVER_DAYS)
+        when = "today" if plan["day_offset"] == 0 else ("tomorrow" if plan["day_offset"] == 1 else day.strftime("%a %-d %b"))
+        lines = [f"📅 Suggested: shop {when} — {plan['first']} runs out then.",
+                 f"🛒 To last until {until.strftime('%a %-d %b')}:"]
+    elif by_store:
+        lines = ["📅 Nothing I can predict runs out in the next two weeks — shop whenever suits you.",
+                 "🛒 On your list:"]
+    else:
+        lines = ["📅 Nothing I can predict runs out in the next two weeks, and your list is empty."]
     for store in sorted(by_store, key=lambda s: (s == "Store not known yet", -len(by_store[s]))):
         lines += [f"\n{store}:", *by_store[store]]
-    if not by_store:
-        lines.append("Nothing I can predict runs out this week, and your list is empty.")
     rows = []
     unlisted = [item for item in to_buy if item["need"].casefold() not in listed_keys]
     if unlisted:
@@ -2314,7 +2343,7 @@ def _shop_text_and_buttons() -> tuple[str, InlineKeyboardMarkup | None]:
                          InlineKeyboardButton(f"❌ Out of {item['need']}", callback_data=f"checkin:no:{item['id']}")])
     if unknown:
         lines.append(f"\n🤷 I can't predict {unknown} thing{'s' if unknown != 1 else ''} yet — I don't know how long "
-                     f"{'they last' if unknown != 1 else 'it lasts'}. Tell me and next week's plan covers "
+                     f"{'they last' if unknown != 1 else 'it lasts'}. Tell me and the next plan covers "
                      f"{'them' if unknown != 1 else 'it'} too.")
         rows.append([InlineKeyboardButton("❓ Ask me now", callback_data="shop_ask")])
     return "\n".join(lines), InlineKeyboardMarkup(rows) if rows else None
@@ -2334,7 +2363,7 @@ async def handle_shop_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_reply_markup(None)
         await send_pending_profile_question(context.bot, query.message.chat_id, force=True)
         return
-    to_buy, _to_check, _unknown = _shop_plan()
+    to_buy = _shop_plan()["to_buy"]
     listed = {entry["name"].casefold() for entry in shopping_list.get_all_items()}
     added = []
     for item in to_buy:

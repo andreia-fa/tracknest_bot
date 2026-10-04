@@ -225,7 +225,7 @@ def set_par_level(name, level):
 # a need is covered by any brand of it, so Gouda bought yesterday means the
 # household has cheese even if Leerdammer ran out. Items without a known
 # product stand alone (keyed by their name).
-_LATEST_PRODUCT_PURCHASE_JOIN = """
+LATEST_PRODUCT_PURCHASE_JOIN = """
     LEFT JOIN item_expenses e ON e.id = (
         SELECT e2.id FROM item_expenses e2
         JOIN inventory_items i2 ON i2.id = e2.item_id
@@ -266,7 +266,7 @@ def get_par_alert_candidates(default_par_level):
         SELECT i.id, i.name, i.product, i.category, i.shelf_life_days, i.notes,
                e.logged_at AS last_purchase, e.quantity_purchased AS last_quantity, e.store AS last_store
         FROM inventory_items i
-        {_LATEST_PRODUCT_PURCHASE_JOIN}
+        {LATEST_PRODUCT_PURCHASE_JOIN}
         WHERE i.treat_or_need = 'need'
           AND i.lasts = 'days'
           AND i.spare_alert_pending = 0
@@ -322,14 +322,16 @@ def get_checkin_candidates():
     Returns:
         List of dicts: id, name, product, shelf_life_days, notes, last_purchase
         (ISO datetime of the product's most recent expense, or None if never
-        purchased) and last_store (where, if known).
+        purchased), last_quantity (packs bought that time — each lasts
+        shelf_life_days) and last_store (where, if known).
     """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(f"""
-        SELECT i.id, i.name, i.product, i.shelf_life_days, i.notes, e.logged_at AS last_purchase, e.store AS last_store
+        SELECT i.id, i.name, i.product, i.shelf_life_days, i.notes, e.logged_at AS last_purchase,
+               e.quantity_purchased AS last_quantity, e.store AS last_store
         FROM inventory_items i
-        {_LATEST_PRODUCT_PURCHASE_JOIN}
+        {LATEST_PRODUCT_PURCHASE_JOIN}
         WHERE i.treat_or_need = 'need'
           AND i.lasts = 'days'
           AND i.checkin_pending = 0

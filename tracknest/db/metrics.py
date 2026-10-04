@@ -177,6 +177,54 @@ def get_month_pace(year=None, month=None):
     }
 
 
+def _stocked_needs():
+    """Every stocked need with its run-out estimate, reasoned per product like the check-ins.
+
+    Only the most recently bought item of each product counts, timed from
+    that purchase — a new brand of cheese replaces the old one rather than
+    the old one's date still saying "cheese runs out". shelf_life_days is
+    per pack, so the run-out date is the purchase plus that many days per
+    pack bought.
+
+    Returns:
+        List of dicts (id, name, product, category, shelf_life_days,
+        last_quantity, days_left — negative once overdue —, run_out_date as
+        an ISO date, store: where this product is usually bought, or None),
+        never-bought needs left out.
+    """
+    from db.crud import LATEST_PRODUCT_PURCHASE_JOIN
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(f"""
+        SELECT i.id AS id, i.name AS name, i.product AS product, i.category AS category,
+               i.shelf_life_days AS shelf_life_days,
+               COALESCE(e.logged_at, e.purchase_date) AS last_purchase,
+               e.quantity_purchased AS last_quantity,
+               (SELECT e3.store FROM item_expenses e3 JOIN inventory_items j ON j.id = e3.item_id
+                WHERE COALESCE(j.product, j.name) = COALESCE(i.product, i.name) AND e3.store IS NOT NULL
+                GROUP BY e3.store ORDER BY COUNT(*) DESC, MAX(e3.purchase_date) DESC LIMIT 1) AS store
+        FROM inventory_items i
+        {LATEST_PRODUCT_PURCHASE_JOIN}
+        WHERE i.treat_or_need = 'need' AND i.lasts = 'days' AND e.item_id = i.id
+    """)
+    rows = cursor.fetchall()
+    cursor.close()
+    conn.close()
+
+    now = datetime.now(tz=timezone.utc)
+    needs = []
+    for row in rows:
+        packs = max(1, row["last_quantity"] or 1)
+        run_out = _as_utc(row["last_purchase"]) + timedelta(days=row["shelf_life_days"] * packs)
+        needs.append({
+            "id": row["id"], "name": row["name"], "product": row["product"], "category": row["category"],
+            "shelf_life_days": row["shelf_life_days"], "last_quantity": packs, "store": row["store"],
+            "days_left": (run_out - now).days, "run_out_date": run_out.date().isoformat(),
+        })
+    return needs
+
+
 def get_running_low(days_ahead=7):
     """Return needs whose estimated run-out date falls within the next few days.
 
@@ -193,36 +241,8 @@ def get_running_low(days_ahead=7):
         ISO date string, shelf_life_days), soonest first. Items already overdue are left out;
         those are the check-in flow's job.
     """
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT i.name AS name, i.product AS product, i.category AS category,
-               i.shelf_life_days AS shelf_life_days,
-               (SELECT COALESCE(MAX(e.logged_at), MAX(e.purchase_date))
-                FROM item_expenses e WHERE e.item_id = i.id) AS last_purchase
-        FROM inventory_items i
-        WHERE i.treat_or_need = 'need' AND i.lasts = 'days'
-    """)
-    rows = cursor.fetchall()
-    cursor.close()
-    conn.close()
-
-    now = datetime.now(tz=timezone.utc)
-    due = []
-    for row in rows:
-        if not row["last_purchase"]:
-            continue
-        run_out = _as_utc(row["last_purchase"]) + timedelta(days=row["shelf_life_days"])
-        days_left = (run_out - now).days
-        if 0 <= days_left <= days_ahead:
-            due.append({
-                "name": row["name"],
-                "product": row["product"],
-                "category": row["category"],
-                "days_left": days_left,
-                "run_out_date": run_out.date().isoformat(),
-                "shelf_life_days": row["shelf_life_days"],
-            })
+    due = [{k: need[k] for k in ("name", "product", "category", "days_left", "run_out_date", "shelf_life_days")}
+           for need in _stocked_needs() if 0 <= need["days_left"] <= days_ahead]
     due.sort(key=lambda item: item["days_left"])
     return due
 
@@ -239,57 +259,27 @@ def get_usual_store(product_or_name):
     return row["store"] if row else None
 
 
-def get_shop_plan(cover_days=7):
-    """Return what a shop today should cover: needs that run out within cover_days (or already have).
-
-    Every need with a known "lasts N days" is predicted from its latest
-    purchase; needs without one can't be, and are counted instead so the
-    caller can ask about them. Treats, same-day and one-off items are left
-    out — nothing to restock.
+def get_shop_plan(horizon_days=14):
+    """Return the needs a shop should think about: everything running out within horizon_days, or overdue.
 
     Args:
-        cover_days: How long the shop should last — until the next one.
+        horizon_days: How far ahead to look — the caller picks the shopping
+            day and the week after it from these.
 
     Returns:
-        Dict with keys items (list of {id, name, product, category,
-        days_left — negative once overdue —, shelf_life_days, store: the
-        store this product is most often bought at, or None}, soonest
-        first) and unknown (count of needs, or not-yet-sorted items, whose
-        lifespan isn't known).
+        Dict with keys items (see _stocked_needs, soonest first) and unknown
+        (count of bought needs, or not-yet-sorted items, whose lifespan
+        isn't known — they can't be predicted, only asked about).
     """
+    items = sorted((need for need in _stocked_needs() if need["days_left"] <= horizon_days),
+                   key=lambda need: need["days_left"])
     conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT i.id AS id, i.name AS name, i.product AS product, i.category AS category,
-               i.shelf_life_days AS shelf_life_days,
-               (SELECT COALESCE(MAX(e.logged_at), MAX(e.purchase_date))
-                FROM item_expenses e WHERE e.item_id = i.id) AS last_purchase,
-               (SELECT e.store FROM item_expenses e JOIN inventory_items j ON j.id = e.item_id
-                WHERE COALESCE(j.product, j.name) = COALESCE(i.product, i.name) AND e.store IS NOT NULL
-                GROUP BY e.store ORDER BY COUNT(*) DESC, MAX(e.purchase_date) DESC LIMIT 1) AS store
-        FROM inventory_items i
-        WHERE i.treat_or_need = 'need' AND i.lasts = 'days'
-    """)
-    rows = cursor.fetchall()
-    cursor.execute("""
+    unknown = conn.execute("""
         SELECT COUNT(*) FROM inventory_items i
         WHERE i.treat_or_need != 'treat' AND i.lasts = 'unknown'
           AND EXISTS (SELECT 1 FROM item_expenses e WHERE e.item_id = i.id)
-    """)
-    unknown = cursor.fetchone()[0]
-    cursor.close()
+    """).fetchone()[0]
     conn.close()
-
-    now = datetime.now(tz=timezone.utc)
-    items = []
-    for row in rows:
-        if not row["last_purchase"]:
-            continue
-        days_left = (_as_utc(row["last_purchase"]) + timedelta(days=row["shelf_life_days"]) - now).days
-        if days_left <= cover_days:
-            items.append({key: row[key] for key in ("id", "name", "product", "category", "shelf_life_days", "store")}
-                         | {"days_left": days_left})
-    items.sort(key=lambda item: item["days_left"])
     return {"items": items, "unknown": unknown}
 
 
