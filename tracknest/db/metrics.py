@@ -189,7 +189,8 @@ def _stocked_needs():
     Returns:
         List of dicts (id, name, product, category, shelf_life_days,
         last_quantity, days_left — negative once overdue —, run_out_date as
-        an ISO date, store: where this product is usually bought, or None),
+        an ISO date, last_purchase as an aware datetime, store: where this
+        product is usually bought, or None),
         never-bought needs left out.
     """
     from db.crud import LATEST_PRODUCT_PURCHASE_JOIN
@@ -221,6 +222,7 @@ def _stocked_needs():
             "id": row["id"], "name": row["name"], "product": row["product"], "category": row["category"],
             "shelf_life_days": row["shelf_life_days"], "last_quantity": packs, "store": row["store"],
             "days_left": (run_out - now).days, "run_out_date": run_out.date().isoformat(),
+            "last_purchase": _as_utc(row["last_purchase"]),
         })
     return needs
 

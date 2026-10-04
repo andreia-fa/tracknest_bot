@@ -121,3 +121,21 @@ def get_history(limit=10):
     cursor.close()
     conn.close()
     return rows
+
+
+def get_manual_removals():
+    """Return every entry the user took off the list by hand (and didn't put back), as {name, removed_at}.
+
+    removed_at is an aware UTC datetime — SQLite's CURRENT_TIMESTAMP is UTC
+    without an offset.
+    """
+    from datetime import datetime, timezone
+
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT name, removed_at FROM shopping_list_history WHERE reason = 'manual' AND restored = 0"
+    ).fetchall()
+    conn.close()
+    return [{"name": row["name"],
+             "removed_at": datetime.fromisoformat(row["removed_at"]).replace(tzinfo=timezone.utc)}
+            for row in rows]

@@ -38,7 +38,8 @@ async def test_checkins_go_out_one_per_call(mock_crud, mock_settings, mock_datet
     mock_crud.mark_checkin_pending.assert_called_once_with("BANANE")
 
 
-@pytest.mark.asyncio
+@patch("bot.main.fill_list_with_predictions", new=lambda: [])
+@patch("bot.main.fill_list_with_predictions", return_value=[])
 @patch("bot.main.check_spare_stock_alerts", new_callable=AsyncMock)
 @patch("bot.main.check_expiring_items", new_callable=AsyncMock)
 @patch("bot.main.check_budget_alert", new_callable=AsyncMock)

@@ -2033,12 +2033,44 @@ async def check_budget_alert(context: ContextTypes.DEFAULT_TYPE) -> bool:
     return False
 
 
+def fill_list_with_predictions() -> list[str]:
+    """Put every need predicted to run out before the shop after next on the list — silently.
+
+    The user's choice (2026-10-05): the bot fills the list itself. What
+    /shop would buy goes on, product-named, unless it's already listed (any
+    language or brand) or the user took it off by hand since it was last
+    bought — removing an entry is an answer, so it isn't re-added until the
+    next purchase. Needs that should already have run out are not added:
+    the check-in asks about them instead of assuming.
+
+    Returns:
+        The names added.
+    """
+    listed = [entry["name"] for entry in shopping_list.get_all_items()]
+    removals = shopping_list.get_manual_removals()
+    added = []
+    for item in _shop_plan()["to_buy"]:
+        names = [item["need"], item["name"]]
+        if any(same_kind(entry, names) for entry in listed):
+            continue
+        if any(r["removed_at"] > item["last_purchase"] and same_kind(r["name"], names) for r in removals):
+            continue
+        shopping_list.add_item(item["need"], 1, category=item.get("category") or infer_category(item["need"]))
+        listed.append(item["need"])
+        added.append(item["need"])
+    if added:
+        logger.info("Added %d predicted need(s) to the shopping list.", len(added))
+    return added
+
+
 async def proactive_round(context: ContextTypes.DEFAULT_TYPE):
-    """Scheduled job: send the single most important proactive message, if any.
+    """Scheduled job: fill the list with what runs out soon, then send the single most important message, if any.
 
     Runs at each of _PROACTIVE_ROUND_TIMES, so the bot volunteers at most
     two messages a day; whatever didn't fit stays due for a later round.
+    Filling the list sends nothing — the user sees it in /list.
     """
+    fill_list_with_predictions()
     for job in (check_budget_alert, check_expiring_items, check_spare_stock_alerts, remind_pending_profile):
         if await job(context):
             return

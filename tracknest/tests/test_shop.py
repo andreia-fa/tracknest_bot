@@ -109,3 +109,34 @@ async def test_the_check_in_waits_for_every_pack(db):
     context.bot.send_message = AsyncMock()
     with patch("bot.main.settings.get_chat_id", return_value=1):
         assert await main.check_expiring_items(context) is False
+
+
+def test_the_bot_fills_the_list_with_what_runs_out(db):
+    _need("Eier bunt 10er", "eggs", 5, 3, "REWE")           # runs out in 1 day
+    _need("Butter", "butter", 14, 10, "REWE")               # in 3 days
+    _need("Reis", "rice", 60, 2, "Lidl", "Pantry")          # weeks away
+    _need("Milram Gouda", "cheese", 10, 14, "REWE")        # overdue: asked, not added
+    shopping_list.add_item("coloured eggs", 1)
+    assert main.fill_list_with_predictions() == ["butter"]
+    assert sorted(i["name"] for i in shopping_list.get_all_items()) == ["butter", "coloured eggs"]
+    assert main.fill_list_with_predictions() == []  # never twice
+
+
+def test_a_removed_entry_stays_removed_until_bought_again(db):
+    _need("Butter", "butter", 14, 10, "REWE")
+    assert main.fill_list_with_predictions() == ["butter"]
+    shopping_list.remove_item("butter", reason="manual")
+    assert main.fill_list_with_predictions() == []
+    _need("Butter", "butter", 14, 12, "REWE")  # an older receipt: still not a new purchase
+    assert main.fill_list_with_predictions() == []
+
+
+@pytest.mark.asyncio
+async def test_the_round_fills_the_list_without_a_message(db):
+    _need("Butter", "butter", 14, 10, "REWE")
+    context = MagicMock()
+    context.bot.send_message = AsyncMock()
+    with patch("bot.main.settings.get_chat_id", return_value=None):
+        await main.proactive_round(context)
+    assert [i["name"] for i in shopping_list.get_all_items()] == ["butter"]
+    context.bot.send_message.assert_not_awaited()
