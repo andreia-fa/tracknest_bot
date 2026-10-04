@@ -11,7 +11,7 @@ from aiohttp import web
 
 from bot import dashboard
 from bot.categorize import CATEGORY_NAMES, infer_category
-from bot.list_match import canonical_product, choose_list_match, same_kind
+from bot.list_match import canonical_product, choose_list_match, copied_from_list, same_kind
 from bot.name_match import clean_name, match_known, name_key
 from bot.parser import TypedPurchase, parse_line, parse_purchase
 from bot.profile_guess import guess_profile
@@ -1597,7 +1597,10 @@ async def process_receipt_result(parsed: dict, receipt_id: int | None = None) ->
         is_new = crud.get_item(name) is None
         if ask_name and product:
             product = canonical_product(product, known_products)
-        list_match = choose_list_match(
+        # A known item or alias is the user's own wording, so only a brand-new
+        # name that's a verbatim list entry is suspect.
+        copied = ask_name and copied_from_list(item["name"], list_names)
+        list_match = None if copied else choose_list_match(
             item["name"], name, item["matched_shopping_list_item"], list_names, product=product,
         )
         if list_match:
@@ -1610,6 +1613,8 @@ async def process_receipt_result(parsed: dict, receipt_id: int | None = None) ->
         )
         if is_code_only(item["name"]):
             line += " ⚠️ no readable name on the receipt — check this one"
+        elif copied:
+            line += " ⚠️ this name was copied from your shopping list, not read off the receipt — check what it was"
         replies.append(line)
         if cleared_id:
             cleared.append((cleared_id, list_match))

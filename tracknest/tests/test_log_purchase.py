@@ -197,3 +197,23 @@ def test_purchase_line_shows_what_the_item_is(_remove, mock_crud, mock_expenses)
 
     assert line.startswith("• 1x LEERDAMMER CAR (cheese) at")
     assert mock_crud.add_item.call_args.kwargs["product"] == "cheese"
+
+
+@patch("bot.main.crud.get_known_products", new=lambda *a, **k: [])
+@patch("bot.main._log_purchase", return_value=("• line", None))
+@patch("bot.main.crud.get_item", return_value=None)
+@patch("bot.main.crud.get_alias", return_value=None)
+@patch("bot.main.shopping_list.get_all_items", return_value=[{"name": "Socks - decathlon"}])
+@patch("bot.main.crud.get_item_names", new=lambda: [])
+@patch("bot.main.expenses.names_bought_at", new=lambda price: set())
+def test_a_name_copied_from_the_list_never_clears_it(_list, _alias, _item, mock_log):
+    """The model once named a Burger King line "Socks - decathlon" — straight off the list it was shown."""
+    import asyncio
+    parsed = {
+        "items": [{"name": "Socks - decathlon", "quantity": 1, "unit_price": 3.99,
+                   "category": "Clothing", "matched_shopping_list_item": "Socks - decathlon"}],
+        "reconciled": True, "store": "Burger King",
+    }
+    reply, _markup = asyncio.run(main.process_receipt_result(parsed))
+    assert mock_log.call_args.kwargs["matched_list_item"] is None
+    assert "copied from your shopping list" in reply

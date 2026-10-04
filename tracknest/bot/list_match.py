@@ -164,6 +164,18 @@ def _shares_a_word(receipt_names: list[str], list_name: str) -> bool:
                for name in receipt_names for word in list_words)
 
 
+def copied_from_list(receipt_name: str, list_names: list[str]) -> bool:
+    """Whether the model's "receipt line" is really one of the shopping-list entries it was shown.
+
+    The vision model sees the list so it can match against it, and it has
+    copied an entry ("Socks - decathlon") as the name of a Burger King line.
+    A real receipt line written exactly like a typed list entry is rare, so
+    such a name isn't trusted to clear the list.
+    """
+    key = _normalize(receipt_name)
+    return bool(key) and any(_normalize(entry) == key for entry in list_names)
+
+
 def choose_list_match(
     receipt_name: str, canonical_name: str, model_match: str, list_names: list[str], product: str | None = None,
 ) -> str | None:

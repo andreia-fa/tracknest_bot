@@ -53,3 +53,10 @@ def test_model_match_kept_when_names_share_a_word():
 
 def test_pretzels_match_across_spellings():
     assert choose_list_match("LAUGENBREZEL", "LAUGENBREZEL", "", ["Pfefferbretzel"]) == "Pfefferbretzel"
+
+
+def test_copied_from_list_spots_a_verbatim_list_entry():
+    from bot.list_match import copied_from_list
+    assert copied_from_list("Socks - decathlon", ["milk", "socks  decathlon"])
+    assert not copied_from_list("SOCKEN 3ER", ["Socks - decathlon"])
+    assert not copied_from_list("", ["Socks"])
