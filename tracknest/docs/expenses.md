@@ -96,30 +96,45 @@ get_price_delta(item_name, new_price, min_history=1) -> dict | None
     # there isn't enough history yet. Call before log_expense() — see "Rules" above.
 ```
 
-## Related: What `/report` shows, and why (`bot/main.py`, `db/metrics.py`)
+## Related: `/finance` and `/stock`, and why (`bot/main.py`, `db/metrics.py`)
 
-Every line in `/report` has to answer something the user couldn't work out
-from the receipt itself. Reporting the obvious ("you spent money", "you
-bought sushi") was deliberately cut. What survived, and the function behind
-each:
+Until 2026-10-04 everything lived in one `/report` message, which the user
+found "too big and too messy": money, per-item insights, what's running out
+and a to-do list of open questions, all at once. It was split by what the
+user wants to know. `/report` stays as an alias of `/finance` until
+2026-10-25 (see `TODO.md`).
+
+Every line still has to answer something the user couldn't work out from
+the receipt itself.
+
+**`/finance`**: money only (`_finance_text`).
 
 | Line | Function | Why it earns its place |
 |------|----------|------------------------|
-| Spent + month-end pace | `get_month_pace()` | Straight-line projection (spend/day × days in month). Withheld before `_MIN_DAYS_FOR_PROJECTION` days, since extrapolating from 2 days is noise. |
-| Treats vs. needs | `get_spending_summary()` (`treat`/`need`/`unknown`) | The user's own treat/need answers, totalled — nobody sums this for themselves, and it reframes the month harder than the headline number. `unknown` stays separate so an unanswered question never masquerades as a need. |
-| Cost per day you own it | `get_daily_cost()` | Latest unit price ÷ shelf life. Separates "expensive to buy" from "expensive to keep around" — invisible on a receipt. Treats included; that's where the spread usually is. |
-| Running out soon | `get_running_low()` | Forward-looking counterpart to the check-in, which only speaks up once an item is *already* due. Needs lasting a number of days only, 7-day window, so one shopping trip can replace three. |
-| Creeping up | `get_price_trends()` | Inflation per item vs. its own history. |
+| Spent + month-end pace | `get_month_pace()` | Straight-line projection (spend/day × days in month). Withheld before `MIN_DAYS_FOR_PROJECTION` days, and says so, since extrapolating from 2 days is noise. |
+| Budget used | `get_budget_status()` | % of the monthly budget. Once there's a projection that lands over budget, it names treats as the easiest cut. |
+| Most on | `get_spending_summary(top_n=1)` | The single biggest category. |
+| Treats vs. needs | `get_spending_summary()` (`treat`/`need`/`unknown`) | The user's own treat/need answers, totalled. `unknown` stays separate so an unanswered question never masquerades as a need. |
 | Goal pace | `get_goal_status()` | Honest anchor, not a fake progress bar (no savings ledger exists). |
-| Green light / needs you | `get_inventory_health()` | Named items and what they need, or a single 🟢 line. |
 
-Ordering is deliberate: the surprising things first, the reassuring
-"nothing needs your attention" last.
+**`/stock`**: what runs out within 7 days (`get_running_low()`), named by
+**product** (`_need_name`: "bananas", not "BANANE"), one line per product.
+When two brands of the same product are both running out, the sooner one
+wins. 🛒 *Add all to list* re-reads the list when tapped and skips anything
+already on the shopping list, so tapping twice never bumps quantities.
 
-**Cut, and why:** a "consumption tracking accuracy" metric (how many
-shelf-life guesses had been corrected) — an internal calibration signal the
-user can't act on; and a frequency-based "most purchased item" — euro totals
-already answer "where does my money go" better.
+**Moved to the dashboard only:** cost per day (`get_daily_cost()`) and rising
+prices (`get_price_trends()`). They need room to be read properly.
+
+**Dropped:** the "needs you" list (`get_inventory_health()`): items waiting
+for a check-in, profiling or a spare alert. The reminders already ask those
+one at a time, and repeating them as a list of brand names was noise. The
+dashboard still shows it.
+
+**Cut earlier, and why:** a "consumption tracking accuracy" metric (how many
+shelf-life guesses had been corrected), which was an internal calibration
+signal the user can't act on; and a frequency-based "most purchased item",
+since euro totals already answer "where does my money go" better.
 
 ### How much to trust a shelf-life estimate
 
@@ -130,19 +145,17 @@ estimate; a "still good" check-in reply bumps it up). The user made the point
 concretely: sushi was declared a 2-day item but was still being eaten on day
 three.
 
-So the two shelf-life-derived report lines are treated differently, on
+So the two shelf-life-derived figures are treated differently, on
 purpose:
 
 - **Cost per day is gated** behind `_MIN_PURCHASES_FOR_SHELF_LIFE_TRUST`
   (currently 2 purchases, i.e. at least one observed interval). A price
   divided by an untested guess *looks* like a measurement, and because the
   figure ranks items against each other, one bad estimate reorders the whole
-  list. When nothing qualifies, `/report` says what it's waiting for rather
-  than dropping the section silently.
+  list. It is shown on the dashboard only.
 - **Running out soon is not gated.** It's a cheap, self-correcting nudge
   built on a number the user supplied themselves — if it's wrong, they just
-  don't buy bread — and the report labels it "based on your own estimates"
-  so the basis is visible.
+  don't buy bread. It's what `/stock` shows.
 
 The check-in and spare-stock alert jobs are deliberately *not* gated either:
 asking early is how the estimate gets corrected in the first place, so
@@ -201,12 +214,12 @@ today, via `handle_goal_date_choice`) or a typed custom `YYYY-MM-DD`.
 `metrics.get_goal_status()` doesn't track real progress (TrackNest has no
 savings ledger, only spending) — it computes an honest anchor number
 instead: the amount per month needed from today to hit the target by the
-target date. `/report` shows this, or that the target date has passed if
+target date. `/finance` shows this, or that the target date has passed if
 `pace_per_month` comes back `None`.
 
 ## Related: Price Trends (`db/metrics.py`)
 
-`/report` includes a "Creeping up" section from `metrics.get_price_trends()`,
+The dashboard's price watch comes from `metrics.get_price_trends()`,
 which compares each item's most recent purchase to the average of its earlier
 ones (same idea as `get_price_delta`, but aggregated across the whole
 inventory) and lists the items that have risen the most.

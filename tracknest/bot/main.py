@@ -214,9 +214,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "  /item <name> — See an item and change its category, treat/need, how long it lasts\n"
         "  /set_budget <amount> — Set a monthly spending budget\n"
         "  /set_goal — Optional: walks you through setting a savings goal "
-        "(name, amount, date), shown in /report\n"
+        "(name, amount, date), shown in /finance\n"
         "  /setup — Re-run the welcome questions (policy, budget, goal)\n"
-        "  /report — Spending, price trends, and what needs your attention"
+        "  /finance — This month's money: spent, budget, where it went, your goal\n"
+        "  /stock — What's about to run out, with a button to add it all to the list\n"
+        "  /dashboard — The full picture in a web page (€/day, rising prices, trips)"
     )
 
 
@@ -273,8 +275,8 @@ async def _finish_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "All set! I'll ask a couple more questions the first time you buy "
             "something new — for now, just send me what you need to buy, or a "
             "photo of a receipt.\n\n"
-            "Type /start anytime to see the full command list, or /report to "
-            "see how things are going."
+            "Type /start anytime to see the full command list, /finance for "
+            "this month's money, or /stock for what's running out."
         ),
     )
 
@@ -1975,98 +1977,104 @@ async def handle_goal_date_choice(update: Update, context: ContextTypes.DEFAULT_
         await _finish_onboarding(update, context)
 
 
-async def report(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /report — what the receipts add up to that a receipt can't tell you.
-
-    Numbers-first, compact format (2026-09-22): label + figure per line, no
-    connecting sentences — the underlying insights are unchanged from the
-    earlier prose version, only the density. Ordered so the surprising
-    things come first (where the money went, what each habit costs per day,
-    what's about to run out) and the reassuring "all clear" line comes last.
-    """
-    spending = metrics.get_spending_summary()
+def _finance_text() -> str:
+    """This month's money at a glance: spent, budget, where it went, the goal."""
+    spending = metrics.get_spending_summary(top_n=1)
     pace = metrics.get_month_pace()
     budget = metrics.get_budget_status()
+    total = spending["total"]
 
-    month_abbr = datetime.now(tz=timezone.utc).strftime("%b").upper()
-    lines = [f"📊 {month_abbr} · day {pace['days_elapsed']}/{pace['days_in_month']}"]
-    spent_line = f"€{spending['total']:.2f} spent"
+    month = datetime.now(tz=timezone.utc).strftime("%B")
+    lines = [f"💶 {month} · day {pace['days_elapsed']} of {pace['days_in_month']}"]
+    # Same gate get_month_pace uses: no forecast off a few days of data.
     if pace["projected"] is not None:
-        spent_line += f" → ~€{pace['projected']:.0f} proj."
-    lines.append(spent_line)
-    if budget:
-        budget_line = f"💰 Budget: €{budget['spent']:.2f} / €{budget['budget']:.2f} ({budget['pct']:.0f}%)"
-        # Only once there's a real month-end projection to compare against —
-        # same gate get_month_pace uses, so a nudge/compliment never fires
-        # off 2 days of data. Treats are named as the lever because it's
-        # the one category actually optional to cut, not because it's the
-        # only cause of an overage.
-        if pace["projected"] is not None:
-            if pace["projected"] > budget["budget"]:
-                budget_line += (
-                    f" — on pace for €{pace['projected']:.0f}, cut treats "
-                    f"(€{spending['treat']:.2f} so far) to land under."
-                )
-            else:
-                budget_line += " — well under pace, nice work 🎉"
-        lines.append(budget_line)
-
-    # The split the user's own treat/need answers add up to — nobody
-    # totals this for themselves, and it reframes the month more than the
-    # headline number does.
-    if spending["total"] > 0 and (spending["treat"] or spending["need"]):
-        treat_pct = spending["treat"] / spending["total"] * 100
-        lines.append(
-            f"Treats €{spending['treat']:.2f} ({treat_pct:.0f}%) · "
-            f"Needs €{spending['need']:.2f}"
-        )
-    if spending["unknown"]:
-        lines.append(f"Not sorted yet: €{spending['unknown']:.2f}")
-    if spending["top_categories"]:
-        lines.append("Top: " + ", ".join(
-            f"{c['category']} €{c['total']:.2f}" for c in spending["top_categories"]
-        ))
-
-    # Held back until a repurchase has tested each item's shelf life — see
-    # get_daily_cost. Says what it's waiting for rather than going quiet, so
-    # the number doesn't look like it was dropped.
-    daily = metrics.get_daily_cost()
-    lines.append("\n💸 €/day")
-    if daily["items"]:
-        lines.append(" · ".join(f"{d['name']} €{d['cost_per_day']:.2f}" for d in daily["items"]))
+        lines.append(f"€{total:.2f} spent — on pace for ~€{pace['projected']:.0f}")
     else:
-        lines.append(f"Waiting on repeat purchases (0/{daily['tracked']} ready)")
-
-    running_low = metrics.get_running_low()
-    if running_low:
-        lines.append("\n⏳ Running low")
-        lines.append(" · ".join(f"{item['name']} {item['days_left']}d" for item in running_low))
-
-    trends = metrics.get_price_trends()
-    if trends:
-        lines.append("\n📈 Rising")
-        lines.append(" · ".join(f"{t['name']} +{t['pct_change']:.0f}%" for t in trends))
-
+        lines.append(f"€{total:.2f} spent — too early to project (from day {metrics.MIN_DAYS_FOR_PROJECTION})")
+    if budget:
+        budget_line = f"Budget: {budget['pct']:.0f}% of €{budget['budget']:.0f} used"
+        if pace["projected"] is not None and pace["projected"] > budget["budget"]:
+            budget_line += " — over pace, treats are the easiest cut"
+        lines.append(budget_line)
+    if spending["top_categories"]:
+        top = spending["top_categories"][0]
+        lines.append(f"Most on: {top['category']} €{top['total']:.2f}")
+    if total > 0 and (spending["treat"] or spending["need"]):
+        mix = (f"Treats {spending['treat'] / total * 100:.0f}% · "
+               f"Needs {spending['need'] / total * 100:.0f}%")
+        if spending["unknown"]:
+            mix += f" · Not sorted {spending['unknown'] / total * 100:.0f}%"
+        lines.append(mix)
     goal = metrics.get_goal_status()
     if goal:
         if goal["pace_per_month"] is not None:
-            lines.append(f"\n🎯 Goal: €{goal['pace_per_month']:.0f}/mo → {goal['name']} ({goal['days_left']}d left)")
+            lines.append(f"🎯 {goal['name']}: put aside €{goal['pace_per_month']:.0f}/month "
+                         f"({goal['days_left']} days left)")
         else:
-            lines.append(f"\n🎯 Goal: {goal['name']} target passed ({goal['target_date']})")
+            lines.append(f"🎯 {goal['name']}: target date passed ({goal['target_date']})")
+    return "\n".join(lines)
 
-    health = metrics.get_inventory_health()
-    if not any(health.values()):
-        lines.append("\n🟢 All clear")
+
+async def finance_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /finance (and the old /report) — this month's money in a few lines.
+
+    Split out of the old all-in-one /report (2026-10-04), which mixed money,
+    insights, stock and a to-do list in one message. €/day and rising prices
+    live on the dashboard now; open questions are asked by the reminders.
+    """
+    await update.message.reply_text(_finance_text())
+
+
+def _running_out() -> list[dict]:
+    """Needs running out soon, one entry per product (soonest brand wins), soonest first."""
+    by_need: dict[str, dict] = {}
+    for item in metrics.get_running_low():
+        need = _need_name(item)
+        key = need.casefold()
+        if key not in by_need or item["days_left"] < by_need[key]["days_left"]:
+            by_need[key] = {**item, "need": need}
+    return sorted(by_need.values(), key=lambda item: item["days_left"])
+
+
+def _days_left_text(days: int) -> str:
+    if days == 0:
+        return "today"
+    return "1 day" if days == 1 else f"{days} days"
+
+
+async def stock_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /stock — what's about to run out, by product, with one button to list it all."""
+    running_out = _running_out()
+    if not running_out:
+        await update.message.reply_text("Nothing is running out in the next 7 days. 🟢")
+        return
+    lines = ["Running out soon:"]
+    lines += [f"• {item['need']} — {_days_left_text(item['days_left'])}" for item in running_out]
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🛒 Add all to list", callback_data="stock_add_all")]])
+    await update.message.reply_text("\n".join(lines), reply_markup=keyboard)
+
+
+async def handle_stock_add_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle "Add all to list" under /stock — list every product running out that isn't listed yet.
+
+    Re-reads what's running out at tap time rather than trusting the old
+    message, and skips anything already on the list so a second tap never
+    bumps quantities.
+    """
+    query = update.callback_query
+    await query.answer()
+    listed = {entry["name"].casefold() for entry in shopping_list.get_all_items()}
+    added = []
+    for item in _running_out():
+        if item["need"].casefold() in listed:
+            continue
+        shopping_list.add_item(item["need"], 1, category=item.get("category") or infer_category(item["need"]))
+        added.append(item["need"])
+    if added:
+        await query.edit_message_text("Added to your shopping list: " + ", ".join(added) + ".")
     else:
-        lines.append("\n🚦 Needs you")
-        for name in health["unprofiled"]:
-            lines.append(f"{name}: needs profiling")
-        for name in health["checkin_pending"]:
-            lines.append(f"{name}: check-in pending")
-        for name in health["spare_alert_pending"]:
-            lines.append(f"{name}: spare-stock alert")
-
-    await update.message.reply_text("\n".join(lines))
+        await query.edit_message_text("Everything running out is already on your shopping list.")
+    await context.bot.send_message(query.message.chat_id, _shopping_list_text())
 
 
 async def dashboard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2197,7 +2205,10 @@ async def main():
     app.add_handler(CommandHandler("item", item_cmd))
     app.add_handler(CommandHandler("set_budget", set_budget_cmd))
     app.add_handler(CommandHandler("set_goal", set_goal_cmd))
-    app.add_handler(CommandHandler("report", report))
+    app.add_handler(CommandHandler("finance", finance_cmd))
+    app.add_handler(CommandHandler("stock", stock_cmd))
+    # Old name, kept until 2026-10-25 so the habit still works (see TODO.md).
+    app.add_handler(CommandHandler("report", finance_cmd))
     app.add_handler(CommandHandler("setup", setup_cmd))
     app.add_handler(CommandHandler("dashboard", dashboard_cmd))
     app.add_handler(CallbackQueryHandler(handle_goal_date_choice, pattern=r"^goal_date:"))
@@ -2221,6 +2232,7 @@ async def main():
     app.add_handler(CallbackQueryHandler(handle_shelf_set, pattern=r"^shelf_set:"))
     app.add_handler(CallbackQueryHandler(handle_spare_alert_choice, pattern=r"^spare_(add|plenty|stop):"))
     app.add_handler(CallbackQueryHandler(handle_typed_choice, pattern=r"^typed:"))
+    app.add_handler(CallbackQueryHandler(handle_stock_add_all, pattern=r"^stock_add_all$"))
     app.add_handler(CallbackQueryHandler(handle_checkin_choice, pattern=r"^checkin:(yes|no):"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))

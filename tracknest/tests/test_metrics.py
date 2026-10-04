@@ -98,10 +98,10 @@ def test_get_running_low_within_window(mock_conn):
     yesterday = (datetime.now(tz=timezone.utc) - timedelta(days=1)).isoformat()
     long_ago = (datetime.now(tz=timezone.utc) - timedelta(days=30)).isoformat()
     conn, _cursor = make_mock_conn(fetchall_side_effect=[[
-        {"name": "Bread", "shelf_life_days": 6, "last_purchase": yesterday},
-        {"name": "Peanut Butter", "shelf_life_days": 60, "last_purchase": yesterday},
-        {"name": "Overdue Spinach", "shelf_life_days": 10, "last_purchase": long_ago},
-        {"name": "Never Bought", "shelf_life_days": 5, "last_purchase": None},
+        {"name": "Bread", "product": "bread", "category": "Bakery", "shelf_life_days": 6, "last_purchase": yesterday},
+        {"name": "Peanut Butter", "product": None, "category": None, "shelf_life_days": 60, "last_purchase": yesterday},
+        {"name": "Overdue Spinach", "product": None, "category": None, "shelf_life_days": 10, "last_purchase": long_ago},
+        {"name": "Never Bought", "product": None, "category": None, "shelf_life_days": 5, "last_purchase": None},
     ]])
     mock_conn.return_value = conn
     result = metrics.get_running_low(days_ahead=7)
@@ -114,7 +114,7 @@ def test_get_running_low_handles_date_only_last_purchase(mock_conn):
     """Rows predating the logged_at column carry a bare YYYY-MM-DD date."""
     date_only = (datetime.now(tz=timezone.utc) - timedelta(days=2)).date().isoformat()
     conn, _cursor = make_mock_conn(fetchall_side_effect=[[
-        {"name": "Bread", "shelf_life_days": 6, "last_purchase": date_only},
+        {"name": "Bread", "product": "bread", "category": "Bakery", "shelf_life_days": 6, "last_purchase": date_only},
     ]])
     mock_conn.return_value = conn
     result = metrics.get_running_low()
@@ -124,11 +124,11 @@ def test_get_running_low_handles_date_only_last_purchase(mock_conn):
 @patch("db.metrics.get_connection")
 def test_get_daily_cost_ranks_by_cost_per_day(mock_conn):
     conn, _cursor = make_mock_conn(fetchall_side_effect=[[
-        {"name": "Peanut Butter", "shelf_life_days": 60, "treat_or_need": "need",
+        {"name": "Peanut Butter", "product": None, "category": None, "shelf_life_days": 60, "treat_or_need": "need",
          "unit_price": 6.99, "purchase_count": 3},
         {"name": "Sushi", "shelf_life_days": 2, "treat_or_need": "treat",
          "unit_price": 10.99, "purchase_count": 2},
-        {"name": "Never Bought", "shelf_life_days": 5, "treat_or_need": "need",
+        {"name": "Never Bought", "product": None, "category": None, "shelf_life_days": 5, "treat_or_need": "need",
          "unit_price": None, "purchase_count": 0},
     ]])
     mock_conn.return_value = conn

@@ -40,27 +40,18 @@ It helps you manage home inventory and track household expenses through a conver
 - ✅ `/set_budget <amount>` – Set a monthly spending budget, with an alert at 80%/100%
 - ✅ `/set_goal` – Optional savings goal: a short guided conversation (what
   you're saving for, how much, then a date picked from buttons or typed
-  custom), shown in `/report` as the pace you'd need per month to hit it
+  custom), shown in `/finance` as the pace you'd need per month to hit it
   (opt-in only, never asked upfront)
 - ✅ Every receipt item shows its % change vs. its own purchase history (not just
   spikes), flagged distinctly once it crosses +15%
-- ✅ `/report` – Compact, numbers-first (label + figure, no prose) view of what a
-  receipt *can't* tell you:
-  - **Budget** – spent vs. budget, plus a nudge to cut treats specifically if
-    you're on pace to go over, or a compliment if you're comfortably under
-  - **Treats / Essential / Necessity split** – what share of the month went to
-    each purchase type. Your own answers, totalled up. (Necessity = a
-    same-day-consumed item like a coffee or a pretzel — distinct from a
-    stocked "essential.")
-  - **€/day you own it** – latest price ÷ shelf life, which separates "expensive
-    to buy" from "expensive to keep around" (a €10.99 box lasting 2 days costs €5.50/day;
-    €6.99 peanut butter lasting 60 days costs €0.12/day).
-  - **Month-end pace** – straight-line projection of where this month lands, withheld
-    early in the month when there's too little to extrapolate from.
-  - **Running low** – essentials due within a week, so one trip replaces three.
-  - Plus price creep, goal pace (a standalone anchor number — not linked to
-    the budget or treats figures, since TrackNest tracks spending, not actual
-    savings), and an all-clear line when genuinely nothing needs you.
+- ✅ `/finance` – This month's money in about six lines: spent and the
+  month-end pace (withheld before day 5), budget used (with a nudge if you're
+  on pace to go over), the category you spent most on, the treats/needs split,
+  and the monthly pace for your goal. `/report` still works as a shortcut
+  until 2026-10-25.
+- ✅ `/stock` – What runs out in the next 7 days, named by product ("bananas",
+  not "BANANE"), each product once, with a 🛒 *Add all to list* button that
+  skips anything already on the list.
 - ✅ `/cleared` – What recently came off the shopping list (by receipt, typed
   purchase, or by hand), each with a ↩️ Put back button. Receipt replies carry
   the same buttons for whatever that receipt cleared.
@@ -69,7 +60,8 @@ It helps you manage home inventory and track household expenses through a conver
   on the server) showing the month at a glance: spend + month-end forecast,
   shopping trips and average basket, budget vs. calendar pace, treats share,
   spend by day, spending mix, categories, stores, price watch, what to buy,
-  what needs your answer, and cost per day once it's trustworthy.
+  what needs your answer, rising prices, and cost per day once it's
+  trustworthy — the detail that `/finance` and `/stock` leave out.
 
   (data layer in `db/metrics.py` is Telegram-agnostic — `/dashboard` is the
   "future web page" this line used to foreshadow, now real)
@@ -167,7 +159,7 @@ tracknest/
 ├── db/
 │   ├── crud.py              # inventory CRUD operations
 │   ├── expenses.py          # expense tracking logic
-│   ├── metrics.py           # read-only aggregates for /report and alerts
+│   ├── metrics.py           # read-only aggregates for /finance, /stock, dashboard, alerts
 │   ├── settings.py          # household settings (chat id, par level, budget)
 │   ├── shopping_list.py     # shopping list CRUD operations
 │   └── database.py          # DB connection and schema

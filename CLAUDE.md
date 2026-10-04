@@ -37,7 +37,7 @@ tracknest/
                          thing receipt_worker.py invokes (via SSH + docker
                          exec) to touch the cloud DB — reuses the real
                          functions above rather than building SQL remotely
-    metrics.py          — read-only aggregates for /report and alerts
+    metrics.py          — read-only aggregates for /finance, /stock, dashboard, alerts
     settings.py         — household settings (chat id, par level, budget)
   tests/                — one test_*.py per db/ and bot/ module above (mocked Bot; mocked or
                          throwaway-SQLite DB, see Development Rules)

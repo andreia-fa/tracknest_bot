@@ -1,4 +1,4 @@
-"""Read-only aggregate queries backing /report and proactive alerts.
+"""Read-only aggregate queries backing /finance, /stock, the dashboard and proactive alerts.
 
 Deliberately Telegram-agnostic — every function returns plain dicts/lists so
 a future web page can call the same functions instead of re-deriving these
@@ -12,7 +12,7 @@ from db.database import get_connection
 
 # Extrapolating a month-end total from only a few days of spend is noise, not
 # a forecast — get_month_pace returns no projection below this many days in.
-_MIN_DAYS_FOR_PROJECTION = 5
+MIN_DAYS_FOR_PROJECTION = 5
 
 # A shelf-life estimate starts as the user's cold guess and only becomes
 # evidence once a real repurchase interval has tested it (log_expense corrects
@@ -133,7 +133,7 @@ def get_month_pace(year=None, month=None):
     days_elapsed = now.day if is_current_month else days_in_month
 
     spent = get_spending_summary(year, month)["total"]
-    if is_current_month and days_elapsed >= _MIN_DAYS_FOR_PROJECTION:
+    if is_current_month and days_elapsed >= MIN_DAYS_FOR_PROJECTION:
         projected = spent / days_elapsed * days_in_month
     else:
         projected = None
@@ -157,14 +157,15 @@ def get_running_low(days_ahead=7):
         days_ahead: How far ahead to look.
 
     Returns:
-        List of dicts (name, days_left, run_out_date as an ISO date string,
-        shelf_life_days), soonest first. Items already overdue are left out;
+        List of dicts (name, product, category, days_left, run_out_date as an
+        ISO date string, shelf_life_days), soonest first. Items already overdue are left out;
         those are the check-in flow's job.
     """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT i.name AS name, i.shelf_life_days AS shelf_life_days,
+        SELECT i.name AS name, i.product AS product, i.category AS category,
+               i.shelf_life_days AS shelf_life_days,
                (SELECT COALESCE(MAX(e.logged_at), MAX(e.purchase_date))
                 FROM item_expenses e WHERE e.item_id = i.id) AS last_purchase
         FROM inventory_items i
@@ -184,6 +185,8 @@ def get_running_low(days_ahead=7):
         if 0 <= days_left <= days_ahead:
             due.append({
                 "name": row["name"],
+                "product": row["product"],
+                "category": row["category"],
                 "days_left": days_left,
                 "run_out_date": run_out.date().isoformat(),
                 "shelf_life_days": row["shelf_life_days"],

@@ -1,5 +1,19 @@
 # TODO
 
+## ✅ Done (2026-10-04) — split /report into /finance and /stock
+User: /report is "just too big and too messy". Agreed split:
+- `/finance` — money only, ~6 lines: spent + projection, budget %, most-spent
+  category, treats vs needs, goal pace.
+- `/stock` — what runs out in the next 7 days, named by **product** (not the
+  receipt name), with one "🛒 Add all to list" button.
+- €/day and rising prices: dashboard only (already shown there).
+- "Needs you" list: dropped — the reminders already ask one at a time.
+- `/report` stays as a shortcut to `/finance` for now.
+
+## ⏰ TODO (due 2026-10-25) — remove the /report shortcut
+Kept a few weeks after the /finance split so the old habit still works.
+Then drop the handler and mention `/finance` in its place.
+
 ## ⏳ Parked (2026-10-04) — favourites are LEARNED by observation, never asked
 User: "it's something one learns by observation" — e.g. 10 of 15 weeks of
 cheese were Milram → Milram is the favourite cheese, no question needed.

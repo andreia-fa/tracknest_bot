@@ -81,7 +81,7 @@ tracknest/
 ├── db/
 │   ├── crud.py              # inventory item CRUD operations
 │   ├── expenses.py          # expense logging and reporting
-│   ├── metrics.py           # read-only aggregates for /report and alerts
+│   ├── metrics.py           # read-only aggregates for /finance, /stock, dashboard, alerts
 │   ├── settings.py          # household settings (chat id, par level, budget)
 │   ├── shopping_list.py     # shopping list CRUD operations
 │   └── database.py          # SQLite connection factory + schema init
