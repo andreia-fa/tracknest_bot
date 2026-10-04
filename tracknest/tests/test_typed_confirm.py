@@ -54,6 +54,25 @@ async def test_list_lines_wait_for_confirmation(mock_crud, mock_list):
 
     mock_list.add_item.assert_called_once()
     mock_list.remove_item.assert_called_once_with("bananas", reason="manual")
+    # The updated list follows right away, without needing /list.
+    assert context.bot.send_message.call_args.args[1].startswith("Shopping list:")
+
+
+@pytest.mark.asyncio
+@patch("bot.main._typed_purchase_store", return_value=None)
+@patch("bot.main.shopping_list")
+@patch("bot.main.crud")
+async def test_purchase_only_does_not_resend_the_list(mock_crud, mock_list, _store):
+    mock_crud.get_pending_profile_item.return_value = None
+    mock_crud.get_pending_checkin_item.return_value = None
+    context = _context()
+    await main.handle_text(_text_update("matcha 2.50"), context)
+
+    with patch("bot.main._log_purchase", return_value=("Logged matcha", None)), \
+            patch("bot.main.send_pending_profile_question", AsyncMock()):
+        await main.handle_typed_choice(_callback_update("typed:list:1"), context)
+
+    context.bot.send_message.assert_not_called()
 
 
 @pytest.mark.asyncio

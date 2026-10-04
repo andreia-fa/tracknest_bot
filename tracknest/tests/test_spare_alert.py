@@ -84,8 +84,12 @@ async def test_alert_near_run_out_comes_with_buttons(mock_crud, mock_settings, m
 @patch("bot.main.crud")
 async def test_add_to_list(mock_crud, mock_list):
     mock_crud.get_item_by_id.return_value = CHEESE
-    await main.handle_spare_alert_choice(_callback_update("spare_add:4"), MagicMock())
+    mock_list.get_all_items.return_value = [{"name": "cheese", "quantity": 1, "category": "Dairy"}]
+    context = MagicMock()
+    context.bot.send_message = AsyncMock()
+    await main.handle_spare_alert_choice(_callback_update("spare_add:4"), context)
     mock_list.add_item.assert_called_once_with("cheese", 1, category="Dairy")
+    assert "• cheese (1x)" in context.bot.send_message.call_args.args[1]
 
 
 @pytest.mark.asyncio

@@ -948,16 +948,18 @@ def _preview_list_lines(text: str) -> list[str]:
     return preview
 
 
-def _apply_list_lines(text: str) -> tuple[list[str], list[int] | None]:
+def _apply_list_lines(text: str) -> tuple[list[str], list[int] | None, bool]:
     """Apply typed lines to the shopping list (or log priced lines as purchases).
 
     Returns:
-        (replies, new_item_ids): one reply line per input line, and the ids
-        of items a purchase line created (to offer ✏️ on their guessed
-        answers) — None if no line was a purchase at all.
+        (replies, new_item_ids, list_changed): one reply line per input
+        line; the ids of items a purchase line created (to offer ✏️ on
+        their guessed answers) — None if no line was a purchase at all;
+        and whether any line added to or removed from the shopping list.
     """
     replies = []
     new_item_ids = None
+    list_changed = False
     trip_key = f"typed:{datetime.now(tz=timezone.utc).isoformat()}"  # one visit per typed message
     for line in (line for line in text.splitlines() if line.strip()):
         line, note = _split_note(line)
@@ -969,6 +971,7 @@ def _apply_list_lines(text: str) -> tuple[list[str], list[int] | None]:
                 continue
             if shopping_list.remove_item(name, reason="manual"):
                 replies.append(f"Removed {name} from your shopping list.")
+                list_changed = True
             else:
                 replies.append(f"'{name}' wasn't on your list.")
             continue
@@ -992,13 +995,14 @@ def _apply_list_lines(text: str) -> tuple[list[str], list[int] | None]:
                 new_item_ids.append(logged["id"])
             continue
         shopping_list.add_item(name, qty, category=infer_category(name))
+        list_changed = True
         reply = f"Added {qty}x {name} to your shopping list."
         if note:
             # Notes live on the item, which exists once it's been bought.
             reply += (f"\n  📝 {note}" if crud.set_item_note(name, note)
                       else "\n  (note not saved — I can keep notes once you've bought it)")
         replies.append(reply)
-    return replies, new_item_ids
+    return replies, new_item_ids, list_changed
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1082,19 +1086,20 @@ async def handle_typed_choice(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.edit_message_text(f"💬 Answering {pending[2]}: {typed['text']}")
         await _answer_pending_question(_replayed_update(query, typed["text"]), context, pending[0])
         return
-    replies, new_item_ids = _apply_list_lines(typed["text"])
+    replies, new_item_ids, list_changed = _apply_list_lines(typed["text"])
     rows = _fix_buttons(new_item_ids or [])
     await query.edit_message_text("\n".join(replies), reply_markup=InlineKeyboardMarkup(rows) if rows else None)
+    if list_changed:
+        await context.bot.send_message(query.message.chat_id, _shopping_list_text())
     if new_item_ids is not None:
         await send_pending_profile_question(context.bot, query.message.chat_id)
 
 
-async def show_shopping_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /list — display the current shopping list, grouped by category."""
+def _shopping_list_text() -> str:
+    """The current shopping list, grouped by category, as one message."""
     items = shopping_list.get_all_items()
     if not items:
-        await update.message.reply_text("Your shopping list is empty.")
-        return
+        return "Your shopping list is empty."
     by_category: dict[str, list[dict]] = {}
     for item in items:
         category = item["category"]
@@ -1108,7 +1113,12 @@ async def show_shopping_list(update: Update, context: ContextTypes.DEFAULT_TYPE)
         lines = [f"• {i['name']} ({i['quantity']}x){_related_notes(i['name'])}"
                  for i in by_category[category]]
         sections.append(f"{category}:\n" + "\n".join(lines))
-    await update.message.reply_text("Shopping list:\n\n" + "\n\n".join(sections))
+    return "Shopping list:\n\n" + "\n\n".join(sections)
+
+
+async def show_shopping_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /list — display the current shopping list, grouped by category."""
+    await update.message.reply_text(_shopping_list_text())
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1478,6 +1488,7 @@ async def handle_spare_alert_choice(update: Update, context: ContextTypes.DEFAUL
         need = _need_name(item)
         shopping_list.add_item(need, 1, category=item.get("category") or infer_category(need))
         await query.edit_message_text(f"Added {need} to your shopping list.")
+        await context.bot.send_message(query.message.chat_id, _shopping_list_text())
     elif action == "spare_plenty":
         extend = max(_SPARE_PLENTY_MIN_EXTEND_DAYS, round(item["shelf_life_days"] * 0.25))
         crud.bump_shelf_life(name, extend)
