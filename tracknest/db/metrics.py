@@ -227,6 +227,72 @@ def get_running_low(days_ahead=7):
     return due
 
 
+def get_usual_store(product_or_name):
+    """Return the store a product (or an item by name) is most often bought at, or None if never with a store."""
+    conn = get_connection()
+    row = conn.execute("""
+        SELECT e.store FROM item_expenses e JOIN inventory_items i ON i.id = e.item_id
+        WHERE (lower(COALESCE(i.product, '')) = lower(?) OR lower(i.name) = lower(?)) AND e.store IS NOT NULL
+        GROUP BY e.store ORDER BY COUNT(*) DESC, MAX(e.purchase_date) DESC LIMIT 1
+    """, (product_or_name, product_or_name)).fetchone()
+    conn.close()
+    return row["store"] if row else None
+
+
+def get_shop_plan(cover_days=7):
+    """Return what a shop today should cover: needs that run out within cover_days (or already have).
+
+    Every need with a known "lasts N days" is predicted from its latest
+    purchase; needs without one can't be, and are counted instead so the
+    caller can ask about them. Treats, same-day and one-off items are left
+    out — nothing to restock.
+
+    Args:
+        cover_days: How long the shop should last — until the next one.
+
+    Returns:
+        Dict with keys items (list of {id, name, product, category,
+        days_left — negative once overdue —, shelf_life_days, store: the
+        store this product is most often bought at, or None}, soonest
+        first) and unknown (count of needs, or not-yet-sorted items, whose
+        lifespan isn't known).
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT i.id AS id, i.name AS name, i.product AS product, i.category AS category,
+               i.shelf_life_days AS shelf_life_days,
+               (SELECT COALESCE(MAX(e.logged_at), MAX(e.purchase_date))
+                FROM item_expenses e WHERE e.item_id = i.id) AS last_purchase,
+               (SELECT e.store FROM item_expenses e JOIN inventory_items j ON j.id = e.item_id
+                WHERE COALESCE(j.product, j.name) = COALESCE(i.product, i.name) AND e.store IS NOT NULL
+                GROUP BY e.store ORDER BY COUNT(*) DESC, MAX(e.purchase_date) DESC LIMIT 1) AS store
+        FROM inventory_items i
+        WHERE i.treat_or_need = 'need' AND i.lasts = 'days'
+    """)
+    rows = cursor.fetchall()
+    cursor.execute("""
+        SELECT COUNT(*) FROM inventory_items i
+        WHERE i.treat_or_need != 'treat' AND i.lasts = 'unknown'
+          AND EXISTS (SELECT 1 FROM item_expenses e WHERE e.item_id = i.id)
+    """)
+    unknown = cursor.fetchone()[0]
+    cursor.close()
+    conn.close()
+
+    now = datetime.now(tz=timezone.utc)
+    items = []
+    for row in rows:
+        if not row["last_purchase"]:
+            continue
+        days_left = (_as_utc(row["last_purchase"]) + timedelta(days=row["shelf_life_days"]) - now).days
+        if days_left <= cover_days:
+            items.append({key: row[key] for key in ("id", "name", "product", "category", "shelf_life_days", "store")}
+                         | {"days_left": days_left})
+    items.sort(key=lambda item: item["days_left"])
+    return {"items": items, "unknown": unknown}
+
+
 def get_daily_cost(top_n=3):
     """Return items ranked by what they cost per day of use, once that's trustworthy.
 

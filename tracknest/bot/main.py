@@ -219,6 +219,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "(name, amount, date), shown in /finance\n"
         "  /setup — Re-run the welcome questions (policy, budget, goal)\n"
         "  /finance — This month's money: spent, budget, where it went, your goal\n"
+        "  /shop — Plan this week's shop: what runs out before the next one, by store\n"
         "  /stock — What's about to run out, with a button to add it all to the list\n"
         "  /dashboard — The full picture in a web page (€/day, rising prices, trips)"
     )
@@ -2254,6 +2255,97 @@ async def stock_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), reply_markup=keyboard)
 
 
+_SHOP_COVER_DAYS = 7  # one shop a week — the user's choice (2026-10-04)
+_SHOP_MAX_CHECKS = 5
+
+
+def _shop_plan() -> tuple[list[dict], list[dict], int]:
+    """(to buy, to check, unknown count) for a shop covering the next week, one entry per product.
+
+    to check = needs that should already have run out: asked about, never
+    assumed gone.
+    """
+    plan = metrics.get_shop_plan(_SHOP_COVER_DAYS)
+    by_need: dict[str, dict] = {}
+    for item in plan["items"]:
+        key = _need_name(item).casefold()
+        if key not in by_need or item["days_left"] < by_need[key]["days_left"]:
+            by_need[key] = {**item, "need": _need_name(item)}
+    entries = sorted(by_need.values(), key=lambda item: item["days_left"])
+    return ([e for e in entries if e["days_left"] >= 0], [e for e in entries if e["days_left"] < 0],
+            plan["unknown"])
+
+
+def _shop_text_and_buttons() -> tuple[str, InlineKeyboardMarkup | None]:
+    """The /shop message: what to buy this week, by store, and what the bot needs to ask first."""
+    to_buy, to_check, unknown = _shop_plan()
+    listed = shopping_list.get_all_items()
+    listed_keys = {entry["name"].casefold() for entry in listed}
+    end = (datetime.now(tz=_LOCAL_TZ) + timedelta(days=_SHOP_COVER_DAYS)).strftime("%a %-d %b")
+    by_store: dict[str, list[str]] = {}
+    for item in to_buy:
+        line = f"• {item['need']} — runs out {'today' if item['days_left'] == 0 else 'in ' + _days_left_text(item['days_left'])}"
+        if item["need"].casefold() in listed_keys:
+            line += " (on your list)"
+        if item["shelf_life_days"] < _SHOP_COVER_DAYS:
+            line += f" ⏳ lasts {_days_left_text(item['shelf_life_days'])} — won't make it to the next shop"
+        by_store.setdefault(item["store"] or "Store not known yet", []).append(line)
+    predicted = {item["need"].casefold() for item in to_buy}
+    for entry in listed:
+        if entry["name"].casefold() not in predicted:
+            known = crud.get_item(entry["name"]) or {}
+            store = metrics.get_usual_store(known.get("product") or entry["name"])
+            by_store.setdefault(store or "Store not known yet", []).append(
+                f"• {entry['name']}" + (f" ({entry['quantity']}x)" if entry["quantity"] > 1 else "") + " — on your list")
+    lines = [f"🛒 Your shop, to last until {end}:"]
+    for store in sorted(by_store, key=lambda s: (s == "Store not known yet", -len(by_store[s]))):
+        lines += [f"\n{store}:", *by_store[store]]
+    if not by_store:
+        lines.append("Nothing I can predict runs out this week, and your list is empty.")
+    rows = []
+    unlisted = [item for item in to_buy if item["need"].casefold() not in listed_keys]
+    if unlisted:
+        rows.append([InlineKeyboardButton(f"🛒 Add the {len(unlisted)} not on your list", callback_data="shop_add")])
+    if to_check:
+        lines.append("\n❓ These should have run out by now — do you still have them?")
+        for item in to_check[:_SHOP_MAX_CHECKS]:
+            crud.mark_checkin_pending(item["name"])
+            rows.append([InlineKeyboardButton(f"✅ Still have {item['need']}", callback_data=f"checkin:yes:{item['id']}"),
+                         InlineKeyboardButton(f"❌ Out of {item['need']}", callback_data=f"checkin:no:{item['id']}")])
+    if unknown:
+        lines.append(f"\n🤷 I can't predict {unknown} thing{'s' if unknown != 1 else ''} yet — I don't know how long "
+                     f"{'they last' if unknown != 1 else 'it lasts'}. Tell me and next week's plan covers "
+                     f"{'them' if unknown != 1 else 'it'} too.")
+        rows.append([InlineKeyboardButton("❓ Ask me now", callback_data="shop_ask")])
+    return "\n".join(lines), InlineKeyboardMarkup(rows) if rows else None
+
+
+async def shop_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /shop — plan a week's shop: what runs out before the next one, by store, plus the list."""
+    text, markup = _shop_text_and_buttons()
+    await update.message.reply_text(text, reply_markup=markup)
+
+
+async def handle_shop_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /shop's buttons: add the predicted products to the list, or start the open questions now."""
+    query = update.callback_query
+    await query.answer()
+    if query.data == "shop_ask":
+        await query.edit_message_reply_markup(None)
+        await send_pending_profile_question(context.bot, query.message.chat_id, force=True)
+        return
+    to_buy, _to_check, _unknown = _shop_plan()
+    listed = {entry["name"].casefold() for entry in shopping_list.get_all_items()}
+    added = []
+    for item in to_buy:
+        if item["need"].casefold() not in listed:
+            shopping_list.add_item(item["need"], 1, category=item.get("category") or infer_category(item["need"]))
+            added.append(item["need"])
+    await query.edit_message_text(("Added to your shopping list: " + ", ".join(added) + ".") if added
+                                  else "Everything is already on your shopping list.")
+    await context.bot.send_message(query.message.chat_id, _shopping_list_text())
+
+
 async def handle_stock_add_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle "Add all to list" under /stock — list every product running out that isn't listed yet.
 
@@ -2407,6 +2499,7 @@ async def main():
     app.add_handler(CommandHandler("set_goal", set_goal_cmd))
     app.add_handler(CommandHandler("finance", finance_cmd))
     app.add_handler(CommandHandler("stock", stock_cmd))
+    app.add_handler(CommandHandler("shop", shop_cmd))
     # Old name, kept until 2026-10-25 so the habit still works (see TODO.md).
     app.add_handler(CommandHandler("report", finance_cmd))
     app.add_handler(CommandHandler("setup", setup_cmd))
@@ -2434,6 +2527,7 @@ async def main():
     app.add_handler(CallbackQueryHandler(handle_typed_choice, pattern=r"^typed:"))
     app.add_handler(CallbackQueryHandler(handle_receipt_review, pattern=r"^rcpt:"))
     app.add_handler(CallbackQueryHandler(handle_stock_add_all, pattern=r"^stock_add_all$"))
+    app.add_handler(CallbackQueryHandler(handle_shop_choice, pattern=r"^shop_(add|ask)$"))
     app.add_handler(CallbackQueryHandler(handle_checkin_choice, pattern=r"^checkin:(yes|no):"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))

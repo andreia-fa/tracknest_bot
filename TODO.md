@@ -1,7 +1,14 @@
 # TODO
 
 
-## 💡 Idea (2026-10-04) — predict WHEN to go shopping and WHAT to buy
+## 🟡 Step 1 built (2026-10-05) — `/shop`; step 2 open — predict WHEN to go
+`/shop` covers one week (user's choice): needs that run out within 7 days,
+overdue ones asked about (✅/❌), the list, grouped by usual store, fresh
+items flagged, unknown lifespans one "Ask me now" tap away. Per-pack
+lifespan stays (user: eggs = pack of 10 lasts 5 days; cheese is "less
+mathematic" — leave it to the self-correction). Still open: pick the day.
+
+### Original idea (2026-10-04) — predict WHEN to go shopping and WHAT to buy
 User's goal, once there's enough data (a few months, data starts 2026-09):
 suggest the next shopping day and the list for it, so one trip covers
 everything that would otherwise run out (fewest trips — see memory).

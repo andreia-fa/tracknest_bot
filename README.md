@@ -49,6 +49,11 @@ It helps you manage home inventory and track household expenses through a conver
   on pace to go over), the category you spent most on, the treats/needs split,
   and the monthly pace for your goal. `/report` still works as a shortcut
   until 2026-10-25.
+- ✅ `/shop` – Plans a week's shop: what runs out before the next one (or
+  already should have — asked, never assumed), plus the shopping list,
+  grouped by the store each product is usually bought at. Fresh things that
+  won't last the week are flagged; items it can't predict yet get one
+  "❓ Ask me now" button.
 - ✅ `/stock` – What runs out in the next 7 days, named by product ("bananas",
   not "BANANE"), each product once, with a 🛒 *Add all to list* button that
   skips anything already on the list.
