@@ -86,17 +86,8 @@ _RESPONSE_SCHEMA = {
                             "Empty if the product is certain."
                         ),
                     },
-                    "matched_shopping_list_item": {
-                        "type": "string",
-                        "description": (
-                            "The exact text of the shopping list entry this item corresponds "
-                            "to, if any — even if written in a different language, "
-                            "abbreviated, or misspelled there. Empty string if it matches "
-                            "nothing on the list."
-                        ),
-                    },
                 },
-                "required": ["name", "quantity", "unit_price", "category", "product", "matched_shopping_list_item"],
+                "required": ["name", "quantity", "unit_price", "category", "product"],
             },
         },
         "total_paid": {
@@ -196,20 +187,22 @@ def _items_total(items: list[dict]) -> float:
     return round(sum(item["quantity"] * item["unit_price"] for item in items), 2)
 
 
-def parse_receipt(image_bytes: bytes, shopping_list_names: list[str]) -> dict:
-    """Extract purchased items from a receipt photo, matched against the shopping list.
+def parse_receipt(image_bytes: bytes) -> dict:
+    """Extract purchased items from a receipt photo.
+
+    The model only reads the receipt. It is never shown the shopping list:
+    when it was, it copied an entry ("Socks - decathlon") as the name of a
+    line it couldn't read. Matching against the list happens afterwards, in
+    bot.list_match.
 
     Args:
         image_bytes: Raw JPEG bytes of the receipt photo (Telegram always sends
             photos as JPEG).
-        shopping_list_names: Current shopping list item names, so the model can
-            match receipt lines to them across languages, abbreviations, and typos.
 
     Returns:
         Dict with keys:
         - items: list of dicts (name, quantity, unit_price, category,
-          product — what it generically is, e.g. "cheese", empty if unknown —
-          and matched_shopping_list_item — empty string when nothing matched).
+          and product — what it generically is, e.g. "cheese", empty if unknown).
         - total_paid: the receipt's printed total, as read by the model.
         - items_total: quantity*unit_price summed across items.
         - reconciled: True if items_total matches total_paid within a cent
@@ -222,7 +215,6 @@ def parse_receipt(image_bytes: bytes, shopping_list_names: list[str]) -> dict:
           illegible or implausible — see parse_receipt_date.
     """
     _ensure_server_running()
-    shopping_list_text = "\n".join(shopping_list_names) if shopping_list_names else "(empty)"
     prompt = (
         "Read this grocery receipt and record every purchased item: its "
         "name, quantity, and price per unit (not the line total). Also read "
@@ -254,12 +246,6 @@ def parse_receipt(image_bytes: bytes, shopping_list_names: list[str]) -> dict:
         "€4.45 is the total for both units, not €4.45 each). Find the "
         "mismatched line and correct it so the numbers reconcile before "
         "giving your final answer.\n\n"
-        "The shopper's current shopping list is:\n"
-        f"{shopping_list_text}\n\n"
-        "For each receipt item, set matched_shopping_list_item to the exact "
-        "text of the shopping list entry it corresponds to, if any — "
-        "matching may cross languages, abbreviations, or typos. Otherwise "
-        "leave it as an empty string.\n\n"
         "For each item, also say what it generically is (product): use what "
         "you know about brands and German/Portuguese/English grocery names, so "
         "a brand-only line like 'LEERDAMMER CAR' still becomes 'cheese'."

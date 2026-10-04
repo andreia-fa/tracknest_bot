@@ -19,10 +19,7 @@ def _make_bot():
 @patch("bot.receipt_worker.parse_receipt")
 @patch("bot.receipt_worker._remote_call")
 async def test_process_one_success_finishes_receipt(mock_remote_call, mock_parse):
-    mock_remote_call.side_effect = lambda op, args=None: {
-        "get_shopping_list_names": ["Milk"],
-        "finish_receipt": {"ok": True},
-    }[op]
+    mock_remote_call.side_effect = lambda op, args=None: {"finish_receipt": {"ok": True}}[op]
     mock_parse.return_value = {"items": [], "reconciled": True}
     bot = _make_bot()
     receipt = {"id": 1, "chat_id": 42, "telegram_file_id": "file-abc"}
@@ -30,7 +27,7 @@ async def test_process_one_success_finishes_receipt(mock_remote_call, mock_parse
     await receipt_worker._process_one(bot, receipt)
 
     bot.get_file.assert_awaited_once_with("file-abc")
-    mock_parse.assert_called_once_with(b"jpeg-bytes", ["Milk"])
+    mock_parse.assert_called_once_with(b"jpeg-bytes")  # never the shopping list
     finish_call = [c for c in mock_remote_call.call_args_list if c[0][0] == "finish_receipt"][0]
     assert finish_call[0][1] == {"receipt_id": 1, "chat_id": 42, "parsed": mock_parse.return_value}
 
@@ -39,9 +36,7 @@ async def test_process_one_success_finishes_receipt(mock_remote_call, mock_parse
 @patch("bot.receipt_worker.parse_receipt")
 @patch("bot.receipt_worker._remote_call")
 async def test_process_one_failure_calls_fail_receipt(mock_remote_call, mock_parse):
-    mock_remote_call.side_effect = lambda op, args=None: (
-        ["Milk"] if op == "get_shopping_list_names" else {"ok": True}
-    )
+    mock_remote_call.return_value = {"ok": True}
     mock_parse.side_effect = RuntimeError("Ollama server did not start in time")
     bot = _make_bot()
     receipt = {"id": 2, "chat_id": 99, "telegram_file_id": "file-xyz"}
@@ -73,8 +68,6 @@ async def test_process_one_finish_receipt_failure_calls_fail_receipt(mock_remote
     run_once's loop and block every receipt queued behind it (see run_once)."""
 
     def side_effect(op, args=None):
-        if op == "get_shopping_list_names":
-            return ["Milk"]
         if op == "finish_receipt":
             raise subprocess.CalledProcessError(1, ["ssh"], stderr="boom")
         return {"ok": True}

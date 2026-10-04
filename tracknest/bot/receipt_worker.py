@@ -60,8 +60,7 @@ async def _process_one(bot: Bot, receipt: dict):
     try:
         telegram_file = await bot.get_file(file_id)
         image_bytes = bytes(await telegram_file.download_as_bytearray())
-        shopping_list_names = _remote_call("get_shopping_list_names")
-        parsed = await asyncio.to_thread(parse_receipt, image_bytes, shopping_list_names)
+        parsed = await asyncio.to_thread(parse_receipt, image_bytes)
         _remote_call("finish_receipt", {"receipt_id": receipt_id, "chat_id": chat_id, "parsed": parsed})
     except Exception:
         logger.exception("Failed to process queued receipt %s", receipt_id)

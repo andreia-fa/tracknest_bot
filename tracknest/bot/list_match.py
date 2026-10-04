@@ -157,39 +157,23 @@ def canonical_product(product: str, known: list[str]) -> str:
     return product
 
 
-def _shares_a_word(receipt_names: list[str], list_name: str) -> bool:
-    """Tell whether a list entry and the receipt names share a word (or a cut-off start of one)."""
-    list_words = [w for w in _normalize(list_name).split() if len(w) >= _MIN_INSIDE_LEN and not w.isdigit()]
-    return any(_mentions(_normalize(name), word) or _mentions(word, _normalize(name))
-               for name in receipt_names for word in list_words)
-
-
-def copied_from_list(receipt_name: str, list_names: list[str]) -> bool:
-    """Whether the model's "receipt line" is really one of the shopping-list entries it was shown.
-
-    The vision model sees the list so it can match against it, and it has
-    copied an entry ("Socks - decathlon") as the name of a Burger King line.
-    A real receipt line written exactly like a typed list entry is rare, so
-    such a name isn't trusted to clear the list.
-    """
-    key = _normalize(receipt_name)
-    return bool(key) and any(_normalize(entry) == key for entry in list_names)
-
-
 def choose_list_match(
-    receipt_name: str, canonical_name: str, model_match: str, list_names: list[str], product: str | None = None,
+    receipt_name: str, canonical_name: str, list_names: list[str], product: str | None = None,
 ) -> str | None:
     """Pick the shopping-list entry this purchase clears, if any.
+
+    Decided here, never by the vision model: it used to be shown the list to
+    match against, and it copied an entry ("Socks - decathlon") as the name
+    of a Burger King line.
 
     Args:
         receipt_name: The line's wording on the receipt.
         canonical_name: The name it's logged under (the user's name for it,
             if they taught the bot one; otherwise the same as receipt_name).
-        model_match: The vision model's suggested list entry ("" for none).
         list_names: Current shopping-list entries.
         product: What the item generically is ("hair curler" for
-            "Lockenstab XL"), if known — lets a cross-language model match
-            through when the synonym list knows neither word.
+            "Lockenstab XL"), if known — matches a list entry written that
+            way even when the synonym list knows neither word.
 
     Returns:
         The list entry to clear, exactly as it appears on the list, or None.
@@ -198,17 +182,9 @@ def choose_list_match(
     by_key = {_normalize(entry): entry for entry in list_names}
 
     # The user's own name for the item is the strongest signal there is.
-    exact = by_key.get(_normalize(canonical_name))
+    exact = by_key.get(_normalize(canonical_name)) or (by_key.get(_normalize(product)) if product else None)
     if exact:
         return exact
-    model_entry = by_key.get(_normalize(model_match)) if model_match else None
-    if model_entry:
-        # The model alone isn't enough: it once cleared "Pfefferbretzel" for
-        # a Kuchenbeleg. When the synonym list can't judge the pair, the
-        # entry must at least share a word with the item's names or product.
-        judged = _same_thing(names, model_entry)
-        if judged or (judged is None and _shares_a_word(names, model_entry)):
-            return model_entry
     for entry in list_names:
         if _same_thing(names, entry):
             return entry

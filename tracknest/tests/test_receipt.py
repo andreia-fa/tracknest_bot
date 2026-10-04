@@ -29,7 +29,7 @@ def test_parse_receipt_reconciled(mock_client, _mock_ensure):
         '"store": "REWE"}'
     )
     mock_client.chat.return_value = mock_response
-    result = receipt.parse_receipt(b"fake-image", [])
+    result = receipt.parse_receipt(b"fake-image")
     assert result["reconciled"] is True
     assert result["items_total"] == 1.50
     assert result["total_paid"] == 1.50
@@ -46,7 +46,7 @@ def test_parse_receipt_not_reconciled(mock_client, _mock_ensure):
         '"store": "dm"}'
     )
     mock_client.chat.return_value = mock_response
-    result = receipt.parse_receipt(b"fake-image", [])
+    result = receipt.parse_receipt(b"fake-image")
     assert result["reconciled"] is False
     assert result["items_total"] == 8.90
     assert result["total_paid"] == 5.90
@@ -61,7 +61,7 @@ def test_parse_receipt_missing_store_defaults_to_empty_string(mock_client, _mock
         '{"items": [], "total_paid": 0.0, "store": ""}'
     )
     mock_client.chat.return_value = mock_response
-    result = receipt.parse_receipt(b"fake-image", [])
+    result = receipt.parse_receipt(b"fake-image")
     assert result["store"] == ""
 
 
@@ -76,7 +76,7 @@ def test_parse_receipt_net_total_misread_is_not_a_mismatch(mock_client, _mock_en
         '"store": "REWE"}'
     )
     mock_client.chat.return_value = mock_response
-    result = receipt.parse_receipt(b"fake-image", [])
+    result = receipt.parse_receipt(b"fake-image")
     assert result["reconciled"] is True
     assert result["total_paid"] == 4.50
 
@@ -100,7 +100,7 @@ def test_parse_receipt_drops_non_items_but_counts_deposits(mock_client, _mock_en
         '], "total_paid": 0.75, "store": "REWE"}'
     )
     mock_client.chat.return_value = mock_response
-    result = receipt.parse_receipt(b"fake-image", [])
+    result = receipt.parse_receipt(b"fake-image")
     assert [i["name"] for i in result["items"]] == ["Water"]
     assert result["reconciled"] is True
 
@@ -136,6 +136,6 @@ def test_the_total_misread_as_a_product_is_dropped(mock_client, _mock_ensure):
         "total_paid": 3.18, "store": "REWE", "purchase_date": "2026-09-25",
     })
     mock_client.chat.return_value = mock_response
-    result = receipt.parse_receipt(b"fake-image", [])
+    result = receipt.parse_receipt(b"fake-image")
     assert [i["name"] for i in result["items"]] == ["HP PUDD.CHOCO V", "SKYR STYLE MANGO"]
     assert result["reconciled"] is True

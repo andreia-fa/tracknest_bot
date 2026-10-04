@@ -54,9 +54,9 @@ def test_main_reads_args_from_stdin_not_argv():
     """Args must come from stdin: an ssh-invoked `docker exec` re-parses its
     trailing argv through the remote shell, which would mangle a JSON string
     passed as a plain argument (word-splits on spaces, strips quotes)."""
-    with patch("db.remote_cli.shopping_list") as mock_shopping_list:
-        mock_shopping_list.get_all_items.return_value = [{"name": "Milk"}, {"name": "Bretzel"}]
-        with patch("sys.argv", ["remote_cli.py", "get_shopping_list_names"]), \
+    with patch("db.remote_cli.crud") as mock_crud:
+        mock_crud.get_items_without_product.return_value = ["Milk", "Bretzel"]
+        with patch("sys.argv", ["remote_cli.py", "get_items_without_product"]), \
              patch("sys.stdin.read", return_value='{"unused": "value with spaces"}'):
             remote_cli.main()
 

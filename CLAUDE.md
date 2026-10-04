@@ -74,7 +74,9 @@ independently of all this — only receipt photos wait on the worker.
 the reading (`pending_receipts.status = 'review'`, JSON in `parsed`) and sends
 a line-by-line preview (`bot.main.receipt_review`); items, expenses and the
 shopping list are only touched when ✅ Save all runs `process_receipt_result`.
-Lines can be renamed or removed first (`handle_receipt_review`).
+Lines can be renamed, repriced or removed first (`handle_receipt_review`).
+The vision model is never shown the shopping list (it copied an entry as a
+line name once); `bot/list_match.py` alone decides what a receipt clears.
 `config/__init__.py` only ever reads `os.environ[]` — it doesn't care where
 the values came from. `DB_PATH` is not a secret — it's just a file path, and
 defaults to `data/tracknest.db` (git-ignored) if unset.

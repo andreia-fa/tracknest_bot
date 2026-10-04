@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 import signal
 from types import SimpleNamespace
 from datetime import date, datetime, time, timedelta, timezone
@@ -11,7 +12,7 @@ from aiohttp import web
 
 from bot import dashboard
 from bot.categorize import CATEGORY_NAMES, infer_category
-from bot.list_match import canonical_product, choose_list_match, copied_from_list, same_kind
+from bot.list_match import canonical_product, choose_list_match, same_kind
 from bot.name_match import clean_name, match_known, name_key
 from bot.parser import TypedPurchase, parse_line, parse_purchase
 from bot.profile_guess import guess_profile
@@ -479,7 +480,7 @@ async def _clear_list_entry_for_named_item(bot, chat_id: int, receipt_name: str,
     gives it a second chance.
     """
     list_names = [entry["name"] for entry in shopping_list.get_all_items()]
-    match = choose_list_match(receipt_name, name, "", list_names)
+    match = choose_list_match(receipt_name, name, list_names)
     if not match:
         return
     history_id = shopping_list.remove_item(match, reason="receipt", source=receipt_name)
@@ -1321,10 +1322,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     buttons says it expired.
     """
     message = update.message or update.edited_message  # an edited message counts as a new one
-    if _awaiting_receipt_rename(context) and update.message:
-        # Asked for right after a ✏️ Rename tap, and it only changes the
-        # reading under review — nothing is saved until ✅ Save all.
-        await _rename_receipt_line(message, context)
+    if _awaiting_receipt_edit(context) and update.message:
+        # Asked for right after a ✏️ Rename / 💶 Change price tap, and it only
+        # changes the reading under review — nothing is saved until ✅ Save all.
+        await _edit_receipt_line(message, context)
         return
     text = message.text
     pending = _pending_question(context) if _could_be_an_answer(text, context) else None
@@ -1584,10 +1585,9 @@ def receipt_review(receipt_id: int, parsed: dict) -> tuple[str, InlineKeyboardMa
     """The model's reading of a receipt, line by line, with buttons to save, fix or discard it.
 
     Nothing is written until ✅ — the model has misread lines before (it once
-    named a Burger King line after "Socks - decathlon" from the shopping list).
+    named a Burger King line "Socks - decathlon").
     """
     items = parsed["items"]
-    list_names = [entry["name"] for entry in shopping_list.get_all_items()]
     where = ", ".join(part for part in (
         parsed.get("store"),
         datetime.fromisoformat(parsed["purchase_date"]).strftime("%-d %b") if parsed.get("purchase_date") else None,
@@ -1597,8 +1597,6 @@ def receipt_review(receipt_id: int, parsed: dict) -> tuple[str, InlineKeyboardMa
         line = _line_text(i, item)
         if is_code_only(item["name"]):
             line += " ⚠️ no readable name"
-        elif copied_from_list(item["name"], list_names):
-            line += " ⚠️ copied from your shopping list, not the receipt"
         lines.append(line)
     if not items:
         lines.append("(no lines left)")
@@ -1641,7 +1639,7 @@ async def handle_receipt_review(update: Update, context: ContextTypes.DEFAULT_TY
     if i is not None and not 0 <= i < len(items):
         action = "back"
     if action == "ok":
-        context.chat_data.pop("receipt_rename", None)
+        context.chat_data.pop("receipt_edit", None)
         reply, markup = await process_receipt_result(parsed, receipt_id=receipt_id)
         receipt_queue.resolve_receipt(receipt_id, status="done")
         await query.edit_message_text(reply, reply_markup=markup)
@@ -1656,50 +1654,64 @@ async def handle_receipt_review(update: Update, context: ContextTypes.DEFAULT_TY
         await query.edit_message_text("Which line is wrong?", reply_markup=InlineKeyboardMarkup(rows))
     elif action == "line":
         rows = [[InlineKeyboardButton("✏️ Rename it", callback_data=f"rcpt:rename:{receipt_id}:{i}"),
-                 InlineKeyboardButton("🗑 Remove it", callback_data=f"rcpt:drop:{receipt_id}:{i}")],
-                [InlineKeyboardButton("⬅️ Back", callback_data=f"rcpt:back:{receipt_id}")]]
+                 InlineKeyboardButton("💶 Change price", callback_data=f"rcpt:price:{receipt_id}:{i}")],
+                [InlineKeyboardButton("🗑 Remove it", callback_data=f"rcpt:drop:{receipt_id}:{i}"),
+                 InlineKeyboardButton("⬅️ Back", callback_data=f"rcpt:back:{receipt_id}")]]
         await query.edit_message_text(_line_text(i, items[i]), reply_markup=InlineKeyboardMarkup(rows))
-    elif action == "rename":
-        context.chat_data["receipt_rename"] = {"receipt_id": receipt_id, "index": i,
-                                               "at": datetime.now(tz=timezone.utc).isoformat()}
+    elif action in ("rename", "price"):
+        field = "name" if action == "rename" else "price"
+        context.chat_data["receipt_edit"] = {"receipt_id": receipt_id, "index": i, "field": field,
+                                             "at": datetime.now(tz=timezone.utc).isoformat()}
+        ask = ("Type what this line really is (e.g. Pommes)." if field == "name"
+               else "Type the right price" + (" for one" if items[i]["quantity"] != 1 else "") + " (e.g. 3,99).")
         rows = [[InlineKeyboardButton("⬅️ Back", callback_data=f"rcpt:back:{receipt_id}")]]
-        await query.edit_message_text(f"{_line_text(i, items[i])}\n\nType what this line really is (e.g. Pommes).",
-                                      reply_markup=InlineKeyboardMarkup(rows))
+        await query.edit_message_text(f"{_line_text(i, items[i])}\n\n{ask}", reply_markup=InlineKeyboardMarkup(rows))
     else:
         if action == "drop":
             items.pop(i)
             _set_review(receipt_id, parsed)
-        context.chat_data.pop("receipt_rename", None)
+        context.chat_data.pop("receipt_edit", None)
         text, markup = receipt_review(receipt_id, parsed)
         await query.edit_message_text(text, reply_markup=markup)
 
 
-_RENAME_WINDOW = timedelta(minutes=15)
+_EDIT_WINDOW = timedelta(minutes=15)
+_PRICE_RE = re.compile(r"^€?\s*(\d+(?:[.,]\d{1,2})?)\s*€?$")
 
 
-def _awaiting_receipt_rename(context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Whether the next typed text is the new name for a receipt line — only shortly after ✏️ Rename."""
-    target = context.chat_data.get("receipt_rename")
-    if target and datetime.now(tz=timezone.utc) - datetime.fromisoformat(target["at"]) <= _RENAME_WINDOW:
+def _awaiting_receipt_edit(context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Whether the next typed text fixes a receipt line — only shortly after ✏️ Rename / 💶 Change price."""
+    target = context.chat_data.get("receipt_edit")
+    if target and datetime.now(tz=timezone.utc) - datetime.fromisoformat(target["at"]) <= _EDIT_WINDOW:
         return True
-    context.chat_data.pop("receipt_rename", None)
+    context.chat_data.pop("receipt_edit", None)
     return False
 
 
-async def _rename_receipt_line(message, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Use a typed name for the receipt line the user chose to rename, then show the reading again."""
-    target = context.chat_data.pop("receipt_rename")
+async def _edit_receipt_line(message, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Use a typed name or price for the receipt line the user chose to fix, then show the reading again."""
+    target = context.chat_data["receipt_edit"]
     parsed = receipt_queue.get_review(target["receipt_id"])
-    name = clean_name(message.text)
-    if parsed is None or not 0 <= target["index"] < len(parsed["items"]) or not name:
+    if parsed is None or not 0 <= target["index"] < len(parsed["items"]):
+        context.chat_data.pop("receipt_edit")
         await message.reply_text("That receipt was already saved or discarded — nothing changed.")
         return
     item = parsed["items"][target["index"]]
-    item["name"] = name
-    # The model's list match was made for the wrong name; let the synonym
-    # matcher judge the real one.
-    item["matched_shopping_list_item"] = ""
-    item["product"] = ""
+    if target["field"] == "price":
+        price = _PRICE_RE.match(message.text.strip())
+        if not price:
+            await message.reply_text("That doesn't look like a price — type just the number, e.g. 3,99.")
+            return
+        item["unit_price"] = float(price.group(1).replace(",", "."))
+    else:
+        name = clean_name(message.text)
+        if not name:
+            await message.reply_text("Type the name of the item, e.g. Pommes.")
+            return
+        item["name"] = name
+        # The model's product was read for the wrong name.
+        item["product"] = ""
+    context.chat_data.pop("receipt_edit")
     _set_review(target["receipt_id"], parsed)
     text, markup = receipt_review(target["receipt_id"], parsed)
     await message.reply_text(text, reply_markup=markup)
@@ -1736,12 +1748,7 @@ async def process_receipt_result(parsed: dict, receipt_id: int | None = None) ->
         is_new = crud.get_item(name) is None
         if ask_name and product:
             product = canonical_product(product, known_products)
-        # A known item or alias is the user's own wording, so only a brand-new
-        # name that's a verbatim list entry is suspect.
-        copied = ask_name and copied_from_list(item["name"], list_names)
-        list_match = None if copied else choose_list_match(
-            item["name"], name, item["matched_shopping_list_item"], list_names, product=product,
-        )
+        list_match = choose_list_match(item["name"], name, list_names, product=product)
         if list_match:
             list_names.remove(list_match)
         line, cleared_id = _log_purchase(
@@ -1752,8 +1759,6 @@ async def process_receipt_result(parsed: dict, receipt_id: int | None = None) ->
         )
         if is_code_only(item["name"]):
             line += " ⚠️ no readable name on the receipt — check this one"
-        elif copied:
-            line += " ⚠️ this name was copied from your shopping list, not read off the receipt — check what it was"
         replies.append(line)
         if cleared_id:
             cleared.append((cleared_id, list_match))

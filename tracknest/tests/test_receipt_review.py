@@ -21,10 +21,9 @@ def _held_receipt() -> int:
     receipt_queue.hold_for_review(receipt_id, {
         "store": "Burger King", "purchase_date": "2026-10-03", "total_paid": 10.98, "items_total": 10.98,
         "reconciled": True, "items": [
-            {"name": "Whopper", "quantity": 1, "unit_price": 6.99, "category": "Other", "product": "burger",
-             "matched_shopping_list_item": ""},
+            {"name": "Whopper", "quantity": 1, "unit_price": 6.99, "category": "Other", "product": "burger"},
             {"name": "Socks - decathlon", "quantity": 1, "unit_price": 3.99, "category": "Clothing",
-             "product": "socks", "matched_shopping_list_item": "Socks - decathlon"},
+             "product": "socks"},
         ]})
     return receipt_id
 
@@ -45,10 +44,10 @@ def _context():
     return context
 
 
-def test_the_review_flags_a_line_copied_from_the_list(db):
+def test_the_review_lists_every_line_before_saving(db):
     receipt_id = _held_receipt()
     text, _markup = main.receipt_review(receipt_id, receipt_queue.get_review(receipt_id))
-    assert "2. 1x Socks - decathlon — €3.99 ⚠️ copied from your shopping list" in text
+    assert "1. 1x Whopper — €6.99" in text and "2. 1x Socks - decathlon — €3.99" in text
     assert "Total €10.98 ✓ matches the receipt" in text
     assert crud.get_item_names() == []  # nothing written yet
 
@@ -88,6 +87,25 @@ async def test_a_stale_rename_never_swallows_a_list_line(db):
     receipt_id = _held_receipt()
     context = _context()
     await _tap(f"rcpt:rename:{receipt_id}:1", context)
-    context.chat_data["receipt_rename"]["at"] = "2026-01-01T00:00:00+00:00"
-    assert not main._awaiting_receipt_rename(context)
-    assert "receipt_rename" not in context.chat_data
+    context.chat_data["receipt_edit"]["at"] = "2026-01-01T00:00:00+00:00"
+    assert not main._awaiting_receipt_edit(context)
+    assert "receipt_edit" not in context.chat_data
+
+
+async def _type(text, context):
+    message = MagicMock()
+    message.text = text
+    message.reply_text = AsyncMock()
+    await main.handle_text(MagicMock(message=message), context)
+    return message.reply_text.call_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_change_a_price(db):
+    receipt_id = _held_receipt()
+    context = _context()
+    await _tap(f"rcpt:price:{receipt_id}:0", context)
+    assert "doesn't look like a price" in await _type("seven", context)
+    reply = await _type("€5,49", context)
+    assert "1. 1x Whopper — €5.49" in reply and "Lines add up to €9.48, the receipt says €10.98" in reply
+    assert "receipt_edit" not in context.chat_data
