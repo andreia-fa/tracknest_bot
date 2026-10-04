@@ -1,3 +1,5 @@
+import pytest
+
 from bot.receipt_lines import classify_line, clean_name
 
 
@@ -44,3 +46,13 @@ def test_receipt_footer_is_never_a_product():
     from bot.receipt_lines import classify_line
     for footer in ("Kundenbeleg", "** Kundenbeleg **", "-K-U-N-D-E-N-B-E-L-E-G-", "Kuchenbeleg"):
         assert classify_line(footer) == "info", footer
+
+
+@pytest.mark.parametrize("name", ["Nettoumsatz", "Bruttoumsatz", "Umsatz 19%", "Gesamtbetrag", "Gesamt", "Zu zahlen"])
+def test_tax_box_and_total_lines_are_info(name):
+    assert classify_line(name) == "info"
+
+
+@pytest.mark.parametrize("name", ["Pizza Margherita", "Gesichtscreme", "Nettle tea"])
+def test_products_near_those_words_stay_products(name):
+    assert classify_line(name) == "item"

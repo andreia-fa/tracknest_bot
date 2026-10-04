@@ -5,6 +5,13 @@ import pytest
 from bot import main
 
 
+@pytest.fixture(autouse=True)
+def _question_just_sent():
+    """These tests are about a question the bot has just asked (see test_name_match for the window)."""
+    with patch("bot.main._question_just_asked", return_value=True):
+        yield
+
+
 def _text_update(text):
     update = MagicMock()
     update.message.text = text

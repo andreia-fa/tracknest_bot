@@ -129,3 +129,13 @@ def get_open_question():
 def set_open_question(key):
     """Remember which profiling question is waiting for the user ("name|stage")."""
     _set_setting("open_question", key)
+
+
+def get_question_asked_at():
+    """Return when the bot last sent a question a typed reply could answer (ISO datetime), or None."""
+    return _get_setting("question_asked_at")
+
+
+def set_question_asked_at(when):
+    """Remember when a profiling or check-in question went out (ISO datetime)."""
+    _set_setting("question_asked_at", when)

@@ -14,7 +14,10 @@ _ADJUSTMENT = re.compile(
 # Informational lines — no money of their own (or money already counted
 # elsewhere): ignored entirely.
 _INFO = re.compile(
-    r"\b(normalpreis|zwischensumme|summe|mwst|ust|netto|brutto|steuer|"
+    # Tax-box compounds too: a pizza receipt's "Nettoumsatz" was logged as
+    # the only "product" (2026-10-04).
+    r"\b(normalpreis|zwischensumme|summe|mwst|ust|netto\w*|brutto\w*|\w*umsatz\w*|steuer\w*|"
+    r"gesamt\w*|zu zahlen|endbetrag|"
     r"sie sparen|ec[- ]?karte|kartenzahlung|r(ü|ue)ckgeld|gegeben|"
     # The "customer receipt" footer — also as the model has misread it
     # ("Kuchenbeleg" is no German word; cake topping is "Kuchenbelag").

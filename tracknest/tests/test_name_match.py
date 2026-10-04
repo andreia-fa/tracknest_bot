@@ -119,3 +119,21 @@ def test_a_receipt_line_at_a_known_price_lands_on_that_item(db):
     expenses.log_expense("Käse-Laugenstange", 1, 1.49, store="Yormas")
     assert main._resolve_receipt_name({"name": "Kaesestange", "unit_price": 1.49})[0] == "Käse-Laugenstange"
     assert main._resolve_receipt_name({"name": "Kaesestange", "unit_price": 1.99})[0] == "Kaesestange"
+
+
+@pytest.mark.asyncio
+async def test_an_old_question_never_hijacks_a_list_line(db):
+    """Real, 2026-10-05: "tempeh" got "is this your answer to what 'Socks - decathlon' is?" over and over."""
+    crud.add_item("Iced Matcha Mango", 1)
+    crud.mark_name_pending("Iced Matcha Mango")
+    context = _context()
+
+    preview, _reply = await _send_and_confirm("tempeh", context)
+    assert "your answer" not in preview and "add 1x tempeh" in preview  # nothing was asked lately
+
+    await main.send_pending_profile_question(MagicMock(send_message=AsyncMock()), 1)
+    update = MagicMock()
+    update.message.text = "matcha drink"
+    update.message.reply_text = AsyncMock()
+    await main.handle_text(update, _context())
+    assert "your answer" in update.message.reply_text.call_args.args[0]  # just asked: both meanings

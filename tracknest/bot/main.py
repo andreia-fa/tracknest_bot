@@ -362,6 +362,7 @@ async def send_pending_profile_question(bot, chat_id: int, force: bool = False):
     if not force and settings.get_open_question() == key:
         return
     settings.set_open_question(key)
+    settings.set_question_asked_at(datetime.now(tz=timezone.utc).isoformat())
     if stage == "name":
         item = crud.get_item(name)
         guess = item.get("product") if item else None
@@ -1052,6 +1053,15 @@ async def handle_checkin_choice(update: Update, context: ContextTypes.DEFAULT_TY
     await query.edit_message_text(reply, reply_markup=markup)
 
 
+_QUESTION_ANSWER_WINDOW = timedelta(minutes=30)
+
+
+def _question_just_asked() -> bool:
+    """Whether a profiling or check-in question went out recently enough for typed text to answer it."""
+    asked = settings.get_question_asked_at()
+    return bool(asked) and datetime.now(tz=timezone.utc) - datetime.fromisoformat(asked) <= _QUESTION_ANSWER_WINDOW
+
+
 def _pending_question(context: ContextTypes.DEFAULT_TYPE) -> tuple[str, object, str] | None:
     """The open question a typed message could be answering, as (kind, key, description).
 
@@ -1077,6 +1087,11 @@ def _pending_question(context: ContextTypes.DEFAULT_TYPE) -> tuple[str, object, 
     if shelf_edit_item:
         item = crud.get_item_by_id(shelf_edit_item) or {}
         return "shelf_edit", shelf_edit_item, f"how many days {item.get('name', 'that item')} lasts"
+    if not _question_just_asked():
+        # An item waiting to be profiled is not a question being asked: only
+        # right after the bot sends one does a typed line maybe answer it.
+        # Otherwise every list line got "is this your answer?" (2026-10-05).
+        return None
     profile = crud.get_pending_profile_item()
     if profile and profile[1] not in ("category", "card"):
         name, stage = profile
@@ -1879,6 +1894,7 @@ async def check_expiring_items(context: ContextTypes.DEFAULT_TYPE) -> bool:
         # shelf_life_days is per pack: two packs of eggs last twice as long.
         if now >= last + timedelta(days=item["shelf_life_days"] * max(1, item.get("last_quantity") or 1)):
             crud.mark_checkin_pending(item["name"])
+            settings.set_question_asked_at(datetime.now(tz=timezone.utc).isoformat())
             await context.bot.send_message(
                 chat_id=chat_id,
                 text=f"Do you still have {_need_name(item)}?",
