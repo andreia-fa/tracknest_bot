@@ -228,7 +228,7 @@ def get_daily_cost(top_n=3):
                CASE i.lasts WHEN 'same_day' THEN 1 ELSE i.shelf_life_days END AS shelf_life_days,
                i.treat_or_need AS treat_or_need,
                (SELECT e.unit_price FROM item_expenses e
-                WHERE e.item_id = i.id ORDER BY e.id DESC LIMIT 1) AS unit_price,
+                WHERE e.item_id = i.id AND e.price_kind = 'unit' ORDER BY e.id DESC LIMIT 1) AS unit_price,
                (SELECT COUNT(*) FROM item_expenses e
                 WHERE e.item_id = i.id) AS purchase_count
         FROM inventory_items i
@@ -331,7 +331,7 @@ def get_price_trends(min_history=2, top_n=3):
         SELECT i.name AS name, e.store AS store, e.unit_price AS unit_price
         FROM item_expenses e
         JOIN inventory_items i ON i.id = e.item_id
-        WHERE e.store IS NOT NULL
+        WHERE e.store IS NOT NULL AND e.price_kind = 'unit'
         ORDER BY i.name, e.store, COALESCE(e.logged_at, e.purchase_date), e.id
     """)
     rows = cursor.fetchall()

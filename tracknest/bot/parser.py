@@ -1,6 +1,8 @@
 """Parsing for plain-text inventory entries (no slash commands)."""
 
 import re
+from dataclasses import dataclass
+from datetime import date, timedelta
 
 # bot/main.py's handle_text checks the ORIGINAL, unmodified line for a
 # leading "-" (its remove-command trigger) before parse_line ever runs, so
@@ -90,3 +92,72 @@ def _parse_price(token: str) -> float | None:
         return float(token.replace(",", "."))
     except ValueError:
         return None
+
+
+# "3/10" or "3/10/2026" — a slash, because "3.10" reads as a price.
+_DATE_RE = re.compile(r"^(\d{1,2})/(\d{1,2})(?:/(\d{2}|\d{4}))?[,\s]+")
+_YESTERDAY_RE = re.compile(r"^(yesterday|gestern|ontem)[,\s]+", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class TypedPurchase:
+    """A typed purchase: "[3/10] [Store,] product [+ product ...] price"."""
+
+    items: list[tuple[str, int]]  # (name, quantity)
+    price: float                  # per unit for one product; the total when several share it
+    store: str | None = None
+    purchase_date: str | None = None  # ISO date when one was typed
+
+    @property
+    def shared(self) -> bool:
+        """Whether the price is one total for several products."""
+        return len(self.items) > 1
+
+
+def _leading_date(line: str, today: date) -> tuple[str | None, str]:
+    """Peel a leading purchase date off a line: (ISO date or None, the rest)."""
+    if match := _YESTERDAY_RE.match(line):
+        return (today - timedelta(days=1)).isoformat(), line[match.end():]
+    match = _DATE_RE.match(line)
+    if not match:
+        return None, line
+    day, month, year = int(match.group(1)), int(match.group(2)), match.group(3)
+    try:
+        if year:
+            when = date(int(year) + (2000 if len(year) == 2 else 0), month, day)
+        else:
+            when = date(today.year, month, day)
+            if when > today:  # "28/12" typed in January means last December
+                when = date(today.year - 1, month, day)
+    except ValueError:
+        return None, line
+    return (when.isoformat(), line[match.end():]) if when <= today else (None, line)
+
+
+def parse_purchase(line: str, today: date) -> TypedPurchase | None:
+    """Parse a typed purchase line, or return None if it has no price (a shopping-list line).
+
+    Shapes, all optional but the product and price: a date first ("3/10",
+    "yesterday"), then "Store," then one product — the price is per unit —
+    or several joined by "+", where the price at the end is what they cost
+    together ("Lidl, milk + bread + eggs 5,40").
+    """
+    purchase_date, rest = _leading_date(line.strip(), today)
+    try:
+        name, quantity, price = parse_line(rest)
+    except ValueError:
+        return None
+    if price is None:
+        return None
+    store = None
+    if "," in name:
+        store, name = (part.strip() for part in name.split(",", 1))
+    parts = [part.strip() for part in name.split("+")]
+    items = []
+    for i, part in enumerate(parts):
+        try:
+            part_name, part_qty, _ = parse_line(part)
+        except ValueError:
+            return None
+        items.append((part_name, quantity if i == len(parts) - 1 and quantity != 1 else part_qty))
+    return TypedPurchase(items=items, price=price, store=store or None, purchase_date=purchase_date)

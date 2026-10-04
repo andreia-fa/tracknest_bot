@@ -4,7 +4,7 @@ import asyncio
 import logging
 import signal
 from types import SimpleNamespace
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from aiohttp import web
@@ -12,7 +12,7 @@ from aiohttp import web
 from bot import dashboard
 from bot.categorize import CATEGORY_NAMES, infer_category
 from bot.list_match import canonical_product, choose_list_match, same_kind
-from bot.parser import parse_line
+from bot.parser import TypedPurchase, parse_line, parse_purchase
 from bot.profile_guess import guess_profile
 from bot.receipt_lines import is_code_only
 from bot.tunnel import CloudflareTunnel
@@ -1111,6 +1111,31 @@ def _typed_purchase_store(name: str, unit_price: float) -> str | None:
     return expenses.guess_store(name, item.get("product") if item else None, unit_price)
 
 
+def _typed_store(purchase: TypedPurchase) -> tuple[str | None, bool]:
+    """Where a typed purchase was made: (store, typed) — the household's spelling of a typed store, else a guess.
+
+    A typed store wins. Without one, a single product's price can still
+    single one out (see expenses.guess_store); a shared total can't.
+    """
+    if purchase.store:
+        known = {store.casefold(): store for store in expenses.get_known_stores()}
+        return known.get(purchase.store.casefold(), purchase.store), True
+    if purchase.shared:
+        return None, False
+    name, _qty = purchase.items[0]
+    return _typed_purchase_store(name, purchase.price), False
+
+
+def _shares(total: float, count: int) -> list[float]:
+    """Split a total into count even shares in cents; the last takes the rounding, so they add up exactly."""
+    share = int(round(total * 100)) // count
+    return [share / 100] * (count - 1) + [(int(round(total * 100)) - share * (count - 1)) / 100]
+
+
+def _today() -> date:
+    return datetime.now(tz=_LOCAL_TZ).date()
+
+
 def _split_note(line: str) -> tuple[str, str | None]:
     """Split "Push Up Bra 35.90 // UK/USA 34B" into the line and its note (None without "//")."""
     line, sep, note = line.partition("//")
@@ -1128,17 +1153,27 @@ def _preview_list_lines(text: str) -> list[str]:
             name = line[1:].strip()
             preview.append(f"• remove {name} from your shopping list" if name else f"• skip '{line}' (not understood)")
             continue
+        purchase = parse_purchase(line, _today())
+        if purchase:
+            store, typed = _typed_store(purchase)
+            where = (f" at {store}" if typed else f" at {store} (same price as before)") if store else ""
+            when = (f" on {date.fromisoformat(purchase.purchase_date).strftime('%-d %b')}"
+                    if purchase.purchase_date else "")
+            if purchase.shared:
+                names = ", ".join(f"{q}x {n}" if q > 1 else n for n, q in purchase.items)
+                preview.append(f"• log a purchase{where}{when}: {names} — €{purchase.price:.2f} together")
+            else:
+                name, qty = purchase.items[0]
+                preview.append(f"• log a purchase{when}: {qty}x {name} at €{purchase.price:.2f} each{where}")
+            if note:
+                preview[-1] += f"\n  📝 new note: {note}"
+            continue
         try:
             name, qty, unit_price = parse_line(line)
         except ValueError:
             preview.append(f"• skip '{line}' (not understood)")
             continue
-        if unit_price is not None:
-            store = _typed_purchase_store(name, unit_price)
-            where = f" at {store} (same price as before)" if store else ""
-            preview.append(f"• log a purchase: {qty}x {name} at €{unit_price:.2f} each{where}")
-        else:
-            preview.append(f"• add {qty}x {name} to your shopping list")
+        preview.append(f"• add {qty}x {name} to your shopping list")
         if note:
             preview[-1] += f"\n  📝 new note: {note}"
         else:
@@ -1176,25 +1211,32 @@ def _apply_list_lines(text: str, purchase_date: str | None = None) -> tuple[list
             else:
                 replies.append(f"'{name}' wasn't on your list.")
             continue
+        purchase = parse_purchase(line, _today())
+        if purchase:
+            store, _typed = _typed_store(purchase)
+            shares = _shares(purchase.price, len(purchase.items)) if purchase.shared else None
+            new_item_ids = new_item_ids or []
+            for i, (name, qty) in enumerate(purchase.items):
+                is_new = crud.get_item(name) is None
+                unit_price = shares[i] / qty if shares else purchase.price
+                reply, _cleared_id = _log_purchase(
+                    name, qty, unit_price, store=store, category=infer_category(name), matched_list_item=name,
+                    trip_key=trip_key, receipt_date=purchase.purchase_date or purchase_date,
+                    share_of=purchase.price if shares else None,
+                )
+                if note and not shares:
+                    crud.set_item_note(name, note)
+                    reply += f"\n  📝 {note}"
+                replies.append(reply)
+                if is_new and (logged := crud.get_item(name)):
+                    new_item_ids.append(logged["id"])
+            if note and shares:
+                replies.append("  (note not saved — write it on a line with one product)")
+            continue
         try:
             name, qty, unit_price = parse_line(line)
         except ValueError:
             replies.append(f"Couldn't understand: '{line}'")
-            continue
-        if unit_price is not None:
-            is_new = crud.get_item(name) is None
-            line, _cleared_id = _log_purchase(
-                name, qty, unit_price, store=_typed_purchase_store(name, unit_price),
-                category=infer_category(name), matched_list_item=name, trip_key=trip_key,
-                receipt_date=purchase_date,
-            )
-            if note:
-                crud.set_item_note(name, note)
-                line += f"\n  📝 {note}"
-            replies.append(line)
-            new_item_ids = new_item_ids or []
-            if is_new and (logged := crud.get_item(name)):
-                new_item_ids.append(logged["id"])
             continue
         shopping_list.add_item(name, qty, category=infer_category(name))
         list_changed = True
@@ -1245,7 +1287,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Only the latest typed message can be confirmed; tapping an older one's
     buttons says it expired.
     """
-    text = update.message.text
+    message = update.message or update.edited_message  # an edited message counts as a new one
+    text = message.text
     pending = _pending_question(context) if _could_be_an_answer(text, context) else None
     preview = _preview_list_lines(text)
     actionable = any(not line.startswith("• skip") for line in preview)
@@ -1269,11 +1312,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                                  callback_data=f"typed:yesterday:{token}")])
     else:
         context.chat_data.pop("typed", None)
-        await update.message.reply_text("\n".join(f"Couldn't understand: '{line.strip()}'"
+        await message.reply_text("\n".join(f"Couldn't understand: '{line.strip()}'"
                                                  for line in text.splitlines() if line.strip()))
         return
     buttons.append([InlineKeyboardButton("❌ Cancel", callback_data=f"typed:cancel:{token}")])
-    await update.message.reply_text(body, reply_markup=InlineKeyboardMarkup(buttons))
+    await message.reply_text(body, reply_markup=InlineKeyboardMarkup(buttons))
 
 
 def _replayed_update(query, text: str):
@@ -1379,7 +1422,7 @@ def _purchased_at(receipt_date: str | None) -> datetime | None:
 
 def _log_purchase(
     name, qty, price, *, store=None, category=None, product=None, matched_list_item=None, ask_name=False,
-    clear_reason="purchase", source=None, receipt_date=None, trip_key=None,
+    clear_reason="purchase", source=None, receipt_date=None, trip_key=None, share_of=None,
 ) -> tuple[str, int | None]:
     """Log one purchased item (inventory + expense) and describe it for a reply.
 
@@ -1393,6 +1436,10 @@ def _log_purchase(
         applicable, and the shopping-list history id of the entry this
         purchase cleared (None if it cleared nothing) — so a caller can
         offer to put it back.
+
+    share_of is the total a typed "milk + bread 5,40" line gave for several
+    products: price is then this one's even share of it, counted as
+    spending but never compared as a price.
     """
     if expenses.is_duplicate_purchase(name, price, purchase_date=receipt_date):
         return (
@@ -1407,12 +1454,16 @@ def _log_purchase(
         crud.mark_name_pending(name)
     elif not existed:
         _fill_guesses(name, product)
-    delta = expenses.get_price_delta(name, price, store=store)
-    expenses.log_expense(name, qty, price, store=store, purchased_at=_purchased_at(receipt_date), trip_key=trip_key)
+    delta = None if share_of else expenses.get_price_delta(name, price, store=store)
+    expenses.log_expense(name, qty, price, store=store, purchased_at=_purchased_at(receipt_date), trip_key=trip_key,
+                         price_kind="share" if share_of else "unit")
     # Show what the bot understood the item to be, so a wrong guess is visible.
     product = (crud.get_item(name) or {}).get("product") or product
     shown = f"{name} ({product})" if product and product.casefold() not in name.casefold() else name
-    line = f"• {qty}x {shown} at €{price:.2f} each"
+    line = (f"• {qty}x {shown} — share of €{share_of:.2f}" if share_of
+            else f"• {qty}x {shown} at €{price:.2f} each")
+    if store and clear_reason == "purchase":
+        line += f" at {store}"  # a receipt names its store once, in the header
     if asking:
         line += " — 🆕 I'll ask what it is"
     elif not existed:

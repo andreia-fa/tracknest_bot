@@ -5,7 +5,8 @@ from datetime import datetime, timedelta, timezone
 from db.database import get_connection
 
 
-def log_expense(item_name, quantity_purchased, unit_price, store=None, purchased_at=None, trip_key=None):
+def log_expense(item_name, quantity_purchased, unit_price, store=None, purchased_at=None, trip_key=None,
+                price_kind="unit"):
     """Record a purchase for an existing inventory item.
 
     For a need lasting a known number of days, if this purchase
@@ -33,6 +34,8 @@ def log_expense(item_name, quantity_purchased, unit_price, store=None, purchased
             timing below use it, so a September receipt counts in September.
         trip_key: Which visit this purchase belongs to ("receipt:16", one
             key per typed message) — see metrics.get_shopping_trips.
+        price_kind: 'unit', or 'share' when unit_price is an even share of a
+            total typed for several products (left out of price comparisons).
 
     Returns:
         True if the expense was logged, False if the item does not exist.
@@ -85,9 +88,11 @@ def log_expense(item_name, quantity_purchased, unit_price, store=None, purchased
             (item["id"],)
         )
     cursor.execute("""
-        INSERT INTO item_expenses (item_id, quantity_purchased, unit_price, store, purchase_date, logged_at, trip_key)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (item["id"], quantity_purchased, unit_price, store, now.date().isoformat(), now.isoformat(), trip_key))
+        INSERT INTO item_expenses (item_id, quantity_purchased, unit_price, store, purchase_date, logged_at, trip_key,
+                                   price_kind)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (item["id"], quantity_purchased, unit_price, store, now.date().isoformat(), now.isoformat(), trip_key,
+          price_kind))
     conn.commit()
     cursor.close()
     conn.close()
@@ -155,7 +160,7 @@ def guess_store(item_name, product, unit_price):
         SELECT DISTINCT e.store
         FROM item_expenses e
         JOIN inventory_items i ON i.id = e.item_id
-        WHERE e.store IS NOT NULL
+        WHERE e.store IS NOT NULL AND e.price_kind = 'unit'
           AND ROUND(e.unit_price, 2) = ROUND(?, 2)
           AND (lower(i.name) = lower(?) OR (? IS NOT NULL AND lower(i.product) = lower(?)))
     """, (unit_price, item_name, product, product))
@@ -195,7 +200,7 @@ def get_price_delta(item_name, new_price, min_history=1, store=None):
         SELECT AVG(e.unit_price) AS avg_price, COUNT(*) AS n
         FROM item_expenses e
         JOIN inventory_items i ON i.id = e.item_id
-        WHERE i.name = ? AND (? IS NULL OR e.store = ?)
+        WHERE i.name = ? AND (? IS NULL OR e.store = ?) AND e.price_kind = 'unit'
     """, (item_name, store, store))
     row = cursor.fetchone()
     cursor.close()
@@ -267,3 +272,14 @@ def get_total_spent(item_name=None):
     cursor.close()
     conn.close()
     return float(total)
+
+
+def get_known_stores():
+    """Every store purchases were logged at, so a typed "rewe" can use the household's "REWE"."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT DISTINCT store FROM item_expenses WHERE store IS NOT NULL ORDER BY store")
+    stores = [row["store"] for row in cursor.fetchall()]
+    cursor.close()
+    conn.close()
+    return stores

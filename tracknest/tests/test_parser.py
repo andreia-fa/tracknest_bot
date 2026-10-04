@@ -1,6 +1,8 @@
+from datetime import date
+
 import pytest
 
-from bot.parser import parse_line
+from bot.parser import TypedPurchase, parse_line, parse_purchase
 
 
 def test_name_only():
@@ -78,3 +80,28 @@ def test_bare_integer_is_still_quantity_not_price():
 ])
 def test_euro_sign_marks_a_price(line, expected):
     assert parse_line(line) == expected
+
+
+_TODAY = date(2026, 10, 4)
+
+
+@pytest.mark.parametrize("line, expected", [
+    ("sesame ring 1,49", TypedPurchase([("sesame ring", 1)], 1.49)),
+    ("avec, sesame ring 1,49", TypedPurchase([("sesame ring", 1)], 1.49, store="avec")),
+    ("Lidl, milk + bread + eggs 5,40", TypedPurchase([("milk", 1), ("bread", 1), ("eggs", 1)], 5.4, store="Lidl")),
+    ("3/10 avec, sesame ring 1,49", TypedPurchase([("sesame ring", 1)], 1.49, "avec", "2026-10-03")),
+    ("yesterday REWE, oat milk 2 1,99", TypedPurchase([("oat milk", 2)], 1.99, "REWE", "2026-10-03")),
+    ("28/12 dm, soap 2,00", TypedPurchase([("soap", 1)], 2.0, "dm", "2025-12-28")),  # last December
+    ("1/2/2026 dm, soap 2,00", TypedPurchase([("soap", 1)], 2.0, "dm", "2026-02-01")),
+])
+def test_typed_purchase_shapes(line, expected):
+    assert parse_purchase(line, _TODAY) == expected
+
+
+@pytest.mark.parametrize("line", ["milk", "milk + bread", "milk, bread", "Bananas 2", "31/02 x"])
+def test_lines_without_a_price_are_not_purchases(line):
+    assert parse_purchase(line, _TODAY) is None
+
+
+def test_a_date_that_does_not_exist_stays_part_of_the_line():
+    assert parse_purchase("31/02 soap 2,00", _TODAY).purchase_date is None

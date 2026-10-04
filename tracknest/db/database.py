@@ -320,6 +320,14 @@ def init_db():
     # it existed; those fall back to one trip per store per day.
     if "trip_key" not in existing_cols:
         cursor.execute("ALTER TABLE item_expenses ADD COLUMN trip_key TEXT")
+    # price_kind: 'unit' = the real price of one unit; 'share' = an even share
+    # of one total typed for several products ("milk + bread 5,40") — counts
+    # towards spending, but never as a price to compare against.
+    if "price_kind" not in existing_cols:
+        cursor.execute(
+            "ALTER TABLE item_expenses ADD COLUMN price_kind TEXT NOT NULL DEFAULT 'unit'"
+            " CHECK (price_kind IN ('unit', 'share'))"
+        )
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS bot_settings (
             key TEXT PRIMARY KEY,

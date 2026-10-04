@@ -13,6 +13,23 @@ Expenses are logged in bulk from a receipt photo (local Ollama vision model,
 see `bot/receipt.py`), which also bulk-adds the purchased items to inventory
 and clears them off the shopping list.
 
+Purchases without a receipt are typed, one per line, and confirmed with a tap
+(`bot.parser.parse_purchase`):
+
+| Typed | Means |
+|-------|-------|
+| `sesame ring 1,49` | one item at €1.49, today |
+| `avec, sesame ring 1,49` | bought at avec (matched to a known store's spelling, e.g. `rewe` → `REWE`) |
+| `Lidl, milk + bread + eggs 5,40` | €5.40 is the **total** for all three |
+| `3/10 avec, sesame ring 1,49` | bought on 3 October (`d/m` or `d/m/yyyy` — a slash, since `3.10` reads as a price) |
+| `yesterday avec, sesame ring 1,49` | bought yesterday (also `gestern`, `ontem`) |
+
+Without a date, the purchase is logged today; the confirmation also offers
+"📅 Yes — it was yesterday". A shared total is split evenly in cents (the
+last share takes the rounding, so they add up exactly) and stored with
+`price_kind = 'share'`: it counts towards spending, but price deltas, price
+trends, cost per day and store guessing only use real `'unit'` prices.
+
 ## Rules
 - An item must exist in inventory before an expense can be logged against it.
 - Deleting an inventory item cascades and removes its associated expense records.
@@ -49,8 +66,10 @@ and clears them off the shopping list.
 | `quantity_purchased` | INT | Units bought |
 | `unit_price` | DECIMAL(10,2) | Price per unit |
 | `total_cost` | DECIMAL(10,2) | Computed as `quantity_purchased × unit_price` |
-| `purchase_date` | DATE | Date the purchase was logged |
+| `purchase_date` | DATE | Date of the purchase (a receipt's printed date, or a typed one) |
 | `logged_at` | TEXT (ISO datetime) | Exact timestamp of the log call, used for duplicate detection |
+| `trip_key` | TEXT | Which visit it belongs to (`receipt:<id>`, or one per typed message) |
+| `price_kind` | TEXT, `'unit'` / `'share'` (CHECK) | `'share'` = an even share of a typed total for several products — never compared as a price |
 
 `inventory_items.category` is populated from receipt parsing (`bot/receipt.py`)
 — the vision model infers a short category (Bread, Dairy, Produce, Sushi/Prepared
