@@ -74,6 +74,18 @@ _RESPONSE_SCHEMA = {
                         "type": "string",
                         "description": _PRODUCT_RULES,
                     },
+                    "alternatives": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "maxItems": 3,
+                        "description": (
+                            "Up to 3 OTHER things this item could be, if the product "
+                            "reading might be wrong — same style as product (general, "
+                            "lowercase English). E.g. 'SCHLAGCREME VEGA' read as "
+                            "'cheese' could also be 'vegan whipping cream' or 'cream'. "
+                            "Empty if the product is certain."
+                        ),
+                    },
                     "matched_shopping_list_item": {
                         "type": "string",
                         "description": (
@@ -266,6 +278,7 @@ def parse_receipt(image_bytes: bytes, shopping_list_names: list[str]) -> dict:
     for line in lines:
         line["name"] = clean_name(line["name"])
         line["product"] = (line.get("product") or "").strip().lower()
+        line["alternatives"] = _clean_alternatives(line.get("alternatives"), line["product"])
     total_paid = result["total_paid"]
     store = result.get("store") or ""
     purchase_date = parse_receipt_date(result.get("purchase_date", ""), date.today())
@@ -301,6 +314,16 @@ def parse_receipt(image_bytes: bytes, shopping_list_names: list[str]) -> dict:
         "store": store,
         "purchase_date": purchase_date,
     }
+
+
+def _clean_alternatives(alternatives, product: str) -> list[str]:
+    """Lowercase, de-duplicated other readings of an item, without the main one."""
+    cleaned = []
+    for alternative in alternatives or []:
+        alternative = str(alternative).strip().lower()
+        if alternative and alternative != product and alternative not in cleaned:
+            cleaned.append(alternative)
+    return cleaned[:3]
 
 
 _GUESS_SCHEMA = {

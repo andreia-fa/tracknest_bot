@@ -537,16 +537,6 @@ def rename_item(old_name, new_name):
     return final_name, merged
 
 
-def keep_item_name(name):
-    """Accept the receipt's wording as the item's name; the category is asked next."""
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE inventory_items SET name_status = 'category' WHERE name = ?", (name,))
-    conn.commit()
-    cursor.close()
-    conn.close()
-
-
 def change_item_category(name, category):
     """Move an already-settled item to another category (e.g. a café drink to Leisure).
 
@@ -668,3 +658,58 @@ def suggest_product(name, product):
     cursor.close()
     conn.close()
     return affected > 0
+
+
+def set_product_options(name, options):
+    """Store the model's other readings of what an item is, in order, replacing earlier ones."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        DELETE FROM product_options WHERE item_id = (SELECT id FROM inventory_items WHERE name = ?)
+    """, (name,))
+    cursor.executemany("""
+        INSERT INTO product_options (item_id, rank, product)
+        SELECT id, ?, ? FROM inventory_items WHERE name = ?
+    """, [(rank, product, name) for rank, product in enumerate(options)])
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+
+def get_product_options(name):
+    """The stored other readings of what an item is, best first."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT o.product FROM product_options o JOIN inventory_items i ON i.id = o.item_id
+        WHERE i.name = ? ORDER BY o.rank
+    """, (name,))
+    rows = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    return [r["product"] for r in rows]
+
+
+def get_known_products(exclude_name=None):
+    """Every product already in the household, most-bought items' products first."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT i.product FROM inventory_items i LEFT JOIN item_expenses e ON e.item_id = i.id
+        WHERE i.product IS NOT NULL AND i.product != '' AND i.name_status IS NULL AND i.name IS NOT ?
+        GROUP BY i.product ORDER BY COUNT(e.id) DESC, i.product
+    """, (exclude_name,))
+    rows = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    return [r["product"] for r in rows]
+
+
+def set_name_status(name, status):
+    """Set where an item is in its first-purchase questions: 'name', 'card', or None when done."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE inventory_items SET name_status = ? WHERE name = ?", (status, name))
+    conn.commit()
+    cursor.close()
+    conn.close()

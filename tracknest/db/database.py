@@ -354,6 +354,17 @@ def init_db():
     existing_alias_cols = {row[1] for row in cursor.execute("PRAGMA table_info(item_aliases)")}
     if "product" not in existing_alias_cols:
         cursor.execute("ALTER TABLE item_aliases ADD COLUMN product TEXT")
+    # The model's other readings of what a new receipt item is ("cream",
+    # "cream cheese"), offered as buttons when the user says its first guess
+    # is wrong — so correcting it is a tap, not typing. Dropped once answered.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS product_options (
+            item_id INTEGER NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
+            rank INTEGER NOT NULL,
+            product TEXT NOT NULL CHECK (length(trim(product)) > 0),
+            PRIMARY KEY (item_id, rank)
+        )
+    """)
     # Receipt photos are queued here by the (cloud) bot and processed later by
     # the local worker, which is the only thing with access to Ollama.
     cursor.execute("""

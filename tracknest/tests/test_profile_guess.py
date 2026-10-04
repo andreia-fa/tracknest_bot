@@ -32,26 +32,21 @@ def test_mixed_categories_have_no_default():
 
 
 @pytest.mark.asyncio
-async def test_receipt_files_new_items_from_product_then_category(db):
-    crud.add_item("Pfefferbretzel", 1, product="pretzel", category="Bread/Bakery")
-    crud.set_treat_or_need("Pfefferbretzel", "treat")
-    crud.set_lasts("Pfefferbretzel", "same_day")
+async def test_receipt_files_nothing_before_the_product_is_confirmed(db):
+    crud.add_item("LEERDAMMER CAR.", 1, product="cheese", category="Dairy")
+    crud.set_treat_or_need("LEERDAMMER CAR.", "need")
+    crud.set_lasts("LEERDAMMER CAR.", "days", 7)
 
     text, keyboard = await main.process_receipt_result(_receipt(
-        _line("LAUGENBREZEL", "pretzel"),        # known product -> its answers
-        _line("BANANE", "banana"),                # Fruits/Veg -> need, 7 days
-        _line("Kuchenbeleg", "cake"),             # nothing to go on -> asked
+        _line("SCHLAGCREME VEGA", "cheese"),   # misread: must NOT become a 7-day cheese
+        _line("BANANE", "banana"),
     ))
 
-    brezel, banane, kuchen = (crud.get_item(n) for n in ("LAUGENBREZEL", "BANANE", "Kuchenbeleg"))
-    assert (brezel["treat_or_need"], brezel["lasts"]) == ("treat", "same_day")
-    assert (banane["treat_or_need"], banane["lasts"], banane["shelf_life_days"]) == ("need", "days", 7)
-    assert kuchen["treat_or_need"] == "unknown"
-    assert "🍫 treat · used up the same day" in text
-    assert "🧺 need · lasts 7 day(s)" in text
-    assert "❓ treat or need" in text
-    buttons = [b.callback_data for row in keyboard.inline_keyboard for b in row]
-    assert buttons == [f"fix:{brezel['id']}", f"fix:{banane['id']}", f"fix:{kuchen['id']}", "fixok"]
+    for name in ("SCHLAGCREME VEGA", "BANANE"):
+        item = crud.get_item(name)
+        assert (item["treat_or_need"], item["lasts"], item["name_status"]) == ("unknown", "unknown", "name")
+    assert text.count("🆕 I'll ask what it is") == 2
+    assert keyboard is None  # no ✏️ for answers that don't exist yet
 
 
 @pytest.mark.asyncio

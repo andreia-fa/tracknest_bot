@@ -55,6 +55,7 @@ def test_vat_code_is_never_taken_as_a_category(_alias):
     assert main._resolve_receipt_name(item) == ("VOLVIC NATURELLE", None, None, True)
 
 
+@patch("bot.main.crud.get_known_products", new=lambda *a, **k: [])
 @patch("bot.main._log_purchase", return_value=("• line", None))
 @patch("bot.main.crud.get_item", return_value=None)
 @patch("bot.main.crud.get_alias", return_value=None)
@@ -81,7 +82,8 @@ def test_receipt_uses_the_synonym_matcher_not_the_model_alone(_list, _alias, _it
 @patch("bot.main.crud")
 async def test_naming_a_receipt_item_clears_its_list_entry(mock_crud, mock_list, _next_question):
     # "PUSH UP" can't be matched to "Soutien branco" until the user says it's a bra.
-    mock_crud.get_item.return_value = {"category": None}
+    mock_crud.get_item.return_value = {"id": 3, "name": "PUSH UP", "category": None}
+    mock_crud.get_known_products.return_value = []
     mock_list.get_all_items.return_value = [{"name": "Soutien branco"}, {"name": "Salmon"}]
     mock_list.remove_item.return_value = 42
     bot = MagicMock()
@@ -90,7 +92,7 @@ async def test_naming_a_receipt_item_clears_its_list_entry(mock_crud, mock_list,
     await main._confirm_product(bot, 1, "PUSH UP", "bra")
 
     mock_crud.set_item_product.assert_called_once_with("PUSH UP", "bra")
-    mock_crud.set_item_category.assert_called_once_with("PUSH UP", "Clothing")
+    mock_crud.change_item_category.assert_called_once_with("PUSH UP", "Clothing")
     mock_crud.save_alias.assert_called_once_with("PUSH UP", "PUSH UP", "Clothing", "bra")
     mock_list.remove_item.assert_called_once_with("Soutien branco", reason="receipt", source="PUSH UP")
     texts = [c.args[1] for c in bot.send_message.call_args_list]
@@ -102,7 +104,8 @@ async def test_naming_a_receipt_item_clears_its_list_entry(mock_crud, mock_list,
 @patch("bot.main.shopping_list")
 @patch("bot.main.crud")
 async def test_naming_leaves_unrelated_list_entries_alone(mock_crud, mock_list, _next_question):
-    mock_crud.get_item.return_value = {"category": "Fruits/Veg"}
+    mock_crud.get_item.return_value = {"id": 3, "name": "BIO aln.pfanne", "category": "Fruits/Veg"}
+    mock_crud.get_known_products.return_value = []
     mock_list.get_all_items.return_value = [{"name": "Salmon"}]
     bot = MagicMock()
     bot.send_message = AsyncMock()
@@ -117,15 +120,17 @@ async def test_naming_leaves_unrelated_list_entries_alone(mock_crud, mock_list, 
 @patch("bot.main.shopping_list")
 @patch("bot.main.crud")
 async def test_confirming_an_already_profiled_item_asks_nothing_more(mock_crud, mock_list, _next_question):
-    mock_crud.get_item.return_value = {"category": "Dairy", "treat_or_need": "need", "lasts": "days"}
+    mock_crud.get_item.return_value = {"id": 4, "name": "LEERDAMMER CAR", "product": "cheese", "category": "Dairy",
+                                       "treat_or_need": "need", "lasts": "days", "shelf_life_days": 7}
+    mock_crud.get_known_products.return_value = []
     mock_list.get_all_items.return_value = []
     bot = MagicMock()
     bot.send_message = AsyncMock()
 
     await main._confirm_product(bot, 1, "LEERDAMMER CAR", "cheese")
 
-    mock_crud.set_item_category.assert_called_once_with("LEERDAMMER CAR", "Dairy")
-    mock_crud.keep_item_name.assert_not_called()
+    mock_crud.set_name_status.assert_called_once_with("LEERDAMMER CAR", None)  # no card to confirm
+    assert bot.send_message.call_args.args[1] == "Cheese (LEERDAMMER CAR): 🧺 need · lasts 7 day(s) · 🏷 Dairy"
 
 
 @pytest.mark.asyncio
@@ -142,8 +147,8 @@ async def test_new_receipt_item_question_offers_the_models_guess(mock_crud, mock
 
     text = bot.send_message.call_args.args[1]
     markup = bot.send_message.call_args.kwargs["reply_markup"]
-    assert "I think it's cheese" in text
-    assert markup.inline_keyboard[0][0].text == "✓ Yes, cheese"
+    assert text == "🧾 New: LEERDAMMER CAR\nI think it's: cheese"
+    assert [b.callback_data for b in markup.inline_keyboard[0]] == ["product_ok", "product_no"]
 
 
 @pytest.mark.asyncio

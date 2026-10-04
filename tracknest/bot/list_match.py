@@ -137,6 +137,26 @@ def same_kind(entry: str, names: list[str]) -> bool:
     return bool(_same_thing([n for n in names if n], entry))
 
 
+def canonical_product(product: str, known: list[str]) -> str:
+    """The household's own word for a product, if it already has one ("brezel" -> "pretzel").
+
+    Only an exact match, or both being whole terms of the same synonym
+    group, counts — "whipping cream" never becomes "cream cheese" just for
+    sharing a word.
+    """
+    key = _normalize(product)
+    for name in known:
+        if _normalize(name) == key:
+            return name
+    for group in _SYNONYMS:
+        terms = {_normalize(term) for term in group}
+        if key in terms:
+            for name in known:
+                if _normalize(name) in terms:
+                    return name
+    return product
+
+
 def _shares_a_word(receipt_names: list[str], list_name: str) -> bool:
     """Tell whether a list entry and the receipt names share a word (or a cut-off start of one)."""
     list_words = [w for w in _normalize(list_name).split() if len(w) >= _MIN_INSIDE_LEN and not w.isdigit()]

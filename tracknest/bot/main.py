@@ -11,7 +11,7 @@ from aiohttp import web
 
 from bot import dashboard
 from bot.categorize import CATEGORY_NAMES, infer_category
-from bot.list_match import choose_list_match, same_kind
+from bot.list_match import canonical_product, choose_list_match, same_kind
 from bot.parser import parse_line
 from bot.profile_guess import guess_profile
 from bot.receipt_lines import is_code_only
@@ -60,8 +60,39 @@ _ONBOARD_GOAL_KEYBOARD = InlineKeyboardMarkup([
 ])
 
 
-def _product_confirm_keyboard(product: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[InlineKeyboardButton(f"✓ Yes, {product}", callback_data="product_ok")]])
+def _product_confirm_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Yes", callback_data="product_ok"),
+        InlineKeyboardButton("❌ No", callback_data="product_no"),
+    ]])
+
+
+_MAX_PRODUCT_CHOICES = 4
+_MAX_CALLBACK_BYTES = 64  # Telegram's limit on a button's callback data
+
+
+def _product_choices(name: str, rejected: str | None) -> list[str]:
+    """Other things a new item could be, as buttons: the model's alternatives, then related products already bought.
+
+    Each is mapped to the household's own word for it ("brezel" ->
+    "pretzel"), and never repeats the guess just rejected.
+    """
+    known = crud.get_known_products(exclude_name=name)
+    hint = rejected or name
+    candidates = [*crud.get_product_options(name), *(p for p in known if same_kind(p, [name, hint]))]
+    choices = []
+    for candidate in candidates:
+        candidate = canonical_product(candidate, known)
+        fits = len(f"product_pick:{candidate}".encode()) <= _MAX_CALLBACK_BYTES
+        if candidate != rejected and candidate not in choices and fits:
+            choices.append(candidate)
+    return choices[:_MAX_PRODUCT_CHOICES]
+
+
+def _product_choices_keyboard(choices: list[str]) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(choice, callback_data=f"product_pick:{choice}")] for choice in choices]
+    rows.append([InlineKeyboardButton("✍️ Something else — I'll type it", callback_data="product_type")])
+    return InlineKeyboardMarkup(rows)
 
 
 def _category_keyboard(suggested: str | None) -> InlineKeyboardMarkup:
@@ -331,19 +362,16 @@ async def send_pending_profile_question(bot, chat_id: int, force: bool = False):
         guess = item.get("product") if item else None
         if guess:
             await bot.send_message(
-                chat_id,
-                f"🧾 New on a receipt: \"{name}\" — I think it's {guess}.\n\n"
-                "Tap to confirm, or type what it really is in a word or two "
-                "(e.g. bra, frozen veg). I'll remember it for next time.",
-                reply_markup=_product_confirm_keyboard(guess),
+                chat_id, f"🧾 New: {name}\nI think it's: {guess}", reply_markup=_product_confirm_keyboard(),
             )
         else:
             await bot.send_message(
-                chat_id,
-                f"🧾 New on a receipt: \"{name}\" — I can't tell what that is.\n\n"
-                "Type what it is in a word or two (e.g. cheese, bra, frozen veg). "
-                "I'll remember it for next time.",
+                chat_id, f"🧾 New: {name}\nWhat is it?",
+                reply_markup=_product_choices_keyboard(_product_choices(name, None)),
             )
+    elif stage == "card":
+        item = crud.get_item(name)
+        await bot.send_message(chat_id, _card_text(item), reply_markup=_card_keyboard(item))
     elif stage == "category":
         item = crud.get_item(name)
         await bot.send_message(
@@ -404,29 +432,39 @@ async def _handle_profile_answer(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def _confirm_product(bot, chat_id: int, receipt_name: str, product: str) -> None:
-    """Save what a new receipt item generically is, and remember it for that wording.
+    """Save what a new receipt item generically is, then file it from that — never before.
 
-    A product the household already buys under another brand lends this
-    item its profile (purchase type, shelf life, spare policy), so those
-    questions are skipped. The category is re-guessed from the product
-    ("bra" says far more than "PUSH UP" did): an already-profiled item just
-    takes it, a new one gets the category question pre-ticked — one tap.
+    Everything else follows from the product, so it's only used once the
+    user has confirmed it: a SCHLAGCREME VEGA misread as "cheese" used to
+    inherit the cheese's "need, lasts 7 days" before anyone checked.
+    The product is mapped to the household's own word for it ("brezel" ->
+    "pretzel"). A product already bought under another brand lends its
+    profile, and the item is done; otherwise the filing card shows the
+    bot's reading (treat or need, how long it lasts, category) to confirm
+    with one tap.
     """
+    product = canonical_product(product, crud.get_known_products(exclude_name=receipt_name))
     crud.set_item_product(receipt_name, product)
+    crud.set_product_options(receipt_name, [])
     crud.copy_product_profile(receipt_name, product)
     item = crud.get_item(receipt_name) or {}
     guess = infer_category(product)
     category = guess if guess != "Other" else item.get("category")
-    if _is_profiled(item) and category:
-        # Already profiled (an existing item, or one that inherited its
-        # product's profile): nothing left to ask.
-        crud.set_item_category(receipt_name, category)
-    else:
-        if guess != "Other":
-            crud.set_item_category(receipt_name, guess)
-        crud.keep_item_name(receipt_name)  # ask the category next, pre-ticked
+    if category:
+        crud.change_item_category(receipt_name, category)
     crud.save_alias(receipt_name, receipt_name, category, product)
     await _clear_list_entry_for_named_item(bot, chat_id, receipt_name, product)
+    item = crud.get_item(receipt_name) or {}
+    if _is_profiled(item) and category:
+        # Filed like the same product's other brands (or answered before).
+        crud.set_name_status(receipt_name, None)
+        await bot.send_message(
+            chat_id, f"{_card_title(item)}: {_profile_note(item)} · 🏷 {category}",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✏️ Change", callback_data=f"fix:{item['id']}")]]),
+        )
+    else:
+        _fill_guesses(receipt_name, None)
+        crud.set_name_status(receipt_name, "card")
     await send_pending_profile_question(bot, chat_id)
 
 
@@ -449,22 +487,68 @@ async def _clear_list_entry_for_named_item(bot, chat_id: int, receipt_name: str,
         )
 
 
+def _pending_name_item() -> str | None:
+    """The item whose what-is-it question is open, if any."""
+    pending = crud.get_pending_profile_item()
+    return pending[0] if pending and pending[1] == "name" else None
+
+
 async def handle_product_ok(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle "✓ Yes, <product>" on a new receipt item's what-is-it question."""
+    """Handle ✅ Yes on "I think it's: cheese"."""
     query = update.callback_query
     await query.answer()
-    pending = crud.get_pending_profile_item()
-    if not pending or pending[1] != "name":
+    name = _pending_name_item()
+    if not name:
         await query.edit_message_text("Already answered.")
         return
-    name, _stage = pending
-    item = crud.get_item(name)
-    product = item.get("product") if item else None
+    product = (crud.get_item(name) or {}).get("product")
     if not product:
-        await query.edit_message_text(f"What is \"{name}\"? Type it in a word or two.")
+        await query.edit_message_text(f"🧾 {name}\nWhat is it?",
+                                      reply_markup=_product_choices_keyboard(_product_choices(name, None)))
         return
-    await query.edit_message_text(f"{name}: {product}.")
+    await query.edit_message_text(f"🧾 {name}: {product} ✓")
     await _confirm_product(context.bot, update.effective_chat.id, name, product)
+
+
+async def handle_product_no(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle ❌ No on "I think it's: cheese": offer the other readings as buttons."""
+    query = update.callback_query
+    await query.answer()
+    name = _pending_name_item()
+    if not name:
+        await query.edit_message_text("Already answered.")
+        return
+    rejected = (crud.get_item(name) or {}).get("product")
+    choices = _product_choices(name, rejected)
+    await query.edit_message_text(
+        f"🧾 {name}\nNot {rejected} — what is it then?" if choices
+        else f"🧾 {name}\nNot {rejected} — what is it then? Type it in a word or two.",
+        reply_markup=_product_choices_keyboard(choices) if choices else None,
+    )
+
+
+async def handle_product_pick(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle one of the other readings tapped after ❌ No."""
+    query = update.callback_query
+    await query.answer()
+    name = _pending_name_item()
+    if not name:
+        await query.edit_message_text("Already answered.")
+        return
+    product = query.data.split(":", 1)[1]
+    await query.edit_message_text(f"🧾 {name}: {product} ✓")
+    await _confirm_product(context.bot, update.effective_chat.id, name, product)
+
+
+async def handle_product_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle "✍️ Something else": the typed answer goes through the usual what-is-it path."""
+    query = update.callback_query
+    await query.answer()
+    name = _pending_name_item()
+    if not name:
+        await query.edit_message_text("Already answered.")
+        return
+    await query.edit_message_text(f"🧾 {name}\nType what it is in a word or two (e.g. vegan cream).")
 
 
 async def handle_name_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -665,6 +749,96 @@ async def _handle_note_answer(update, context: ContextTypes.DEFAULT_TYPE, item_i
     )
 
 
+def _card_title(item: dict) -> str:
+    """ "Cheese (LEERDAMMER CAR.)" — the product first, the receipt wording only when it adds something."""
+    product = item.get("product")
+    if not product or product.casefold() in item["name"].casefold():
+        return item["name"]
+    return f"{product[0].upper()}{product[1:]} ({item['name']})"
+
+
+def _card_lasts_line(item: dict) -> str:
+    lasts = item.get("lasts", "unknown")
+    if lasts == "same_day":
+        return "🍽 Used up the same day"
+    if lasts == "one_off":
+        return "🎂 Bought once — no reminders"
+    if lasts == "days":
+        return f"⏳ Lasts about {item['shelf_life_days']} days"
+    return "⏳ ❓ How long does it last?"
+
+
+def _card_text(item: dict) -> str:
+    """The filing card: how the bot would file a new item, one line per answer."""
+    kind = {"treat": "🍫 Treat", "need": "🧺 Need"}.get(item.get("treat_or_need"), "❓ Treat or need?")
+    category = item.get("category") or "❓ Category?"
+    return (f"{_card_title(item)} — I'd file it as:\n"
+            f"• {kind}\n• {_card_lasts_line(item)}\n• 🏷 {category}")
+
+
+def _card_keyboard(item: dict) -> InlineKeyboardMarkup:
+    """✅ once every line is answered; one button per line to change it."""
+    item_id = item["id"]
+    rows = []
+    if _is_profiled(item) and item.get("category"):
+        rows.append([InlineKeyboardButton("✅ Right", callback_data=f"card_ok:{item_id}")])
+    kind = item.get("treat_or_need")
+    if kind in ("treat", "need"):
+        other = "need" if kind == "treat" else "treat"
+        rows.append([InlineKeyboardButton(f"🔁 It's a {other}", callback_data=f"card_kind:{item_id}:{other}")])
+    else:
+        rows.append([InlineKeyboardButton("🍫 Treat", callback_data=f"card_kind:{item_id}:treat"),
+                     InlineKeyboardButton("🧺 Need", callback_data=f"card_kind:{item_id}:need")])
+    rows.append([InlineKeyboardButton("⏳ How long", callback_data=f"card_lasts:{item_id}"),
+                 InlineKeyboardButton("🏷 Category", callback_data=f"card_cat:{item_id}")])
+    return InlineKeyboardMarkup(rows)
+
+
+async def handle_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the filing card's buttons: change one line and show the card again, or ✅ to finish."""
+    query = update.callback_query
+    await query.answer()
+    action, item_id, *rest = query.data.split(":")
+    item = crud.get_item_by_id(int(item_id))
+    if not item:
+        await query.edit_message_text("That item no longer exists.")
+        return
+    name = item["name"]
+    if action == "card_ok":
+        if item["name_status"] != "card":
+            await query.edit_message_text(f"{_card_title(item)}: already filed.")
+            return
+        crud.set_name_status(name, None)
+        await query.edit_message_text(f"✅ {_card_title(item)}: {_profile_note(item)} · 🏷 {item['category']}")
+        await send_pending_profile_question(context.bot, query.message.chat_id)
+        return
+    if action == "card_lasts":
+        await query.edit_message_text(f"How long does {item.get('product') or name} last?",
+                                      reply_markup=_shelf_keyboard(f"card_setl:{item['id']}:"))
+        return
+    if action == "card_cat":
+        buttons = [
+            InlineKeyboardButton(f"✓ {category}" if category == item["category"] else category,
+                                 callback_data=f"card_setc:{item['id']}:{i}")
+            for i, category in enumerate(CATEGORY_NAMES)
+        ]
+        await query.edit_message_text(f"Which category is {item.get('product') or name}?",
+                                      reply_markup=InlineKeyboardMarkup([buttons[i:i + 2] for i in range(0, len(buttons), 2)]))
+        return
+    if action == "card_kind":
+        crud.set_treat_or_need(name, rest[0])
+    elif action == "card_setl":
+        if rest[0] == "custom":
+            context.chat_data["shelf_edit_item"] = item["id"]
+            await query.edit_message_text(f"How many days does {item.get('product') or name} last? Reply with a number.")
+            return
+        _apply_shelf_edit(name, *_lasts_from_choice(rest[0]))
+    elif action == "card_setc":
+        crud.change_item_category(name, CATEGORY_NAMES[int(rest[0])])
+    item = crud.get_item_by_id(item["id"])
+    await query.edit_message_text(_card_text(item), reply_markup=_card_keyboard(item))
+
+
 async def handle_fix(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle "✏️ <name>" under a purchase reply: offer that item's answers to change."""
     query = update.callback_query
@@ -813,6 +987,10 @@ async def _handle_shelf_edit_answer(update: Update, context: ContextTypes.DEFAUL
         await update.message.reply_text("Reply with a number of days (2 or more), 'same day', or 'one-off'.")
         return
     _apply_shelf_edit(item["name"], *answer)
+    item = crud.get_item_by_id(item_id)
+    if item.get("name_status") == "card":
+        await update.message.reply_text(_card_text(item), reply_markup=_card_keyboard(item))
+        return
     await update.message.reply_text(
         f"{item['name']}: {_describe_lasts(*answer)}.", reply_markup=_shelf_change_keyboard(item_id)
     )
@@ -895,7 +1073,7 @@ def _pending_question(context: ContextTypes.DEFAULT_TYPE) -> tuple[str, object, 
         item = crud.get_item_by_id(shelf_edit_item) or {}
         return "shelf_edit", shelf_edit_item, f"how many days {item.get('name', 'that item')} lasts"
     profile = crud.get_pending_profile_item()
-    if profile and profile[1] != "category":
+    if profile and profile[1] not in ("category", "card"):
         name, stage = profile
         what = {
             "name": f'what "{name}" is',
@@ -1187,9 +1365,11 @@ def _log_purchase(
         ), None
     existed = crud.get_item(name) is not None
     crud.add_item(name, qty, category=category, product=product)
-    if ask_name and not existed:
+    asking = ask_name and not existed
+    if asking:
+        # What it is gets asked first; nothing is guessed from an unconfirmed product.
         crud.mark_name_pending(name)
-    if not existed:
+    elif not existed:
         _fill_guesses(name, product)
     delta = expenses.get_price_delta(name, price, store=store)
     expenses.log_expense(name, qty, price, store=store, purchased_at=_purchased_at(receipt_date), trip_key=trip_key)
@@ -1197,7 +1377,9 @@ def _log_purchase(
     product = (crud.get_item(name) or {}).get("product") or product
     shown = f"{name} ({product})" if product and product.casefold() not in name.casefold() else name
     line = f"• {qty}x {shown} at €{price:.2f} each"
-    if not existed:
+    if asking:
+        line += " — 🆕 I'll ask what it is"
+    elif not existed:
         line += f" — {_profile_note(crud.get_item(name) or {})}"
     elif note := (crud.get_item(name) or {}).get("notes"):
         line += f"\n  📝 {note}"  # e.g. "don't buy again" — shown when it's bought again anyway
@@ -1282,9 +1464,12 @@ async def process_receipt_result(parsed: dict, receipt_id: int | None = None) ->
     replies = []
     cleared = []
     new_ids = []
+    known_products = crud.get_known_products()
     for item in items:
         name, category, product, ask_name = _resolve_receipt_name(item)
         is_new = crud.get_item(name) is None
+        if ask_name and product:
+            product = canonical_product(product, known_products)
         list_match = choose_list_match(
             item["name"], name, item["matched_shopping_list_item"], list_names, product=product,
         )
@@ -1301,7 +1486,10 @@ async def process_receipt_result(parsed: dict, receipt_id: int | None = None) ->
         replies.append(line)
         if cleared_id:
             cleared.append((cleared_id, list_match))
-        if is_new and (logged := crud.get_item(name)):
+        logged = crud.get_item(name) if is_new else None
+        if logged and logged.get("name_status"):
+            crud.set_product_options(name, item.get("alternatives") or [])
+        elif logged:
             new_ids.append(logged["id"])
     if not receipt_date:
         replies.append("⚠️ I couldn't read the date on this receipt, so it's logged as bought today.")
@@ -1929,6 +2117,10 @@ async def main():
     app.add_handler(CallbackQueryHandler(handle_onboarding_choice, pattern=r"^onboard_"))
     app.add_handler(CallbackQueryHandler(handle_profile_kind_choice, pattern=r"^profile_(kind|type):"))
     app.add_handler(CallbackQueryHandler(handle_product_ok, pattern=r"^product_ok$"))
+    app.add_handler(CallbackQueryHandler(handle_product_no, pattern=r"^product_no$"))
+    app.add_handler(CallbackQueryHandler(handle_product_pick, pattern=r"^product_pick:"))
+    app.add_handler(CallbackQueryHandler(handle_product_type, pattern=r"^product_type$"))
+    app.add_handler(CallbackQueryHandler(handle_card, pattern=r"^card_(ok|kind|lasts|cat|setl|setc):"))
     app.add_handler(CallbackQueryHandler(handle_restore, pattern=r"^restore:"))
     app.add_handler(CallbackQueryHandler(handle_fix, pattern=r"^fix:"))
     app.add_handler(CallbackQueryHandler(handle_fix_ok, pattern=r"^fixok$"))
