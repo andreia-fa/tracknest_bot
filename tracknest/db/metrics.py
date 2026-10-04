@@ -109,6 +109,38 @@ def get_spending_summary(year=None, month=None, top_n=3):
     }
 
 
+def get_category_purchases(year=None, month=None):
+    """Return a month's purchases grouped by category — what each category bar is made of.
+
+    Args:
+        year: Calendar year. Defaults to the current month.
+        month: Calendar month (1-12). Defaults to the current month.
+
+    Returns:
+        Dict of category (as get_spending_summary names it, 'Uncategorized'
+        when unset) -> list of {day, name, store, total}, biggest first.
+    """
+    now = datetime.now(tz=timezone.utc)
+    prefix = f"{year or now.year:04d}-{month or now.month:02d}"
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT COALESCE(i.category, 'Uncategorized') AS category, e.purchase_date AS day,
+               i.name AS name, e.store AS store, e.quantity_purchased * e.unit_price AS total
+        FROM item_expenses e
+        JOIN inventory_items i ON i.id = e.item_id
+        WHERE e.purchase_date LIKE ?
+        ORDER BY total DESC, e.purchase_date
+    """, (f"{prefix}%",))
+    grouped = {}
+    for row in cursor.fetchall():
+        grouped.setdefault(row["category"], []).append(
+            {"day": row["day"], "name": row["name"], "store": row["store"], "total": float(row["total"])})
+    cursor.close()
+    conn.close()
+    return grouped
+
+
 def get_month_pace(year=None, month=None):
     """Return a month's spend so far alongside a straight-line month-end projection.
 

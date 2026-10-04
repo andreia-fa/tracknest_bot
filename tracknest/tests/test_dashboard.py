@@ -40,6 +40,7 @@ def sample_data(**overrides) -> dict:
 @patch("bot.dashboard.metrics.get_price_trends", return_value=[])
 @patch("bot.dashboard.metrics.get_running_low", return_value=[])
 @patch("bot.dashboard.metrics.get_daily_spend", return_value=[0.0] * 30)
+@patch("bot.dashboard.metrics.get_category_purchases", return_value={})
 @patch("bot.dashboard.metrics.get_fast_food", return_value={"meals": 0, "total": 0.0, "last_day": None})
 @patch("bot.dashboard.metrics.get_shopping_trips")
 @patch("bot.dashboard.metrics.get_budget_status", return_value=None)
@@ -204,3 +205,15 @@ def test_fast_food_tile_without_any_yet():
     html = dashboard._tiles(sample_data(), None, amounts=True)
     assert "0<span class=\"of\"> meals</span>" in html
     assert "None logged yet" in html
+
+
+def test_each_category_opens_to_its_purchases_in_the_private_view_only():
+    import re
+    bought = {"Hygiene/Personal Care": [{"day": "2026-09-02", "name": "Balea Duschgel", "store": "dm", "total": 3.99}]}
+    data = sample_data(categories=[{"name": "Hygiene/Personal Care", "total": 3.99}], category_purchases=bought)
+    html = dashboard.render_dashboard_html(data)
+    private = dashboard._categories(data, amounts=True)
+    assert "<details" in private and "Balea Duschgel" in private and "2 Sep" in private and "dm" in private
+    assert "Balea Duschgel" not in dashboard._categories(data, amounts=False)
+    for part in re.findall(r'<div class="shared">(.*?)</div></section>', html, re.S):
+        assert "Balea Duschgel" not in part

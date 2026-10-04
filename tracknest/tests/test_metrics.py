@@ -330,3 +330,12 @@ def test_fast_food_is_one_meal_per_trip_by_store_or_product(db):
 def test_fast_food_last_day_looks_past_the_month(db):
     _visit([("Big Mac", 5.49, "Other")], "McDonald's", 28, trip_key="typed:a")
     assert metrics.get_fast_food(2026, 10) == {"meals": 0, "total": 0.0, "last_day": "2026-09-28"}
+
+
+def test_category_purchases_show_what_each_bar_is_made_of(db):
+    _visit([("Duschgel", 3.99, "Hygiene/Personal Care"), ("Banane", 1.20, "Fruits/Veg")], "dm", 2, trip_key="r:1")
+    _visit([("Apfel", 2.50, "Fruits/Veg")], None, 5, trip_key="typed:a")
+    grouped = metrics.get_category_purchases(2026, 9)
+    assert grouped["Hygiene/Personal Care"] == [
+        {"day": "2026-09-02", "name": "Duschgel", "store": "dm", "total": pytest.approx(3.99)}]
+    assert [p["name"] for p in grouped["Fruits/Veg"]] == ["Apfel", "Banane"]

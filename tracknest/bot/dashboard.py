@@ -46,7 +46,8 @@ def build_month_data(year: int, month: int) -> dict:
         Dict with keys: key ("YYYY-MM"), is_current, month_label, day,
         days_in_month, spent, projected, budget (dict or None), mix ({need,
         treat, unknown} in euros), categories (list of {name, total}), trips
-        fast_food ({meals, total, last_day}) and daily (euros per day).
+        fast_food ({meals, total, last_day}), category_purchases (category ->
+        purchases) and daily (euros per day).
     """
     now = datetime.now(tz=timezone.utc)
     is_current = (year, month) == (now.year, now.month)
@@ -77,6 +78,7 @@ def build_month_data(year: int, month: int) -> dict:
         "purposes": _purposes(spending["top_categories"]),
         "trips": metrics.get_shopping_trips(year, month),
         "fast_food": metrics.get_fast_food(year, month),
+        "category_purchases": metrics.get_category_purchases(year, month),
         "daily": metrics.get_daily_spend(year, month),
     }
 
@@ -405,15 +407,31 @@ def _categories(month: dict, amounts: bool) -> str:
     if not categories:
         return ""
     peak = max(c["total"] for c in categories) or 1.0
-    rows = "".join(
-        f'<div class="bar-row"><span class="bar-name"><span class="cat-icon" aria-hidden="true">'
-        f'{_CATEGORY_ICONS.get(c["name"], "📦")}</span>{escape(c["name"])}</span>'
-        f'<div class="bar-track"><div class="bar-fill" style="width:{c["total"] / peak * 100:.1f}%"></div></div>'
-        f'<span class="bar-value">{_share(c["total"], total):.0f}%'
-        + (f'<span class="bar-amt">{_eur(c["total"])}</span>' if amounts else "") + "</span></div>"
-        for c in categories
-    )
-    return _card("Spending by category", rows)
+    purchases = month.get("category_purchases") or {}
+
+    def bar(c: dict) -> str:
+        return (f'<div class="bar-row"><span class="bar-name"><span class="cat-icon" aria-hidden="true">'
+                f'{_CATEGORY_ICONS.get(c["name"], "📦")}</span>{escape(c["name"])}</span>'
+                f'<div class="bar-track"><div class="bar-fill" style="width:{c["total"] / peak * 100:.1f}%"></div></div>'
+                f'<span class="bar-value">{_share(c["total"], total):.0f}%'
+                + (f'<span class="bar-amt">{_eur(c["total"])}</span>' if amounts else "") + "</span></div>")
+
+    def row(c: dict) -> str:
+        # Private view only: what each bar is made of, one tap away.
+        bought = purchases.get(c["name"]) if amounts else None
+        if not bought:
+            return bar(c)
+        lines = "".join(
+            f'<li><div><span class="buy-name">{escape(p["name"])}</span>'
+            f'<span class="buy-meta">{datetime.fromisoformat(p["day"]).strftime("%-d %b")} · '
+            f'{escape(p["store"] or "typed in")}</span></div><span class="num">{_eur(p["total"])}</span></li>'
+            for p in bought
+        )
+        return f'<details class="cat"><summary>{bar(c)}</summary><ul class="buys">{lines}</ul></details>'
+
+    rows = "".join(row(c) for c in categories)
+    sub = "Tap a category to see what's in it" if amounts and purchases else ""
+    return _card("Spending by category", rows, sub=sub)
 
 
 def _stores(month: dict, amounts: bool) -> str:
@@ -639,6 +657,17 @@ _STYLE = """
   .dot-key.topup { background: transparent; border: 1.6px solid var(--bad); }
   details { margin-top: 12px; }
   summary { cursor: pointer; font-size: 13px; color: var(--ink-2); }
+  details.cat { margin: 0; }
+  details.cat > summary { list-style: none; }
+  details.cat > summary::-webkit-details-marker { display: none; }
+  details.cat[open] > summary .bar-name { color: var(--ink); font-weight: 600; }
+  .buys { list-style: none; margin: 2px 0 10px; padding: 0 0 0 26px; }
+  .buys li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0;
+             border-bottom: 1px solid var(--border); font-size: 13px; }
+  .buys li:last-child { border-bottom: 0; }
+  .buy-name { display: block; overflow-wrap: anywhere; }
+  .buy-meta { display: block; font-size: 11px; color: var(--ink-muted); }
+  .buys .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
   .bar-row { display: grid; grid-template-columns: minmax(0, 150px) 1fr 84px; align-items: center; gap: 10px; padding: 5px 0; }
   .bar-name { font-size: 13px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .bar-track { height: 10px; border-radius: 4px; background: var(--track); }
