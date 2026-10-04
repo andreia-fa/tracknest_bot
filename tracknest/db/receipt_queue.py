@@ -1,5 +1,6 @@
-"""Queue of receipt photos awaiting processing by the local Ollama worker."""
+"""Queue of receipt photos awaiting processing by the local Ollama worker, then the user's review."""
 
+import json
 from datetime import datetime, timezone
 
 from db.database import get_connection
@@ -45,7 +46,8 @@ def resolve_receipt(receipt_id: int, status: str = "done") -> None:
 
     Args:
         receipt_id: The pending_receipts row id.
-        status: 'done' on success, 'failed' if parsing errored out.
+        status: 'done' once saved, 'failed' if parsing errored out,
+            'discarded' if the user threw the reading away.
     """
     conn = get_connection()
     cursor = conn.cursor()
@@ -56,3 +58,32 @@ def resolve_receipt(receipt_id: int, status: str = "done") -> None:
     conn.commit()
     cursor.close()
     conn.close()
+
+
+def hold_for_review(receipt_id: int, parsed: dict) -> None:
+    """Park a parsed receipt until the user confirms it — nothing is logged yet."""
+    conn = get_connection()
+    conn.execute("UPDATE pending_receipts SET status = 'review', parsed = ? WHERE id = ?",
+                 (json.dumps(parsed), receipt_id))
+    conn.commit()
+    conn.close()
+
+
+def get_review(receipt_id: int) -> dict | None:
+    """Return a receipt's parsed reading while it awaits review, or None once it's saved or discarded."""
+    conn = get_connection()
+    row = conn.execute("SELECT parsed FROM pending_receipts WHERE id = ? AND status = 'review'",
+                       (receipt_id,)).fetchone()
+    conn.close()
+    return json.loads(row["parsed"]) if row and row["parsed"] else None
+
+
+def update_review(receipt_id: int, parsed: dict) -> bool:
+    """Store the user's corrections to a reading under review; False if it's no longer under review."""
+    conn = get_connection()
+    cursor = conn.execute("UPDATE pending_receipts SET parsed = ? WHERE id = ? AND status = 'review'",
+                          (json.dumps(parsed), receipt_id))
+    conn.commit()
+    changed = cursor.rowcount == 1
+    conn.close()
+    return changed

@@ -70,6 +70,11 @@ result back to the cloud container via `db.remote_cli` over SSH. `bot/receipt.py
 starts `ollama serve` itself on first use and leaves it running — no env
 var, no API key, fully offline. The shopping-list feature works
 independently of all this — only receipt photos wait on the worker.
+**Receipts wait for the user's ✅ (2026-10-04).** `finish_receipt` only parks
+the reading (`pending_receipts.status = 'review'`, JSON in `parsed`) and sends
+a line-by-line preview (`bot.main.receipt_review`); items, expenses and the
+shopping list are only touched when ✅ Save all runs `process_receipt_result`.
+Lines can be renamed or removed first (`handle_receipt_review`).
 `config/__init__.py` only ever reads `os.environ[]` — it doesn't care where
 the values came from. `DB_PATH` is not a secret — it's just a file path, and
 defaults to `data/tracknest.db` (git-ignored) if unset.

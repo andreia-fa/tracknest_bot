@@ -9,13 +9,9 @@ from db import remote_cli
 @pytest.mark.asyncio
 @patch("db.remote_cli.Bot")
 @patch("db.remote_cli.receipt_queue")
-@patch("bot.main.send_pending_profile_question", new_callable=AsyncMock)
+@patch("bot.main.receipt_review", return_value=("🧾 Receipt read", "keyboard"))
 @patch("bot.main.process_receipt_result", new_callable=AsyncMock)
-async def test_finish_receipt_logs_resolves_and_replies(
-    mock_process, mock_send_profile, mock_queue, mock_bot_cls
-):
-    keyboard = MagicMock()
-    mock_process.return_value = ("Receipt processed:\n• 1x Milk at €1.50 each", keyboard)
+async def test_finish_receipt_only_holds_it_for_review(mock_process, _review, mock_queue, mock_bot_cls):
     mock_bot = MagicMock()
     mock_bot.send_message = AsyncMock()
     mock_bot_cls.return_value = mock_bot
@@ -23,12 +19,10 @@ async def test_finish_receipt_logs_resolves_and_replies(
     parsed = {"items": [], "reconciled": True}
     result = await remote_cli._finish_receipt({"receipt_id": 5, "chat_id": 123, "parsed": parsed})
 
-    mock_process.assert_awaited_once_with(parsed, receipt_id=5)  # the receipt is the trip
-    mock_queue.resolve_receipt.assert_called_once_with(5, status="done")
-    mock_bot.send_message.assert_awaited_once_with(
-        123, "Receipt processed:\n• 1x Milk at €1.50 each", reply_markup=keyboard
-    )
-    mock_send_profile.assert_awaited_once_with(mock_bot, 123)
+    mock_process.assert_not_awaited()  # nothing logged before the user confirms
+    mock_queue.hold_for_review.assert_called_once_with(5, parsed)
+    mock_queue.resolve_receipt.assert_not_called()
+    mock_bot.send_message.assert_awaited_once_with(123, "🧾 Receipt read", reply_markup="keyboard")
     assert result == {"ok": True}
 
 

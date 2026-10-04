@@ -1321,6 +1321,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     buttons says it expired.
     """
     message = update.message or update.edited_message  # an edited message counts as a new one
+    if _awaiting_receipt_rename(context) and update.message:
+        # Asked for right after a ✏️ Rename tap, and it only changes the
+        # reading under review — nothing is saved until ✅ Save all.
+        await _rename_receipt_line(message, context)
+        return
     text = message.text
     pending = _pending_question(context) if _could_be_an_answer(text, context) else None
     preview = _preview_list_lines(text)
@@ -1564,6 +1569,140 @@ def _put_back_keyboard(cleared: list[tuple[int, str]]) -> InlineKeyboardMarkup |
         [InlineKeyboardButton(f"↩️ Put back {name}", callback_data=f"restore:{history_id}")]
         for history_id, name in cleared
     ])
+
+
+_RECONCILE_TOLERANCE = 0.02
+_REVIEW_LABEL_LEN = 40
+
+
+def _line_text(i: int, item: dict) -> str:
+    return f"{i + 1}. {item['quantity']}x {item['name']} — €{item['unit_price']:.2f}" + (
+        " each" if item["quantity"] != 1 else "")
+
+
+def receipt_review(receipt_id: int, parsed: dict) -> tuple[str, InlineKeyboardMarkup]:
+    """The model's reading of a receipt, line by line, with buttons to save, fix or discard it.
+
+    Nothing is written until ✅ — the model has misread lines before (it once
+    named a Burger King line after "Socks - decathlon" from the shopping list).
+    """
+    items = parsed["items"]
+    list_names = [entry["name"] for entry in shopping_list.get_all_items()]
+    where = ", ".join(part for part in (
+        parsed.get("store"),
+        datetime.fromisoformat(parsed["purchase_date"]).strftime("%-d %b") if parsed.get("purchase_date") else None,
+    ) if part)
+    lines = [f"🧾 Receipt read{f' ({where})' if where else ''} — check it before I save anything:"]
+    for i, item in enumerate(items):
+        line = _line_text(i, item)
+        if is_code_only(item["name"]):
+            line += " ⚠️ no readable name"
+        elif copied_from_list(item["name"], list_names):
+            line += " ⚠️ copied from your shopping list, not the receipt"
+        lines.append(line)
+    if not items:
+        lines.append("(no lines left)")
+    total = sum(item["quantity"] * item["unit_price"] for item in items)
+    paid = parsed.get("total_paid")
+    if paid is not None and abs(total - paid) > _RECONCILE_TOLERANCE:
+        lines.append(f"\n⚠️ Lines add up to €{total:.2f}, the receipt says €{paid:.2f}.")
+    else:
+        lines.append(f"\nTotal €{total:.2f}" + (" ✓ matches the receipt" if paid is not None else ""))
+    if not parsed.get("purchase_date"):
+        lines.append("⚠️ No date read — it'll be logged as bought today.")
+    buttons = [[InlineKeyboardButton("✅ Save all", callback_data=f"rcpt:ok:{receipt_id}")]] if items else []
+    if items:
+        buttons.append([InlineKeyboardButton("✏️ Fix a line", callback_data=f"rcpt:fix:{receipt_id}")])
+    buttons.append([InlineKeyboardButton("❌ Discard the whole receipt", callback_data=f"rcpt:cancel:{receipt_id}")])
+    return "\n".join(lines), InlineKeyboardMarkup(buttons)
+
+
+def _set_review(receipt_id: int, parsed: dict) -> None:
+    """Save corrections to a reading, keeping its totals honest for the final reply."""
+    parsed["items_total"] = round(sum(i["quantity"] * i["unit_price"] for i in parsed["items"]), 2)
+    if parsed.get("total_paid") is not None:
+        parsed["reconciled"] = abs(parsed["items_total"] - parsed["total_paid"]) <= _RECONCILE_TOLERANCE
+    receipt_queue.update_review(receipt_id, parsed)
+
+
+async def handle_receipt_review(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the receipt review buttons: save, pick a line to fix, rename or remove it, or discard."""
+    query = update.callback_query
+    await query.answer()
+    _prefix, action, rest = query.data.split(":", 2)
+    receipt_id, _, index = rest.partition(":")
+    receipt_id = int(receipt_id)
+    parsed = receipt_queue.get_review(receipt_id)
+    if parsed is None:
+        await query.edit_message_text("This receipt was already saved or discarded.")
+        return
+    items = parsed["items"]
+    i = int(index) if index else None
+    if i is not None and not 0 <= i < len(items):
+        action = "back"
+    if action == "ok":
+        context.chat_data.pop("receipt_rename", None)
+        reply, markup = await process_receipt_result(parsed, receipt_id=receipt_id)
+        receipt_queue.resolve_receipt(receipt_id, status="done")
+        await query.edit_message_text(reply, reply_markup=markup)
+        await send_pending_profile_question(context.bot, query.message.chat_id)
+    elif action == "cancel":
+        receipt_queue.resolve_receipt(receipt_id, status="discarded")
+        await query.edit_message_text("🗑 Receipt discarded — nothing saved. Send the photo again to retry.")
+    elif action == "fix":
+        rows = [[InlineKeyboardButton(_line_text(n, item)[:_REVIEW_LABEL_LEN],
+                                      callback_data=f"rcpt:line:{receipt_id}:{n}")] for n, item in enumerate(items)]
+        rows.append([InlineKeyboardButton("⬅️ Back", callback_data=f"rcpt:back:{receipt_id}")])
+        await query.edit_message_text("Which line is wrong?", reply_markup=InlineKeyboardMarkup(rows))
+    elif action == "line":
+        rows = [[InlineKeyboardButton("✏️ Rename it", callback_data=f"rcpt:rename:{receipt_id}:{i}"),
+                 InlineKeyboardButton("🗑 Remove it", callback_data=f"rcpt:drop:{receipt_id}:{i}")],
+                [InlineKeyboardButton("⬅️ Back", callback_data=f"rcpt:back:{receipt_id}")]]
+        await query.edit_message_text(_line_text(i, items[i]), reply_markup=InlineKeyboardMarkup(rows))
+    elif action == "rename":
+        context.chat_data["receipt_rename"] = {"receipt_id": receipt_id, "index": i,
+                                               "at": datetime.now(tz=timezone.utc).isoformat()}
+        rows = [[InlineKeyboardButton("⬅️ Back", callback_data=f"rcpt:back:{receipt_id}")]]
+        await query.edit_message_text(f"{_line_text(i, items[i])}\n\nType what this line really is (e.g. Pommes).",
+                                      reply_markup=InlineKeyboardMarkup(rows))
+    else:
+        if action == "drop":
+            items.pop(i)
+            _set_review(receipt_id, parsed)
+        context.chat_data.pop("receipt_rename", None)
+        text, markup = receipt_review(receipt_id, parsed)
+        await query.edit_message_text(text, reply_markup=markup)
+
+
+_RENAME_WINDOW = timedelta(minutes=15)
+
+
+def _awaiting_receipt_rename(context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Whether the next typed text is the new name for a receipt line — only shortly after ✏️ Rename."""
+    target = context.chat_data.get("receipt_rename")
+    if target and datetime.now(tz=timezone.utc) - datetime.fromisoformat(target["at"]) <= _RENAME_WINDOW:
+        return True
+    context.chat_data.pop("receipt_rename", None)
+    return False
+
+
+async def _rename_receipt_line(message, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Use a typed name for the receipt line the user chose to rename, then show the reading again."""
+    target = context.chat_data.pop("receipt_rename")
+    parsed = receipt_queue.get_review(target["receipt_id"])
+    name = clean_name(message.text)
+    if parsed is None or not 0 <= target["index"] < len(parsed["items"]) or not name:
+        await message.reply_text("That receipt was already saved or discarded — nothing changed.")
+        return
+    item = parsed["items"][target["index"]]
+    item["name"] = name
+    # The model's list match was made for the wrong name; let the synonym
+    # matcher judge the real one.
+    item["matched_shopping_list_item"] = ""
+    item["product"] = ""
+    _set_review(target["receipt_id"], parsed)
+    text, markup = receipt_review(target["receipt_id"], parsed)
+    await message.reply_text(text, reply_markup=markup)
 
 
 async def process_receipt_result(parsed: dict, receipt_id: int | None = None) -> tuple[str, InlineKeyboardMarkup | None]:
@@ -2275,6 +2414,7 @@ async def main():
     app.add_handler(CallbackQueryHandler(handle_shelf_set, pattern=r"^shelf_set:"))
     app.add_handler(CallbackQueryHandler(handle_spare_alert_choice, pattern=r"^spare_(add|plenty|stop):"))
     app.add_handler(CallbackQueryHandler(handle_typed_choice, pattern=r"^typed:"))
+    app.add_handler(CallbackQueryHandler(handle_receipt_review, pattern=r"^rcpt:"))
     app.add_handler(CallbackQueryHandler(handle_stock_add_all, pattern=r"^stock_add_all$"))
     app.add_handler(CallbackQueryHandler(handle_checkin_choice, pattern=r"^checkin:(yes|no):"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))

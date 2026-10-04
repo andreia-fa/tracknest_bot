@@ -4,7 +4,7 @@ Invoked over SSH + `docker exec` against the running container (see
 `bot/receipt_worker.py`), so the DB is only ever touched on the machine
 where the SQLite file actually lives — no network filesystem, no ad-hoc SQL
 built on the calling side. Reuses the exact same functions the live bot
-uses (bot.main.process_receipt_result / send_pending_profile_question),
+uses (bot.main.receipt_review / send_pending_profile_question),
 so the item-logging and follow-up-question logic only exists in one place.
 """
 
@@ -18,14 +18,12 @@ from telegram import Bot
 
 
 async def _finish_receipt(args: dict) -> dict:
-    """Log a parsed receipt's items, resolve the queue entry, and reply to the chat."""
-    from bot.main import process_receipt_result, send_pending_profile_question
+    """Hold a parsed receipt for the user's review and send them the reading — nothing is logged yet."""
+    from bot.main import receipt_review
 
-    reply, put_back_keyboard = await process_receipt_result(args["parsed"], receipt_id=args["receipt_id"])
-    receipt_queue.resolve_receipt(args["receipt_id"], status="done")
-    bot = Bot(token=BOT_TOKEN)
-    await bot.send_message(args["chat_id"], reply, reply_markup=put_back_keyboard)
-    await send_pending_profile_question(bot, args["chat_id"])
+    receipt_queue.hold_for_review(args["receipt_id"], args["parsed"])
+    text, keyboard = receipt_review(args["receipt_id"], args["parsed"])
+    await Bot(token=BOT_TOKEN).send_message(args["chat_id"], text, reply_markup=keyboard)
     return {"ok": True}
 
 

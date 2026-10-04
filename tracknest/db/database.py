@@ -385,6 +385,11 @@ def init_db():
             resolved_at TEXT
         )
     """)
+    # A parsed receipt waits here (status 'review') until the user confirms
+    # it — the model's reading is never written to items/expenses unchecked.
+    receipt_cols = {row[1] for row in cursor.execute("PRAGMA table_info(pending_receipts)")}
+    if "parsed" not in receipt_cols:
+        cursor.execute("ALTER TABLE pending_receipts ADD COLUMN parsed TEXT")
     conn.commit()
     cursor.close()
     _make_item_names_case_insensitive(conn)
