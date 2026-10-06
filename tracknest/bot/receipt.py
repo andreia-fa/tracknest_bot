@@ -5,7 +5,7 @@ import logging
 import re
 import subprocess
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 import ollama
 
@@ -174,20 +174,27 @@ def parse_receipt_date(raw: str, today: date) -> str | None:
     """Turn the model's reading of the receipt date into an ISO date, or None if it can't be trusted.
 
     Accepts YYYY-MM-DD (as asked) and the printed German forms DD.MM.YYYY /
-    DD.MM.YY (in case the model copies them). A date in the future or more
-    than _MAX_RECEIPT_AGE old is treated as a misread.
+    DD.MM.YY (in case the model copies them), also with spaces after the
+    dots ("05. 10. 2026", as REWE prints it) or a time next to it. A date in
+    the future or more than _MAX_RECEIPT_AGE old is treated as a misread.
     """
     raw = (raw or "").strip()
-    for pattern, fmt in ((r"\d{4}-\d{2}-\d{2}", "%Y-%m-%d"),
-                         (r"\d{1,2}\.\d{1,2}\.\d{4}", "%d.%m.%Y"),
-                         (r"\d{1,2}\.\d{1,2}\.\d{2}", "%d.%m.%y")):
-        if re.fullmatch(pattern, raw):
-            try:
-                parsed = datetime.strptime(raw, fmt).date()
-            except ValueError:
-                return None
-            return parsed.isoformat() if today - _MAX_RECEIPT_AGE <= parsed <= today else None
-    return None
+    found = (re.search(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b", raw), None)
+    if not found[0]:
+        found = (re.search(r"\b(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4}|\d{2})\b", raw), "dmy")
+    match, order = found
+    if not match:
+        return None
+    if order == "dmy":
+        day, month, year = (int(part) for part in match.groups())
+        year += 2000 if year < 100 else 0
+    else:
+        year, month, day = (int(part) for part in match.groups())
+    try:
+        parsed = date(year, month, day)
+    except ValueError:
+        return None
+    return parsed.isoformat() if today - _MAX_RECEIPT_AGE <= parsed <= today else None
 
 
 def _items_total(items: list[dict]) -> float:
@@ -280,6 +287,9 @@ def parse_receipt(image_bytes: bytes) -> dict:
     total_paid = result["total_paid"]
     store = result.get("store") or ""
     purchase_date = parse_receipt_date(result.get("purchase_date", ""), date.today())
+    if not purchase_date:
+        # The user is asked for the date; this says why, next time one is missed.
+        logger.info("Receipt date not used — the model read %r.", result.get("purchase_date"))
     # A "product" costing exactly the receipt total, next to other products,
     # is the total line misread as an item (the footer "Kundenbeleg" was once
     # logged as a €3.18 "Kuchenbeleg" this way).

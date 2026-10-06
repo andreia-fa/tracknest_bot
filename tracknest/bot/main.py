@@ -1629,18 +1629,32 @@ def receipt_review(receipt_id: int, parsed: dict) -> tuple[str, InlineKeyboardMa
     else:
         lines.append(f"\nTotal €{total:.2f}" + (" ✓ matches the receipt" if paid is not None else ""))
     if not parsed.get("purchase_date"):
-        lines.append("⚠️ No date read — it'll be logged as bought today.")
+        lines.append("❓ I couldn't read the date — when did you buy this? Tap the day before I can save.")
     if unnamed:
         # Never saved under a made-up name: the user names or removes it first.
         which = "the line" if unnamed == 1 else f"the {unnamed} lines"
         lines.append(f"❓ Tell me what {which} without a name {'is' if unnamed == 1 else 'are'} "
                      "(✏️ Fix a line) before I can save.")
     buttons = ([[InlineKeyboardButton("✅ Save all", callback_data=f"rcpt:ok:{receipt_id}")]]
-               if items and not unnamed else [])
+               if items and not unnamed and parsed.get("purchase_date") else [])
+    if items and not parsed.get("purchase_date"):
+        buttons.extend(_date_buttons(receipt_id))
     if items:
         buttons.append([InlineKeyboardButton("✏️ Fix a line", callback_data=f"rcpt:fix:{receipt_id}")])
+        if parsed.get("purchase_date"):
+            buttons.append([InlineKeyboardButton("📅 Change date", callback_data=f"rcpt:date:{receipt_id}")])
     buttons.append([InlineKeyboardButton("❌ Discard the whole receipt", callback_data=f"rcpt:cancel:{receipt_id}")])
     return "\n".join(lines), InlineKeyboardMarkup(buttons)
+
+
+def _date_buttons(receipt_id: int) -> list[list[InlineKeyboardButton]]:
+    """Today, yesterday and the day before, to date a receipt the model couldn't (or misread)."""
+    today = datetime.now(tz=_LOCAL_TZ).date()
+    days = [today - timedelta(days=n) for n in range(3)]
+    labels = ["Today", "Yesterday", days[2].strftime("%a")]
+    return [[InlineKeyboardButton(f"📅 {label}, {day.strftime('%-d %b')}",
+                                  callback_data=f"rcpt:day:{receipt_id}:{day.strftime('%Y%m%d')}")]
+            for label, day in zip(labels, days)]
 
 
 def _set_review(receipt_id: int, parsed: dict) -> None:
@@ -1663,11 +1677,16 @@ async def handle_receipt_review(update: Update, context: ContextTypes.DEFAULT_TY
         await query.edit_message_text("This receipt was already saved or discarded.")
         return
     items = parsed["items"]
+    if action == "day":
+        # The date the user picked; the button carries it, so a late tap can't shift it.
+        parsed["purchase_date"] = datetime.strptime(index, "%Y%m%d").date().isoformat()
+        receipt_queue.update_review(receipt_id, parsed)
+        action, index = "back", ""
     i = int(index) if index else None
     if i is not None and not 0 <= i < len(items):
         action = "back"
-    if action == "ok" and any(is_code_only(item["name"]) for item in items):
-        action = "back"  # an old preview's ✅ — a line still needs its name
+    if action == "ok" and (any(is_code_only(item["name"]) for item in items) or not parsed.get("purchase_date")):
+        action = "back"  # an old preview's ✅ — a line still needs its name, or the receipt its date
     if action == "ok":
         context.chat_data.pop("receipt_edit", None)
         reply, markup = await process_receipt_result(parsed, receipt_id=receipt_id)
@@ -1677,6 +1696,9 @@ async def handle_receipt_review(update: Update, context: ContextTypes.DEFAULT_TY
     elif action == "cancel":
         receipt_queue.resolve_receipt(receipt_id, status="discarded")
         await query.edit_message_text("🗑 Receipt discarded — nothing saved. Send the photo again to retry.")
+    elif action == "date":
+        rows = [*_date_buttons(receipt_id), [InlineKeyboardButton("⬅️ Back", callback_data=f"rcpt:back:{receipt_id}")]]
+        await query.edit_message_text("When did you buy this?", reply_markup=InlineKeyboardMarkup(rows))
     elif action == "fix":
         rows = [[InlineKeyboardButton(_line_text(n, item)[:_REVIEW_LABEL_LEN],
                                       callback_data=f"rcpt:line:{receipt_id}:{n}")] for n, item in enumerate(items)]
@@ -1798,8 +1820,6 @@ async def process_receipt_result(parsed: dict, receipt_id: int | None = None) ->
             crud.set_product_options(name, item.get("alternatives") or [])
         elif logged:
             new_ids.append(logged["id"])
-    if not receipt_date:
-        replies.append("⚠️ I couldn't read the date on this receipt, so it's logged as bought today.")
     if not parsed["reconciled"]:
         replies.append(
             f"⚠️ Heads up: item prices add up to €{parsed['items_total']:.2f} but the "

@@ -77,12 +77,6 @@ async def test_old_receipt_is_logged_on_its_printed_date(db):
     assert "skipped" in again
 
 
-@pytest.mark.asyncio
-async def test_unreadable_date_is_flagged(db):
-    text, _keyboard = await main.process_receipt_result(_receipt(_line("BANANE", "banana")))
-    assert "couldn't read the date" in text
-
-
 def test_a_pastry_is_a_same_day_treat():
     from bot.profile_guess import guess_profile
     assert guess_profile("Pastries") == ("treat", ("same_day", None))

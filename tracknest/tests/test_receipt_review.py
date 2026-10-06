@@ -134,3 +134,37 @@ async def test_an_unreadable_line_must_be_named_before_saving(db):
     assert "❓" not in reply and "2. 1x Pommes — €3.99" in reply
     await _tap(f"rcpt:ok:{receipt_id}", context)
     assert sorted(crud.get_item_names()) == ["Pommes", "Whopper"]
+
+
+@pytest.mark.asyncio
+async def test_a_receipt_without_a_date_asks_for_it_before_saving(db):
+    receipt_id = _held_receipt()
+    parsed = receipt_queue.get_review(receipt_id)
+    parsed["purchase_date"] = None
+    receipt_queue.update_review(receipt_id, parsed)
+    text, markup = main.receipt_review(receipt_id, parsed)
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert "couldn't read the date" in text
+    assert f"rcpt:ok:{receipt_id}" not in callbacks
+    assert len([c for c in callbacks if c.startswith(f"rcpt:day:{receipt_id}:")]) == 3
+
+    context = _context()
+    await _tap(f"rcpt:ok:{receipt_id}", context)  # an old ✅ can't sneak it through
+    assert crud.get_item_names() == []
+
+    await _tap(f"rcpt:day:{receipt_id}:20261005", context)
+    assert receipt_queue.get_review(receipt_id)["purchase_date"] == "2026-10-05"
+    await _tap(f"rcpt:ok:{receipt_id}", context)
+    assert expenses.get_expenses("Whopper")[0]["purchase_date"] == "2026-10-05"
+
+
+@pytest.mark.asyncio
+async def test_a_read_date_can_be_changed(db):
+    receipt_id = _held_receipt()
+    _text, markup = main.receipt_review(receipt_id, receipt_queue.get_review(receipt_id))
+    assert f"rcpt:date:{receipt_id}" in [b.callback_data for row in markup.inline_keyboard for b in row]
+    context = _context()
+    picker = await _tap(f"rcpt:date:{receipt_id}", context)
+    assert "When did you buy this?" in picker.args[0]
+    await _tap(f"rcpt:day:{receipt_id}:20261002", context)
+    assert receipt_queue.get_review(receipt_id)["purchase_date"] == "2026-10-02"

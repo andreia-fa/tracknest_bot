@@ -109,6 +109,8 @@ def test_parse_receipt_drops_non_items_but_counts_deposits(mock_client, _mock_en
     ("2026-09-22", "2026-09-22"),
     ("22.09.2026", "2026-09-22"),   # printed German form, copied as-is
     ("22.09.26", "2026-09-22"),
+    ("02. 10. 2026", "2026-10-02"),  # REWE prints spaces after the dots
+    ("2.10.2026 11:52:38", "2026-10-02"),  # with the time next to it
     ("", None),                     # illegible
     ("2026-10-04", None),           # in the future: a misread
     ("2024-09-22", None),           # over a year old: a misread
