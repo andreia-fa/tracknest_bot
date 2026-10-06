@@ -141,3 +141,32 @@ def test_the_total_misread_as_a_product_is_dropped(mock_client, _mock_ensure):
     result = receipt.parse_receipt(b"fake-image")
     assert [i["name"] for i in result["items"]] == ["HP PUDD.CHOCO V", "SKYR STYLE MANGO"]
     assert result["reconciled"] is True
+
+
+def _reading(items_json, total):
+    response = MagicMock()
+    response.message.content = f'{{"items": [{items_json}], "total_paid": {total}, "store": "REWE"}}'
+    return response
+
+
+@patch("bot.receipt._ensure_server_running")
+@patch("bot.receipt._client")
+def test_a_reading_that_misses_a_line_is_read_again(mock_client, _mock_ensure):
+    tofu = '{"name": "RAEUCHERTOFU", "quantity": 1, "unit_price": 2.29, "category": "Other", "product": "tofu"}'
+    wrap = '{"name": "WRAP THUNFISCH", "quantity": 1, "unit_price": 1.99, "category": "Other", "product": "wrap"}'
+    mock_client.chat.side_effect = [_reading(tofu, 4.28), _reading(f"{tofu}, {wrap}", 4.28)]
+    result = receipt.parse_receipt(b"fake-image")
+    assert result["reconciled"] is True
+    assert [i["name"] for i in result["items"]] == ["RAEUCHERTOFU", "WRAP THUNFISCH"]
+    assert mock_client.chat.call_count == 2
+
+
+@patch("bot.receipt._ensure_server_running")
+@patch("bot.receipt._client")
+def test_reads_stop_after_the_limit_and_keep_the_closest(mock_client, _mock_ensure):
+    tofu = '{"name": "RAEUCHERTOFU", "quantity": 1, "unit_price": 2.29, "category": "Other", "product": "tofu"}'
+    eggs = '{"name": "EIER", "quantity": 1, "unit_price": 1.00, "category": "Other", "product": "eggs"}'
+    mock_client.chat.side_effect = [_reading(tofu, 9.56), _reading(f"{tofu}, {eggs}", 9.56), _reading(tofu, 9.56)]
+    result = receipt.parse_receipt(b"fake-image")
+    assert mock_client.chat.call_count == receipt._MAX_READS
+    assert result["reconciled"] is False and result["items_total"] == 3.29

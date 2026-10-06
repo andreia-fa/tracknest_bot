@@ -1624,8 +1624,13 @@ def receipt_review(receipt_id: int, parsed: dict) -> tuple[str, InlineKeyboardMa
         lines.append("(no lines left)")
     total = sum(item["quantity"] * item["unit_price"] for item in items)
     paid = parsed.get("total_paid")
-    if paid is not None and abs(total - paid) > _RECONCILE_TOLERANCE:
+    off = _mismatch(parsed)
+    if off:
         lines.append(f"\n⚠️ Lines add up to €{total:.2f}, the receipt says €{paid:.2f}.")
+        lines.append(f"€{-off:.2f} is missing — probably a line I didn't read. ➕ Add it, or 🧾 fix the total "
+                     "if I misread that, before I can save." if off < 0 else
+                     f"€{off:.2f} too much — ✏️ fix or remove the wrong line, or 🧾 fix the total "
+                     "if I misread that, before I can save.")
     else:
         lines.append(f"\nTotal €{total:.2f}" + (" ✓ matches the receipt" if paid is not None else ""))
     if not parsed.get("purchase_date"):
@@ -1636,15 +1641,25 @@ def receipt_review(receipt_id: int, parsed: dict) -> tuple[str, InlineKeyboardMa
         lines.append(f"❓ Tell me what {which} without a name {'is' if unnamed == 1 else 'are'} "
                      "(✏️ Fix a line) before I can save.")
     buttons = ([[InlineKeyboardButton("✅ Save all", callback_data=f"rcpt:ok:{receipt_id}")]]
-               if items and not unnamed and parsed.get("purchase_date") else [])
+               if items and not unnamed and parsed.get("purchase_date") and not off else [])
     if items and not parsed.get("purchase_date"):
         buttons.extend(_date_buttons(receipt_id))
     if items:
         buttons.append([InlineKeyboardButton("✏️ Fix a line", callback_data=f"rcpt:fix:{receipt_id}")])
         if parsed.get("purchase_date"):
             buttons.append([InlineKeyboardButton("📅 Change date", callback_data=f"rcpt:date:{receipt_id}")])
+    if off:
+        buttons.append([InlineKeyboardButton("➕ Add a line", callback_data=f"rcpt:add:{receipt_id}"),
+                        InlineKeyboardButton("🧾 Fix the total", callback_data=f"rcpt:total:{receipt_id}")])
     buttons.append([InlineKeyboardButton("❌ Discard the whole receipt", callback_data=f"rcpt:cancel:{receipt_id}")])
     return "\n".join(lines), InlineKeyboardMarkup(buttons)
+
+
+def _mismatch(parsed: dict) -> float:
+    """How far the lines are from the printed total (negative = money missing); 0 when they match or there's no total."""
+    paid = parsed.get("total_paid")
+    total = sum(item["quantity"] * item["unit_price"] for item in parsed["items"])
+    return 0 if paid is None or abs(total - paid) <= _RECONCILE_TOLERANCE else round(total - paid, 2)
 
 
 def _date_buttons(receipt_id: int) -> list[list[InlineKeyboardButton]]:
@@ -1685,8 +1700,9 @@ async def handle_receipt_review(update: Update, context: ContextTypes.DEFAULT_TY
     i = int(index) if index else None
     if i is not None and not 0 <= i < len(items):
         action = "back"
-    if action == "ok" and (any(is_code_only(item["name"]) for item in items) or not parsed.get("purchase_date")):
-        action = "back"  # an old preview's ✅ — a line still needs its name, or the receipt its date
+    if action == "ok" and (any(is_code_only(item["name"]) for item in items) or not parsed.get("purchase_date")
+                           or _mismatch(parsed)):
+        action = "back"  # an old preview's ✅ — a line still needs its name, the receipt its date, or a line is off
     if action == "ok":
         context.chat_data.pop("receipt_edit", None)
         reply, markup = await process_receipt_result(parsed, receipt_id=receipt_id)
@@ -1710,6 +1726,13 @@ async def handle_receipt_review(update: Update, context: ContextTypes.DEFAULT_TY
                 [InlineKeyboardButton("🗑 Remove it", callback_data=f"rcpt:drop:{receipt_id}:{i}"),
                  InlineKeyboardButton("⬅️ Back", callback_data=f"rcpt:back:{receipt_id}")]]
         await query.edit_message_text(_line_text(i, items[i]), reply_markup=InlineKeyboardMarkup(rows))
+    elif action in ("add", "total"):
+        context.chat_data["receipt_edit"] = {"receipt_id": receipt_id, "index": None, "field": action,
+                                             "at": datetime.now(tz=timezone.utc).isoformat()}
+        ask = ("Type the missing line: its name and price, e.g. Wrap Thunfisch 1,99." if action == "add"
+               else f"I read the total as €{parsed['total_paid']:.2f}. Type the total printed on the receipt (e.g. 9,56).")
+        rows = [[InlineKeyboardButton("⬅️ Back", callback_data=f"rcpt:back:{receipt_id}")]]
+        await query.edit_message_text(ask, reply_markup=InlineKeyboardMarkup(rows))
     elif action in ("rename", "price"):
         field = "name" if action == "rename" else "price"
         context.chat_data["receipt_edit"] = {"receipt_id": receipt_id, "index": i, "field": field,
@@ -1729,6 +1752,7 @@ async def handle_receipt_review(update: Update, context: ContextTypes.DEFAULT_TY
 
 _EDIT_WINDOW = timedelta(minutes=15)
 _PRICE_RE = re.compile(r"^€?\s*(\d+(?:[.,]\d{1,2})?)\s*€?$")
+_ADDED_LINE_RE = re.compile(r"^(.+?)\s+€?\s*(\d+(?:[.,]\d{1,2})?)\s*€?$")
 
 
 def _awaiting_receipt_edit(context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -1741,21 +1765,39 @@ def _awaiting_receipt_edit(context: ContextTypes.DEFAULT_TYPE) -> bool:
 
 
 async def _edit_receipt_line(message, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Use a typed name or price for the receipt line the user chose to fix, then show the reading again."""
+    """Use a typed name, price, missing line or total for the receipt the user chose to fix, then show it again."""
     target = context.chat_data["receipt_edit"]
     parsed = receipt_queue.get_review(target["receipt_id"])
-    if parsed is None or not 0 <= target["index"] < len(parsed["items"]):
+    if parsed is None or (target["index"] is not None and not 0 <= target["index"] < len(parsed["items"])):
         context.chat_data.pop("receipt_edit")
         await message.reply_text("That receipt was already saved or discarded — nothing changed.")
         return
-    item = parsed["items"][target["index"]]
-    if target["field"] == "price":
-        price = _PRICE_RE.match(message.text.strip())
+    text = message.text.strip()
+    if target["field"] == "add":
+        line = _ADDED_LINE_RE.match(text)
+        name = clean_name(line.group(1)) if line else ""
+        if not name:
+            await message.reply_text("Type the name and the price, e.g. Wrap Thunfisch 1,99.")
+            return
+        # Typed by the user, so nothing on it is unsure; what it is gets asked after saving.
+        parsed["items"].append({"name": name, "quantity": 1, "unit_price": float(line.group(2).replace(",", ".")),
+                                "category": "Other", "product": "", "unsure": False, "alternatives": []})
+    elif target["field"] == "total":
+        total = _PRICE_RE.match(text)
+        if not total:
+            await message.reply_text("That doesn't look like a price — type just the number, e.g. 9,56.")
+            return
+        parsed["total_paid"] = float(total.group(1).replace(",", "."))
+    elif target["field"] == "price":
+        item = parsed["items"][target["index"]]
+        price = _PRICE_RE.match(text)
         if not price:
             await message.reply_text("That doesn't look like a price — type just the number, e.g. 3,99.")
             return
         item["unit_price"] = float(price.group(1).replace(",", "."))
+        item["unsure"] = False
     else:
+        item = parsed["items"][target["index"]]
         name = clean_name(message.text)
         if not name:
             await message.reply_text("Type the name of the item, e.g. Pommes.")
@@ -1763,7 +1805,7 @@ async def _edit_receipt_line(message, context: ContextTypes.DEFAULT_TYPE) -> Non
         item["name"] = name
         # The model's product was read for the wrong name.
         item["product"] = ""
-    item["unsure"] = False
+        item["unsure"] = False
     context.chat_data.pop("receipt_edit")
     _set_review(target["receipt_id"], parsed)
     text, markup = receipt_review(target["receipt_id"], parsed)

@@ -168,3 +168,32 @@ async def test_a_read_date_can_be_changed(db):
     assert "When did you buy this?" in picker.args[0]
     await _tap(f"rcpt:day:{receipt_id}:20261002", context)
     assert receipt_queue.get_review(receipt_id)["purchase_date"] == "2026-10-02"
+
+
+@pytest.mark.asyncio
+async def test_a_missed_line_blocks_saving_until_added(db):
+    receipt_id = _held_receipt()
+    context = _context()
+    review = await _tap(f"rcpt:drop:{receipt_id}:1", context)  # as if the model had missed the socks line
+    callbacks = [b.callback_data for row in review.kwargs["reply_markup"].inline_keyboard for b in row]
+    assert "€3.99 is missing" in review.args[0]
+    assert f"rcpt:ok:{receipt_id}" not in callbacks and f"rcpt:add:{receipt_id}" in callbacks
+    await _tap(f"rcpt:ok:{receipt_id}", context)  # an old ✅ can't sneak it through
+    assert crud.get_item_names() == []
+
+    await _tap(f"rcpt:add:{receipt_id}", context)
+    assert "name and the price" in await _type("just words", context)
+    reply = await _type("Wrap Thunfisch 3,99", context)
+    assert "2. 1x Wrap Thunfisch — €3.99" in reply and "✓ matches the receipt" in reply
+    await _tap(f"rcpt:ok:{receipt_id}", context)
+    assert sorted(crud.get_item_names()) == ["Whopper", "Wrap Thunfisch"]
+
+
+@pytest.mark.asyncio
+async def test_a_misread_total_can_be_fixed(db):
+    receipt_id = _held_receipt()
+    context = _context()
+    await _tap(f"rcpt:drop:{receipt_id}:1", context)
+    await _tap(f"rcpt:total:{receipt_id}", context)
+    reply = await _type("6,99", context)
+    assert "Total €6.99 ✓ matches the receipt" in reply

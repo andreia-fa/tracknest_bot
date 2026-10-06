@@ -24,6 +24,10 @@ _VAT_RATES = (0.07, 0.19)
 # A receipt date older than this is more likely a misread than a real
 # receipt being caught up on.
 _MAX_RECEIPT_AGE = timedelta(days=366)
+# Reads of one photo, at most, while its lines don't add up to its total. The
+# model's misses vary from read to read (a REWE line skipped once was found
+# on every re-read), so another read is the cheapest fix there is.
+_MAX_READS = 3
 
 _PRODUCT_RULES = (
     "The most general everyday word for this item, lowercase English, as "
@@ -228,8 +232,30 @@ def parse_receipt(image_bytes: bytes) -> dict:
           if illegible.
         - purchase_date: the printed purchase date (ISO), or None if it was
           illegible or implausible — see parse_receipt_date.
+
+    When the lines don't add up to the total, the photo is read again (up to
+    _MAX_READS in all) and the reading closest to the total is kept.
     """
     _ensure_server_running()
+    best = None
+    for attempt in range(1, _MAX_READS + 1):
+        reading = _read_receipt(image_bytes)
+        if best is None or _gap(reading) < _gap(best):
+            best = reading
+        if best["reconciled"]:
+            break
+        logger.info("Receipt read %d of %d doesn't add up (%.2f vs %.2f).",
+                    attempt, _MAX_READS, reading["items_total"], reading["total_paid"])
+    return best
+
+
+def _gap(reading: dict) -> float:
+    """How far a reading's lines are from its printed total."""
+    return abs(reading["items_total"] - reading["total_paid"])
+
+
+def _read_receipt(image_bytes: bytes) -> dict:
+    """One read of a receipt photo by the vision model — see parse_receipt for what it returns."""
     prompt = (
         "Read this grocery receipt and record every purchased item: its "
         "name, quantity, and price per unit (not the line total). Also read "
