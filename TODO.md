@@ -1,6 +1,16 @@
 # TODO
 
 
+## ⏸ Off (2026-10-12) — the bot no longer fills the shopping list itself
+User: estimates don't hold ("when i have visits, they will run out early"),
+and the list drifted out of sync (tofu bought 5 Oct, re-listed 6 Oct). The
+list now holds only what the user (or a tapped button) put there;
+predictions are suggestions in /shop and /stock with an add button. User is
+"not sure" about auto-filling in general — revisit only if they ask, e.g.
+once estimates are trustworthy. Code removed in the commit after `febab54`.
+Also open: a visit makes things run out early, which the self-correction
+reads as "lasts less" — worth a thought once there's more data.
+
 ## 🟡 Step 1 built (2026-10-05) — `/shop`; step 2 open — predict WHEN to go
 `/shop` covers one week (user's choice): needs that run out within 7 days,
 overdue ones asked about (✅/❌), the list, grouped by usual store, fresh

@@ -65,14 +65,14 @@ async def test_only_a_week_old_entry_is_asked_about_and_only_once_a_week(db):
 
 
 @pytest.mark.asyncio
-async def test_bought_takes_it_off_and_keeps_the_bot_from_adding_it_back(db):
+async def test_bought_takes_it_off_and_says_so_in_the_history(db):
     socks = _list_entry("Socks - decathlon", days_ago=8)
     tap = _tap(f"stale:bought:{socks}")
 
     await main.handle_stale_entry(tap, _context())
 
     assert shopping_list.get_all_items() == []
-    assert [r["name"] for r in shopping_list.get_manual_removals()] == ["Socks - decathlon"]
+    assert [(h["name"], h["reason"]) for h in shopping_list.get_history()] == [("Socks - decathlon", "bought")]
     assert tap.callback_query.edit_message_text.call_args.args[0] == (
         "🛒 Took Socks - decathlon off your list. To count what it cost, type it like: Store, Socks - decathlon price")
 

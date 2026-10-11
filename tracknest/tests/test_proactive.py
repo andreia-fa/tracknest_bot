@@ -39,7 +39,6 @@ async def test_checkins_go_out_one_per_call(mock_crud, mock_settings, mock_datet
 
 
 @pytest.mark.asyncio
-@patch("bot.main.fill_list_with_predictions", new=lambda: [])
 @patch("bot.main.ask_stale_list_entry", new_callable=AsyncMock)
 @patch("bot.main.nudge_waiting_receipt", new_callable=AsyncMock)
 @patch("bot.main.check_spare_stock_alerts", new_callable=AsyncMock)
