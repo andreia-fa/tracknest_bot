@@ -110,9 +110,13 @@ def _mentions(name: str, term: str) -> bool:
 
 def _groups_of(name: str) -> list[tuple[str, ...]]:
     normalized = _normalize(name)
+    # A whole name spelled apart ("Blue berries") still names the term
+    # ("blueberries") — only the whole name, so stray words never fuse.
+    joined = normalized.replace(" ", "")
     return [
         group for group in _SYNONYMS
-        if any(_mentions(normalized, _normalize(term)) for term in group)
+        if any(_mentions(normalized, _normalize(term)) or joined == _normalize(term).replace(" ", "")
+               for term in group)
     ]
 
 

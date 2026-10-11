@@ -9,7 +9,9 @@ import re
 # Money that really changed hands but isn't a product: counts toward the
 # receipt total, never logged as an item.
 _ADJUSTMENT = re.compile(
-    r"\b(pfand|leergut|rabatt|preisvorteil|coupon|gutschein)", re.IGNORECASE
+    # Deposits and discounts come as compounds too: "Einwegpfand" was logged
+    # as a bread item and cleared Knusperbrot from the list (2026-10-07).
+    r"(\w*pfand|\bleergut|\w*rabatt|\bpreisvorteil|\bcoupon|\bgutschein)", re.IGNORECASE
 )
 # Informational lines — no money of their own (or money already counted
 # elsewhere): ignored entirely.

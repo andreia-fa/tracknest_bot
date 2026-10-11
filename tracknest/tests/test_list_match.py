@@ -49,3 +49,11 @@ def test_unrelated_entries_are_never_cleared():
 def test_pretzels_match_across_spellings():
     assert choose_list_match("LAUGENBREZEL", "LAUGENBREZEL", ["Pfefferbretzel"]) == "Pfefferbretzel"
 
+
+
+def test_a_name_spelled_apart_still_matches():
+    assert choose_list_match("HEIDELBEEREN", "HEIDELBEEREN", ["Blue berries"]) == "Blue berries"
+
+
+def test_stray_words_never_fuse_into_a_term():
+    assert choose_list_match("BANANE", "BANANE", ["blue berries jam"]) is None

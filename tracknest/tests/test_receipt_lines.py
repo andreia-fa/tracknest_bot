@@ -56,3 +56,8 @@ def test_tax_box_and_total_lines_are_info(name):
 @pytest.mark.parametrize("name", ["Pizza Margherita", "Gesichtscreme", "Nettle tea"])
 def test_products_near_those_words_stay_products(name):
     assert classify_line(name) == "item"
+
+
+def test_compound_deposits_and_discounts_are_adjustments():
+    for name in ("Einwegpfand", "Mehrwegpfand", "Flaschenpfand 0,25", "Sofortrabatt"):
+        assert classify_line(name) == "adjustment", name
