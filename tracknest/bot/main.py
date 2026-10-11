@@ -1909,7 +1909,8 @@ async def handle_restore(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_reply_markup(InlineKeyboardMarkup(remaining) if remaining else None)
 
 
-_REASON_LABELS = {"manual": "you removed it", "receipt": "receipt", "purchase": "typed purchase"}
+_REASON_LABELS = {"manual": "you removed it", "bought": "you bought it", "receipt": "receipt",
+                  "purchase": "typed purchase"}
 
 
 async def cleared_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2159,6 +2160,106 @@ def fill_list_with_predictions() -> list[str]:
     return added
 
 
+_REVIEW_NUDGE_AFTER_HOURS = 24
+_LIST_STALE_DAYS = 7
+
+
+def _receipt_where(parsed: dict) -> str:
+    """ "REWE receipt from 7 Oct" — whatever of store and date the reading has."""
+    store = parsed.get("store") or "Your"
+    date = parsed.get("purchase_date")
+    return f"{store} receipt" + (f" from {datetime.fromisoformat(date).strftime('%-d %b')}" if date else "")
+
+
+async def nudge_waiting_receipt(context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Remind, once, about a receipt reading still waiting for ✅ a day after it was shown.
+
+    Nothing from a receipt is saved until ✅, so a missed review message
+    silently loses the whole shop: a 7 Oct receipt sat unsaved for 5 days
+    and its blueberries stayed on the list (2026-10-12).
+
+    Returns:
+        True if a reminder was sent.
+    """
+    chat_id = settings.get_chat_id()
+    waiting = receipt_queue.get_review_to_nudge(_REVIEW_NUDGE_AFTER_HOURS) if chat_id else None
+    if not waiting:
+        return False
+    receipt_queue.mark_nudged(waiting["id"])
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=f"🧾 {_receipt_where(waiting['parsed'])} is still waiting for your ✅ — nothing from it is saved yet.",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("🧾 Show it again", callback_data=f"rcpt_show:{waiting['id']}"),
+        ]]),
+    )
+    return True
+
+
+async def handle_receipt_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle "🧾 Show it again": send the receipt's review once more, with its buttons."""
+    query = update.callback_query
+    await query.answer()
+    receipt_id = int(query.data.split(":", 1)[1])
+    parsed = receipt_queue.get_review(receipt_id)
+    if parsed is None:
+        await query.edit_message_text("That receipt is already saved or discarded.")
+        return
+    await query.edit_message_reply_markup(None)
+    text, markup = receipt_review(receipt_id, parsed)
+    await query.message.reply_text(text, reply_markup=markup)
+
+
+async def ask_stale_list_entry(context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Ask about the entry longest on the list: a week without a purchase may mean it was bought unlogged.
+
+    The user's idea (2026-10-12): socks bought with a digital receipt never
+    shared stayed on the list for a week. Each entry comes up at most once
+    a week (shopping_list.get_stale_entry).
+
+    Returns:
+        True if a question was sent.
+    """
+    chat_id = settings.get_chat_id()
+    entry = shopping_list.get_stale_entry(_LIST_STALE_DAYS) if chat_id else None
+    if not entry:
+        return False
+    shopping_list.mark_asked(entry["id"])
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=f"{entry['name']} has been on your list for a week — did you buy it?",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("🛒 Bought it", callback_data=f"stale:bought:{entry['id']}"),
+            InlineKeyboardButton("📌 Still need it", callback_data=f"stale:keep:{entry['id']}"),
+            InlineKeyboardButton("🗑 Remove", callback_data=f"stale:drop:{entry['id']}"),
+        ]]),
+    )
+    return True
+
+
+async def handle_stale_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the buttons under "X has been on your list for a week"."""
+    query = update.callback_query
+    await query.answer()
+    _prefix, answer, entry_id = query.data.split(":", 2)
+    entry = shopping_list.get_entry(int(entry_id))
+    if not entry:
+        await query.edit_message_text("That's no longer on your list.")
+        return
+    name = entry["name"]
+    if answer == "keep":
+        await query.edit_message_text(f"📌 {name} stays on your list — I'll ask again in a week.")
+        return
+    shopping_list.remove_item(name, reason="bought" if answer == "bought" else "manual")
+    if answer == "bought":
+        # Bought without a receipt here, so no price is known: typing it in is
+        # the user's call, never a guessed amount.
+        await query.edit_message_text(
+            f"🛒 Took {name} off your list. To count what it cost, type it like: Store, {name} price")
+    else:
+        await query.edit_message_text(f"🗑 Took {name} off your list.")
+
+
 async def proactive_round(context: ContextTypes.DEFAULT_TYPE):
     """Scheduled job: fill the list with what runs out soon, then send the single most important message, if any.
 
@@ -2167,7 +2268,8 @@ async def proactive_round(context: ContextTypes.DEFAULT_TYPE):
     Filling the list sends nothing — the user sees it in /list.
     """
     fill_list_with_predictions()
-    for job in (check_budget_alert, check_expiring_items, check_spare_stock_alerts, remind_pending_profile):
+    for job in (check_budget_alert, nudge_waiting_receipt, check_expiring_items, check_spare_stock_alerts,
+                ask_stale_list_entry, remind_pending_profile):
         if await job(context):
             return
 
@@ -2688,6 +2790,8 @@ async def main():
     app.add_handler(CallbackQueryHandler(handle_stock_add_all, pattern=r"^stock_add_all$"))
     app.add_handler(CallbackQueryHandler(handle_shop_choice, pattern=r"^shop_(add|ask)$"))
     app.add_handler(CallbackQueryHandler(handle_checkin_choice, pattern=r"^checkin:(yes|no):"))
+    app.add_handler(CallbackQueryHandler(handle_receipt_show, pattern=r"^rcpt_show:"))
+    app.add_handler(CallbackQueryHandler(handle_stale_entry, pattern=r"^stale:(bought|keep|drop):"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_error_handler(handle_error)

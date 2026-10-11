@@ -63,8 +63,8 @@ def resolve_receipt(receipt_id: int, status: str = "done") -> None:
 def hold_for_review(receipt_id: int, parsed: dict) -> None:
     """Park a parsed receipt until the user confirms it — nothing is logged yet."""
     conn = get_connection()
-    conn.execute("UPDATE pending_receipts SET status = 'review', parsed = ? WHERE id = ?",
-                 (json.dumps(parsed), receipt_id))
+    conn.execute("UPDATE pending_receipts SET status = 'review', parsed = ?, review_at = ? WHERE id = ?",
+                 (json.dumps(parsed), datetime.now(tz=timezone.utc).isoformat(), receipt_id))
     conn.commit()
     conn.close()
 
@@ -87,3 +87,29 @@ def update_review(receipt_id: int, parsed: dict) -> bool:
     changed = cursor.rowcount == 1
     conn.close()
     return changed
+
+
+def get_review_to_nudge(min_age_hours: int) -> dict | None:
+    """Return the oldest reading that has waited for review at least this long and wasn't nudged yet.
+
+    Returns:
+        Dict with id and parsed (the reading), or None.
+    """
+    conn = get_connection()
+    row = conn.execute("""
+        SELECT id, parsed FROM pending_receipts
+        WHERE status = 'review' AND nudged_at IS NULL
+          AND datetime(COALESCE(review_at, queued_at)) <= datetime('now', ?)
+        ORDER BY id LIMIT 1
+    """, (f"-{min_age_hours} hours",)).fetchone()
+    conn.close()
+    return {"id": row["id"], "parsed": json.loads(row["parsed"])} if row else None
+
+
+def mark_nudged(receipt_id: int) -> None:
+    """Record that the user was reminded about this reading, so it's only nudged once."""
+    conn = get_connection()
+    conn.execute("UPDATE pending_receipts SET nudged_at = ? WHERE id = ?",
+                 (datetime.now(tz=timezone.utc).isoformat(), receipt_id))
+    conn.commit()
+    conn.close()

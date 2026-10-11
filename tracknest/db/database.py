@@ -299,6 +299,10 @@ def init_db():
     existing_list_cols = {row[1] for row in cursor.execute("PRAGMA table_info(shopping_list_items)")}
     if "category" not in existing_list_cols:
         cursor.execute("ALTER TABLE shopping_list_items ADD COLUMN category TEXT")
+    # When the bot last asked "still need it?" about an entry (NULL = never):
+    # an entry a week on the list gets asked once a week, not every round.
+    if "asked_at" not in existing_list_cols:
+        cursor.execute("ALTER TABLE shopping_list_items ADD COLUMN asked_at TEXT")
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS item_expenses (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -390,6 +394,12 @@ def init_db():
     receipt_cols = {row[1] for row in cursor.execute("PRAGMA table_info(pending_receipts)")}
     if "parsed" not in receipt_cols:
         cursor.execute("ALTER TABLE pending_receipts ADD COLUMN parsed TEXT")
+    # review_at: when the reading was shown for review; nudged_at: when the
+    # user was reminded it's still waiting (once). A 7 Oct receipt sat
+    # unsaved for 5 days, unnoticed (2026-10-12).
+    for column in ("review_at", "nudged_at"):
+        if column not in receipt_cols:
+            cursor.execute(f"ALTER TABLE pending_receipts ADD COLUMN {column} TEXT")
     conn.commit()
     cursor.close()
     _make_item_names_case_insensitive(conn)
