@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from bot import main
-from db import crud, database
+from db import crud, database, shopping_list
 
 
 @pytest.fixture
@@ -126,4 +126,27 @@ async def test_card_hides_confirm_until_every_line_is_answered(household):
         "• ❓ Treat or need?\n• ⏳ ❓ How long does it last?\n• 🏷 Bread/Bakery")
     assert _buttons(main._card_keyboard(item)) == [
         f"card_kind:{item['id']}:treat", f"card_kind:{item['id']}:need",
-        f"card_lasts:{item['id']}", f"card_cat:{item['id']}"]
+        f"card_lasts:{item['id']}", f"card_cat:{item['id']}", f"card_del:{item['id']}"]
+
+
+@pytest.mark.asyncio
+async def test_a_misread_line_is_deleted_from_its_card_and_what_it_cleared_goes_back(household):
+    shopping_list.add_item("Knusperbrot")
+    shopping_list.remove_item("Knusperbrot", reason="receipt", source="Einwegpfand")
+    await main.process_receipt_result(_receipt(("Einwegpfand", "bread deposit", [])))
+    item_id = crud.get_item("Einwegpfand")["id"]
+    context = _context(_bot())
+
+    ask = _tap(f"card_del:{item_id}")
+    await main.handle_card(ask, context)
+    assert crud.get_item("Einwegpfand") is not None  # nothing deleted before the second tap
+    assert _buttons(ask.callback_query.edit_message_text.call_args.kwargs["reply_markup"]) == [
+        f"card_delok:{item_id}", f"card_back:{item_id}"]
+
+    done = _tap(f"card_delok:{item_id}")
+    with patch("bot.main.settings.get_open_question", return_value=None):
+        await main.handle_card(done, context)
+    assert crud.get_item("Einwegpfand") is None
+    assert [e["name"] for e in shopping_list.get_all_items()] == ["Knusperbrot"]
+    assert done.callback_query.edit_message_text.call_args.args[0] == (
+        "🗑 Deleted Einwegpfand. Back on your list: Knusperbrot.")

@@ -797,6 +797,8 @@ def _card_keyboard(item: dict) -> InlineKeyboardMarkup:
                      InlineKeyboardButton("🧺 Need", callback_data=f"card_kind:{item_id}:need")])
     rows.append([InlineKeyboardButton("⏳ How long", callback_data=f"card_lasts:{item_id}"),
                  InlineKeyboardButton("🏷 Category", callback_data=f"card_cat:{item_id}")])
+    # A misread line ("Einwegpfand" filed as bread, 2026-10-07) had no way out.
+    rows.append([InlineKeyboardButton("🗑 Not something I bought", callback_data=f"card_del:{item_id}")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -816,6 +818,21 @@ async def handle_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         crud.set_name_status(name, None)
         await query.edit_message_text(f"✅ {_card_title(item)}: {_profile_note(item)} · 🏷 {item['category']}")
+        await send_pending_profile_question(context.bot, query.message.chat_id)
+        return
+    if action == "card_del":
+        await query.edit_message_text(
+            f"Delete {name} and its purchase? Anything it cleared from your list goes back on.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🗑 Delete", callback_data=f"card_delok:{item['id']}"),
+                InlineKeyboardButton("↩️ Back", callback_data=f"card_back:{item['id']}"),
+            ]]))
+        return
+    if action == "card_delok":
+        restored = shopping_list.restore_cleared_by(name)
+        crud.delete_item(name)
+        back = f" Back on your list: {', '.join(restored)}." if restored else ""
+        await query.edit_message_text(f"🗑 Deleted {name}.{back}")
         await send_pending_profile_question(context.bot, query.message.chat_id)
         return
     if action == "card_lasts":
@@ -2653,7 +2670,7 @@ async def main():
     app.add_handler(CallbackQueryHandler(handle_product_no, pattern=r"^product_no$"))
     app.add_handler(CallbackQueryHandler(handle_product_pick, pattern=r"^product_pick:"))
     app.add_handler(CallbackQueryHandler(handle_product_type, pattern=r"^product_type$"))
-    app.add_handler(CallbackQueryHandler(handle_card, pattern=r"^card_(ok|kind|lasts|cat|setl|setc):"))
+    app.add_handler(CallbackQueryHandler(handle_card, pattern=r"^card_(ok|kind|lasts|cat|setl|setc|del|delok|back):"))
     app.add_handler(CallbackQueryHandler(handle_restore, pattern=r"^restore:"))
     app.add_handler(CallbackQueryHandler(handle_fix, pattern=r"^fix:"))
     app.add_handler(CallbackQueryHandler(handle_fix_ok, pattern=r"^fixok$"))

@@ -104,6 +104,19 @@ def restore_item(history_id):
     return row["name"]
 
 
+def restore_cleared_by(source):
+    """Put back every list entry a receipt line cleared, for a line that turned out not to be a product.
+
+    Returns:
+        The names put back.
+    """
+    conn = get_connection()
+    ids = [row["id"] for row in conn.execute(
+        "SELECT id FROM shopping_list_history WHERE reason = 'receipt' AND source = ? AND restored = 0", (source,))]
+    conn.close()
+    return [name for name in map(restore_item, ids) if name]
+
+
 def get_history(limit=10):
     """Return the most recent shopping-list removals, newest first.
 
