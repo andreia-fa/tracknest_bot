@@ -99,3 +99,17 @@ def test_price_kind_only_takes_its_two_values(db):
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute("INSERT INTO item_expenses (item_id, unit_price, price_kind) VALUES (1, 1.0, 'guess')")
     conn.close()
+
+
+def test_price_jump_gets_its_own_line(db):
+    for price in (0.98, 1.00):  # two different prices: the same one twice is skipped as a resent receipt
+        main._log_purchase("pudding", 1, price)
+    line, _ = main._log_purchase("pudding", 1, 1.49)
+    assert line == "• 1x pudding at €1.49 each\n   📈 +51% — usually €0.99 (+€0.50)"
+
+
+def test_small_price_change_stays_inline(db):
+    for price in (0.99, 1.01):
+        main._log_purchase("pudding", 1, price)
+    line, _ = main._log_purchase("pudding", 1, 1.05)
+    assert line == "• 1x pudding at €1.05 each (+5% vs usual €1.00)"

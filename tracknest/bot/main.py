@@ -1541,11 +1541,12 @@ def _log_purchase(
             line += f" (cleared '{matched_list_item}' from your list)"
     if delta is not None:
         sign = "+" if delta["pct_change"] >= 0 else ""
-        delta_text = f"{sign}{delta['pct_change']:.0f}% vs usual €{delta['avg_price']:.2f}"
         if delta["pct_change"] >= _PRICE_SPIKE_THRESHOLD_PCT and delta["n"] >= _PRICE_SPIKE_MIN_HISTORY:
-            line += f" — ⚠️ {delta_text}, that's a jump"
+            # Its own line: tacked onto the end, the jump got lost (2026-10-11).
+            line += (f"\n   📈 {sign}{delta['pct_change']:.0f}% — usually €{delta['avg_price']:.2f}"
+                     f" (+€{price - delta['avg_price']:.2f})")
         else:
-            line += f" ({delta_text})"
+            line += f" ({sign}{delta['pct_change']:.0f}% vs usual €{delta['avg_price']:.2f})"
     return line, cleared_id
 
 
