@@ -1,4 +1,4 @@
-"""A week-old list entry and a receipt left unconfirmed: each asked about once — on a real SQLite file."""
+"""Old list-question buttons, and a receipt left unconfirmed asked about once — on a real SQLite file."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -50,18 +50,8 @@ def _buttons(call):
     return [b.callback_data for row in call.kwargs["reply_markup"].inline_keyboard for b in row]
 
 
-@pytest.mark.asyncio
-async def test_only_a_week_old_entry_is_asked_about_and_only_once_a_week(db):
-    _list_entry("milk", days_ago=3)
-    socks = _list_entry("Socks - decathlon", days_ago=8)
-    context = _context()
-
-    assert await main.ask_stale_list_entry(context) is True
-    call = context.bot.send_message.call_args
-    assert call.kwargs["text"] == "Socks - decathlon has been on your list for a week — did you buy it?"
-    assert _buttons(call) == [f"stale:bought:{socks}", f"stale:keep:{socks}", f"stale:drop:{socks}"]
-
-    assert await main.ask_stale_list_entry(context) is False  # just asked; milk is only 3 days old
+def test_list_entries_are_never_asked_about():
+    assert not hasattr(main, "ask_stale_list_entry")
 
 
 @pytest.mark.asyncio
@@ -80,12 +70,10 @@ async def test_bought_takes_it_off_and_says_so_in_the_history(db):
 @pytest.mark.asyncio
 async def test_still_need_it_keeps_the_entry(db):
     berries = _list_entry("Blue berries", days_ago=8)
-    await main.ask_stale_list_entry(_context())
 
     await main.handle_stale_entry(_tap(f"stale:keep:{berries}"), _context())
 
     assert [e["name"] for e in shopping_list.get_all_items()] == ["Blue berries"]
-    assert shopping_list.get_stale_entry(7) is None
 
 
 def _waiting_receipt(hours_ago):

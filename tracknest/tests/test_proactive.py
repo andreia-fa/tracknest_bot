@@ -39,13 +39,12 @@ async def test_checkins_go_out_one_per_call(mock_crud, mock_settings, mock_datet
 
 
 @pytest.mark.asyncio
-@patch("bot.main.ask_stale_list_entry", new_callable=AsyncMock)
 @patch("bot.main.nudge_waiting_receipt", new_callable=AsyncMock)
 @patch("bot.main.check_spare_stock_alerts", new_callable=AsyncMock)
 @patch("bot.main.check_expiring_items", new_callable=AsyncMock)
 @patch("bot.main.check_budget_alert", new_callable=AsyncMock)
 @patch("bot.main.remind_pending_profile", new_callable=AsyncMock)
-async def test_round_stops_after_first_message(remind, budget, checkin, spare, receipt, stale):
+async def test_round_stops_after_first_message(remind, budget, checkin, spare, receipt):
     budget.return_value = False
     receipt.return_value = False
     checkin.return_value = True
@@ -56,7 +55,6 @@ async def test_round_stops_after_first_message(remind, budget, checkin, spare, r
     receipt.assert_awaited_once()
     checkin.assert_awaited_once()
     spare.assert_not_awaited()
-    stale.assert_not_awaited()
     remind.assert_not_awaited()
 
 

@@ -2131,7 +2131,6 @@ async def check_budget_alert(context: ContextTypes.DEFAULT_TYPE) -> bool:
 
 
 _REVIEW_NUDGE_AFTER_HOURS = 24
-_LIST_STALE_DAYS = 7
 
 
 def _receipt_where(parsed: dict) -> str:
@@ -2180,35 +2179,12 @@ async def handle_receipt_show(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.message.reply_text(text, reply_markup=markup)
 
 
-async def ask_stale_list_entry(context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Ask about the entry longest on the list: a week without a purchase may mean it was bought unlogged.
-
-    The user's idea (2026-10-12): socks bought with a digital receipt never
-    shared stayed on the list for a week. Each entry comes up at most once
-    a week (shopping_list.get_stale_entry).
-
-    Returns:
-        True if a question was sent.
-    """
-    chat_id = settings.get_chat_id()
-    entry = shopping_list.get_stale_entry(_LIST_STALE_DAYS) if chat_id else None
-    if not entry:
-        return False
-    shopping_list.mark_asked(entry["id"])
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text=f"{entry['name']} has been on your list for a week — did you buy it?",
-        reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("🛒 Bought it", callback_data=f"stale:bought:{entry['id']}"),
-            InlineKeyboardButton("📌 Still need it", callback_data=f"stale:keep:{entry['id']}"),
-            InlineKeyboardButton("🗑 Remove", callback_data=f"stale:drop:{entry['id']}"),
-        ]]),
-    )
-    return True
-
-
 async def handle_stale_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle the buttons under "X has been on your list for a week"."""
+    """Handle the buttons under "X has been on your list for a week".
+
+    The bot no longer asks this (user, 2026-10-19: it knows from the
+    purchases what wasn't bought); kept for questions already in the chat.
+    """
     query = update.callback_query
     await query.answer()
     _prefix, answer, entry_id = query.data.split(":", 2)
@@ -2218,7 +2194,7 @@ async def handle_stale_entry(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     name = entry["name"]
     if answer == "keep":
-        await query.edit_message_text(f"📌 {name} stays on your list — I'll ask again in a week.")
+        await query.edit_message_text(f"📌 {name} stays on your list.")
         return
     shopping_list.remove_item(name, reason="bought" if answer == "bought" else "manual")
     if answer == "bought":
@@ -2240,7 +2216,7 @@ async def proactive_round(context: ContextTypes.DEFAULT_TYPE):
     (/shop, /stock) and the list holds what the user put there.
     """
     for job in (check_budget_alert, nudge_waiting_receipt, check_expiring_items, check_spare_stock_alerts,
-                ask_stale_list_entry, remind_pending_profile):
+                remind_pending_profile):
         if await job(context):
             return
 

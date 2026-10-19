@@ -137,33 +137,9 @@ def get_history(limit=10):
     return rows
 
 
-def get_stale_entry(days):
-    """Return the entry longest on the list without being asked about for this many days, or None.
-
-    Counted from when it was added, or from the last "still need it?" if it
-    was asked before — so each entry comes up at most once per period.
-    """
-    conn = get_connection()
-    row = conn.execute("""
-        SELECT * FROM shopping_list_items
-        WHERE datetime(COALESCE(asked_at, added_at)) <= datetime('now', ?)
-        ORDER BY datetime(COALESCE(asked_at, added_at)), id LIMIT 1
-    """, (f"-{days} days",)).fetchone()
-    conn.close()
-    return dict(row) if row else None
-
-
 def get_entry(entry_id):
     """Return one list entry by id, or None if it's no longer on the list."""
     conn = get_connection()
     row = conn.execute("SELECT * FROM shopping_list_items WHERE id = ?", (entry_id,)).fetchone()
     conn.close()
     return dict(row) if row else None
-
-
-def mark_asked(entry_id):
-    """Record that the user was just asked whether they still need this entry."""
-    conn = get_connection()
-    conn.execute("UPDATE shopping_list_items SET asked_at = CURRENT_TIMESTAMP WHERE id = ?", (entry_id,))
-    conn.commit()
-    conn.close()
