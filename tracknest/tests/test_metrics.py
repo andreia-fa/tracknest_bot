@@ -254,11 +254,21 @@ def test_older_purchases_count_one_trip_per_store_per_day(db):
 
 def test_leisure_is_spending_but_never_a_trip(db):
     _visit([("Pool", 5.50, "Leisure")], None, 27, trip_key="typed:a")
-    _visit([("Brezel", 1.00, "Bread/Bakery")], "Yormas", 26, trip_key="typed:b")
+    _visit([("Brezel", 1.00, "Bread/Bakery")], "Bäckerei Müller", 26, trip_key="typed:b")
     trips = metrics.get_shopping_trips(2026, 9)
     assert trips["count"] == 1
     assert trips["not_shopping"] == pytest.approx(5.50)
-    assert trips["top_ups"] == [{"day": "2026-09-26", "store": "Yormas", "total": pytest.approx(1.0)}]
+    assert trips["top_ups"] == [{"day": "2026-09-26", "store": "Bäckerei Müller", "total": pytest.approx(1.0)}]
+
+
+def test_a_cafe_visit_is_spending_but_never_a_trip_whatever_was_bought(db):
+    _visit([("Matcha 0.21", 4.20, "Beverages"), ("Pfefferbretzel", 2.30, "Bread/Bakery")],
+           "Yormas im Bahnhof Klettspassage", 18, trip_key="receipt:40")
+    _visit([("Cola", 1.29, "Beverages")], "REWE", 18, trip_key="receipt:41")
+    trips = metrics.get_shopping_trips(2026, 9)
+    assert trips["count"] == 1
+    assert trips["by_store"] == [{"store": "REWE", "trips": 1, "total": pytest.approx(1.29)}]
+    assert trips["not_shopping"] == pytest.approx(6.50)
 
 
 def test_get_shopping_trips_empty_month(db):

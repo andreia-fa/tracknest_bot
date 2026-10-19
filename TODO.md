@@ -79,8 +79,8 @@ Revisit ~2027-01 with ~15 weeks of purchases.
 ## 💡 Idea (2026-10-03) — travel trips, later
 User: "maybe in the future we will also count trips? for now, i don't have
 any." Shopping trips (to buy what's needed, incl. Intimissimi) are counted
-and should be minimised; Leisure (pool, cinema, cafés) is spending, never a
-shopping trip. Travel (holidays — cf. the "Trips!" savings goal) isn't
+and should be minimised; Leisure (pool, cinema) and café visits are spending,
+never a shopping trip (café drinks themselves are Beverages, 2026-10-19). Travel (holidays — cf. the "Trips!" savings goal) isn't
 modelled at all yet. Revisit when the user has one to track.
 
 ## ✅ Done (2026-10-03) — purchase type split into treat-or-need + how long it lasts

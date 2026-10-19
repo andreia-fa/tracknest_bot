@@ -508,8 +508,9 @@ def get_shopping_trips(year=None, month=None):
     Purchases carry a trip_key (see expenses.log_expense); older ones
     without it fall back to one trip per store per day, which undercounts
     two visits to the same store on one day. Spending that isn't shopping
-    (categorize.NOT_SHOPPING, e.g. a pool ticket) is never a trip: it's
-    reported separately as not_shopping, and left out of everything else here.
+    (categorize.NOT_SHOPPING, e.g. a pool ticket, or anything bought at a
+    café, categorize.is_cafe) is never a trip: it's reported separately as
+    not_shopping, and left out of everything else here.
 
     Args:
         year: Calendar year. Defaults to the current month.
@@ -523,33 +524,34 @@ def get_shopping_trips(year=None, month=None):
         day of the month, holding each of that day's trip totals) and
         not_shopping (euros). per_day entries are {store, total} per trip.
     """
-    from bot.categorize import NOT_SHOPPING
+    from bot.categorize import NOT_SHOPPING, is_cafe
 
     now = datetime.now(tz=timezone.utc)
     year, month = year or now.year, month or now.month
-    prefix = f"{year:04d}-{month:02d}"
-    placeholders = ", ".join("?" for _ in NOT_SHOPPING)
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute(f"""
+    cursor.execute("""
         SELECT COALESCE(e.trip_key, e.purchase_date || '|' || COALESCE(e.store, '')) AS trip,
-               MIN(e.purchase_date) AS day, e.store AS store,
-               SUM(e.quantity_purchased * e.unit_price) AS total
+               e.purchase_date AS day, e.store AS store, i.category AS category,
+               e.quantity_purchased * e.unit_price AS total
         FROM item_expenses e
         JOIN inventory_items i ON i.id = e.item_id
-        WHERE e.purchase_date LIKE ? AND COALESCE(i.category, '') NOT IN ({placeholders})
-        GROUP BY trip, e.store
-    """, (f"{prefix}%", *NOT_SHOPPING))
-    trips = cursor.fetchall()
-    cursor.execute(f"""
-        SELECT COALESCE(SUM(e.quantity_purchased * e.unit_price), 0)
-        FROM item_expenses e
-        JOIN inventory_items i ON i.id = e.item_id
-        WHERE e.purchase_date LIKE ? AND i.category IN ({placeholders})
-    """, (f"{prefix}%", *NOT_SHOPPING))
-    not_shopping = float(cursor.fetchone()[0])
+        WHERE e.purchase_date LIKE ?
+    """, (f"{year:04d}-{month:02d}%",))
+    rows = cursor.fetchall()
     cursor.close()
     conn.close()
+
+    not_shopping = 0.0
+    grouped: dict[tuple, dict] = {}
+    for row in rows:
+        if row["category"] in NOT_SHOPPING or is_cafe(row["store"]):
+            not_shopping += float(row["total"])
+            continue
+        trip = grouped.setdefault((row["trip"], row["store"]), {"day": row["day"], "store": row["store"], "total": 0.0})
+        trip["day"] = min(trip["day"], row["day"])
+        trip["total"] += float(row["total"])
+    trips = list(grouped.values())
 
     by_store = {}
     for trip in trips:

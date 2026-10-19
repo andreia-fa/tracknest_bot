@@ -24,7 +24,7 @@ It helps you manage home inventory and track household expenses through a conver
 - ✅ `/update_item <name> <qty>` – Set item quantity to an absolute value
 - ✅ `/rename <old name> = <new name>` – Give an item a readable name (e.g. a receipt
   abbreviation); future receipts with the old wording land on the new name
-- ✅ `/item <name>` – See an item and change its category (e.g. a café drink to
+- ✅ `/item <name>` – See an item and change its category (e.g. a pool ticket to
   Leisure, which never counts as a shopping trip), treat/need, how long it lasts, or note
 - ✅ `/note [item]` – Remember something about an item (e.g. a size), shown on
   `/list` and in its reminders; also `📝` buttons, or `name price // note` when typing

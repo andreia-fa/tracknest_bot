@@ -103,7 +103,10 @@ _CATEGORIES: list[tuple[str, list[str]]] = [
     ("Beverages", [
         "water", "wasser", "água", "agua", "juice", "saft", "sumo", "coffee",
         "kaffee", "café", "cafe", "tea", "tee", "chá", "cha", "beer", "bier",
-        "cerveja", "wine", "wein", "vinho",
+        "cerveja", "wine", "wein", "vinho", "drink", "getränk", "getraenk",
+        "bebida",
+        # Café drinks too: the visit is what isn't shopping (is_cafe), not the drink.
+        "matcha", "latte", "cappuccino", "flat white", "chai",
     ]),
     ("Hygiene/Personal Care", [
         "soap", "seife", "sabonete", "shampoo", "toothpaste", "zahnpasta",
@@ -126,14 +129,21 @@ _CATEGORIES: list[tuple[str, list[str]]] = [
         "pool", "schwimmbad", "hallenbad", "freibad", "piscina", "eintritt",
         "ticket", "kino", "cinema", "museum", "museu", "theater", "concert",
         "konzert",
-        # Café drinks — not "espresso"/"kaffee", which are bought at the
-        # supermarket too.
-        "café", "cafe", "latte", "cappuccino", "matcha", "flat white", "chai",
     ]),
 ]
 
 # Categories that are spending but not shopping — no store visit to cut down on.
 NOT_SHOPPING = ("Leisure",)
+
+# A visit to a café is spending, not a shopping trip — whatever was bought
+# there (a matcha, a pretzel). Recognised by the store's name, substring match.
+_CAFE_STORES = ("café", "cafe", "coffee", "starbucks", "yormas", "balzac", "costa")
+
+
+def is_cafe(store: str | None) -> bool:
+    """Whether a store is a café, whose visits never count as shopping trips."""
+    return any(k in (store or "").lower() for k in _CAFE_STORES)
+
 
 # What the money went to, one level above categories — the headline split
 # on the dashboard. Every category belongs to exactly one purpose.

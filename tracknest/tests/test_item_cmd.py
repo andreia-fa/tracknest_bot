@@ -47,10 +47,9 @@ async def test_item_command_then_category_makes_a_cafe_drink_leisure(db):
     assert trips["count"] == 0 and trips["not_shopping"] == pytest.approx(6.90)
 
 
-def test_cafe_drinks_are_leisure_but_supermarket_coffee_is_not():
-    assert infer_category("Matcha Latte") == "Leisure"
-    assert infer_category("Cappuccino") == "Leisure"
-    assert infer_category("Lavazza Espresso") != "Leisure"
+@pytest.mark.parametrize("name", ["Matcha Latte", "Cappuccino", "Matcha 0.21", "drink", "Getränk", "bebida"])
+def test_drinks_are_beverages(name):
+    assert infer_category(name) == "Beverages"
 
 
 def test_changing_category_leaves_an_open_question_open(db):
