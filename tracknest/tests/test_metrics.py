@@ -235,7 +235,8 @@ def test_a_cafe_visit_is_spending_but_never_a_trip_whatever_was_bought(db):
     _visit([("Cola", 1.29, "Beverages")], "REWE", 18, trip_key="receipt:41")
     trips = metrics.get_shopping_trips(2026, 9)
     assert trips["count"] == 1
-    assert trips["by_store"] == [{"store": "REWE", "trips": 1, "total": pytest.approx(1.29)}]
+    assert trips["by_store"] == [{"store": "Yormas im Bahnhof Klettspassage", "trips": 0, "total": pytest.approx(6.50)},
+                                 {"store": "REWE", "trips": 1, "total": pytest.approx(1.29)}]
     assert trips["not_shopping"] == pytest.approx(6.50)
 
 
@@ -254,6 +255,7 @@ def test_an_amazon_order_is_spending_not_a_trip(db):
     _visit([("Kabelbinder", 3.99, "Household")], "Amazon", 15, trip_key="amazon:2026-09-15")
     trips = metrics.get_shopping_trips(2026, 9)
     assert trips["count"] == 0 and trips["not_shopping"] == pytest.approx(3.99)
+    assert trips["by_store"] == [{"store": "Amazon", "trips": 0, "total": pytest.approx(3.99)}]  # still a store
 
 
 def test_get_shopping_trips_empty_month(db):

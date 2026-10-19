@@ -164,7 +164,7 @@ def _overview(month: dict, amounts: bool) -> str:
     busiest = max(range(len(daily)), key=lambda i: daily[i]) if any(daily) else None
     short = month["month_label"][:3]
     if not amounts:
-        top_store = max(trips["by_store"], key=lambda st: st["trips"], default=None)
+        top_store = max((st for st in trips["by_store"] if st["trips"]), key=lambda st: st["trips"], default=None)
         top_cat = month["categories"][0] if month["categories"] else None
         pairs = [
             ("Shopping days", f'{shopped} of {month["day"]}'),
@@ -453,7 +453,7 @@ def _stores(month: dict, amounts: bool) -> str:
     head = "<tr><th>Store</th><th class='num'>Trips</th><th class='num'>Share</th>" + (
         "<th class='num'>Amount</th>" if amounts else "") + "</tr>"
     rows = "".join(
-        f'<tr><td class="store">{escape(s["store"] or "Typed in by hand")}</td><td class="num">{s["trips"]}</td>'
+        f'<tr><td class="store">{escape(s["store"] or "Typed in by hand")}</td><td class="num">{s["trips"] or "—"}</td>'
         f'<td class="num">{_share(s["total"], total):.0f}%</td>'
         + (f'<td class="num">{_eur(s["total"])}</td>' if amounts else "") + "</tr>"
         for s in stores

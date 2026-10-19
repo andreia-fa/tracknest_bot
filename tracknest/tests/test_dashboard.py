@@ -110,6 +110,12 @@ def test_render_offers_every_month_and_opens_on_the_latest():
     assert "€90.00" in html
 
 
+def test_a_store_without_trips_still_shows_its_spending():
+    trips = sample_data()["trips"] | {"by_store": [{"store": "Amazon", "trips": 0, "total": 145.49}]}
+    html = dashboard._stores(sample_data(trips=trips), amounts=True)
+    assert "Amazon" in html and "€145.49" in html and '<td class="num">—</td>' in html
+
+
 def test_largest_category_bar_never_overflows():
     html = dashboard.render_dashboard_html(sample_data(
         categories=[{"name": "Clothing", "total": 35.9}, {"name": "Other", "total": 55.82}],
