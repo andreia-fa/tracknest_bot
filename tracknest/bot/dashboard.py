@@ -301,13 +301,13 @@ def _fast_food_tile(month: dict, previous: dict | None, amounts: bool) -> str:
     slices = "🍕" * min(meals, _MAX_SLICES) + (f'<span class="of"> +{meals - _MAX_SLICES}</span>' if meals > _MAX_SLICES else "")
     row = (f'<div class="slices" aria-label="{meals} fast-food {unit}">{slices}</div>' if meals
            else '<div class="slices none" aria-hidden="true">🍕</div>')
-    # What each meal was — private view only, like the category drill-down.
+    # Where and when, not what (user: at Burger King it's always the veggie
+    # burger) — private view only, like the category drill-down.
     listed = food.get("list") or []
     if amounts and listed:
         lines = "".join(
-            f'<li><div><span class="buy-name">{escape(", ".join(m["items"]))}</span>'
-            f'<span class="buy-meta">{datetime.fromisoformat(m["day"]).strftime("%-d %b")} · '
-            f'{escape(m["store"] or "typed in")}</span></div><span class="num">{_eur(m["total"])}</span></li>'
+            f'<li><span>{datetime.fromisoformat(m["day"]).strftime("%-d %b")} · {escape(m["store"] or "typed in")}</span>'
+            f'<span class="num">{_eur(m["total"])}</span></li>'
             for m in listed
         )
         row += (f'<details class="meals"><summary>Show the {len(listed)} {"meal" if len(listed) == 1 else "meals"}'
