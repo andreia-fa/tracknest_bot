@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 
+from bot.stores import canonical_store
 from db.database import get_connection
 
 
@@ -28,7 +29,8 @@ def log_expense(item_name, quantity_purchased, unit_price, store=None, purchased
         item_name: Name of the item being purchased (must already exist).
         quantity_purchased: Number of units bought.
         unit_price: Price per unit.
-        store: Optional store or supplier name.
+        store: Optional store or supplier name; saved under the shop's one
+            name (bot.stores.canonical_store), so "YORMAS'S" is "Yormas".
         purchased_at: When it was bought (an aware datetime), for a receipt
             sent days later; defaults to now. Both purchase_date and the
             timing below use it, so a September receipt counts in September.
@@ -87,6 +89,9 @@ def log_expense(item_name, quantity_purchased, unit_price, store=None, purchased
             "UPDATE inventory_items SET checkin_pending = 0, spare_alert_pending = 0 WHERE id = ?",
             (item["id"],)
         )
+    # One name per shop, however the receipt printed it (bot/stores.py).
+    cursor.execute("SELECT DISTINCT store FROM item_expenses WHERE store IS NOT NULL")
+    store = canonical_store(store, [row["store"] for row in cursor.fetchall()])
     cursor.execute("""
         INSERT INTO item_expenses (item_id, quantity_purchased, unit_price, store, purchase_date, logged_at, trip_key,
                                    price_kind)

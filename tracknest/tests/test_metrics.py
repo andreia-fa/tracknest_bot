@@ -235,7 +235,7 @@ def test_a_cafe_visit_is_spending_but_never_a_trip_whatever_was_bought(db):
     _visit([("Cola", 1.29, "Beverages")], "REWE", 18, trip_key="receipt:41")
     trips = metrics.get_shopping_trips(2026, 9)
     assert trips["count"] == 1
-    assert trips["by_store"] == [{"store": "Yormas im Bahnhof Klettspassage", "trips": 0, "total": pytest.approx(6.50)},
+    assert trips["by_store"] == [{"store": "Yormas", "trips": 0, "total": pytest.approx(6.50)},
                                  {"store": "REWE", "trips": 1, "total": pytest.approx(1.29)}]
     assert trips["not_shopping"] == pytest.approx(6.50)
 
