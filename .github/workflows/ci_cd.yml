@@ -117,7 +117,9 @@ jobs:
             # Tailscale fails the deploy without taking the bot down.
             DASHBOARD_URL="https://$(tailscale status --json | python3 -c 'import json, sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')"
             [ "$DASHBOARD_URL" != "https://" ] || { echo "Tailscale isn't logged in on this VM" >&2; exit 1; }
-            sudo tailscale serve --bg http://127.0.0.1:8080
+            # Bounded: on a tailnet where Serve was never enabled it waits
+            # forever for someone to click an approval link.
+            timeout 30 sudo tailscale serve --bg http://127.0.0.1:8080
             docker pull ghcr.io/andreia-fa/tracknest_bot:latest
             docker stop tracknest-bot 2>/dev/null || true
             docker rm tracknest-bot 2>/dev/null || true
