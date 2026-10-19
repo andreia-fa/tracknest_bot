@@ -275,11 +275,14 @@ def test_fast_food_is_one_meal_per_trip_by_store_or_product(db):
     assert food["meals"] == 2
     assert food["total"] == pytest.approx(6.99 + 2.99 + 2.49)
     assert food["last_day"] == "2026-09-10"
+    assert [(m["day"], m["store"], m["items"]) for m in food["list"]] == [
+        ("2026-09-03", "Burger King", ["Whopper", "Cola"]), ("2026-09-10", "REWE", ["Steinofen Pizza"])]
+    assert food["list"][0]["total"] == pytest.approx(9.98)
 
 
 def test_fast_food_last_day_looks_past_the_month(db):
     _visit([("Big Mac", 5.49, "Other")], "McDonald's", 28, trip_key="typed:a")
-    assert metrics.get_fast_food(2026, 10) == {"meals": 0, "total": 0.0, "last_day": "2026-09-28"}
+    assert metrics.get_fast_food(2026, 10) == {"meals": 0, "total": 0.0, "last_day": "2026-09-28", "list": []}
 
 
 def test_category_purchases_show_what_each_bar_is_made_of(db):

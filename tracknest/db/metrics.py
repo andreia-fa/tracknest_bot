@@ -520,9 +520,10 @@ def get_fast_food(year=None, month=None):
         month: Calendar month (1-12). Defaults to the current month.
 
     Returns:
-        Dict with keys meals (int), total (euros) and last_day (ISO date of
+        Dict with keys meals (int), total (euros), last_day (ISO date of
         the most recent fast-food meal ever, not just this month; None if
-        there's never been one).
+        there's never been one) and list (this month's meals, oldest first,
+        as {day, store, items (names, as bought), total}).
     """
     from bot.categorize import is_fast_food
 
@@ -541,10 +542,16 @@ def get_fast_food(year=None, month=None):
     cursor.close()
     conn.close()
     in_month = [r for r in rows if r["day"].startswith(prefix)]
+    meals: dict[str, dict] = {}
+    for r in in_month:
+        meal = meals.setdefault(r["trip"], {"day": r["day"], "store": r["store"], "items": [], "total": 0.0})
+        meal["items"].append(r["name"])
+        meal["total"] += float(r["total"])
     return {
-        "meals": len({r["trip"] for r in in_month}),
+        "meals": len(meals),
         "total": sum(float(r["total"]) for r in in_month),
         "last_day": max((r["day"] for r in rows), default=None),
+        "list": sorted(meals.values(), key=lambda m: m["day"]),
     }
 
 

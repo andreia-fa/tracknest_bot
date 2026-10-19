@@ -301,6 +301,17 @@ def _fast_food_tile(month: dict, previous: dict | None, amounts: bool) -> str:
     slices = "🍕" * min(meals, _MAX_SLICES) + (f'<span class="of"> +{meals - _MAX_SLICES}</span>' if meals > _MAX_SLICES else "")
     row = (f'<div class="slices" aria-label="{meals} fast-food {unit}">{slices}</div>' if meals
            else '<div class="slices none" aria-hidden="true">🍕</div>')
+    # What each meal was — private view only, like the category drill-down.
+    listed = food.get("list") or []
+    if amounts and listed:
+        lines = "".join(
+            f'<li><div><span class="buy-name">{escape(", ".join(m["items"]))}</span>'
+            f'<span class="buy-meta">{datetime.fromisoformat(m["day"]).strftime("%-d %b")} · '
+            f'{escape(m["store"] or "typed in")}</span></div><span class="num">{_eur(m["total"])}</span></li>'
+            for m in listed
+        )
+        row += (f'<details class="meals"><summary>Show the {len(listed)} {"meal" if len(listed) == 1 else "meals"}'
+                f'</summary><ul class="buys">{lines}</ul></details>')
     return _tile("Fast food", f'{meals}<span class="of"> {unit}</span>', note, extra=row, icon="🍔")
 
 
@@ -590,7 +601,7 @@ _STYLE = """
   .legend-list .lg-name { color: var(--ink-2); }
   .legend-list .lg-amt { grid-column: 2 / 4; font-size: 11px; color: var(--ink-muted); }
   .swatch { width: 10px; height: 10px; border-radius: 2px; }
-  .tiles { display: grid; grid-template-rows: repeat(4, 1fr); gap: 14px; flex: 1; }
+  .tiles { display: grid; grid-template-rows: repeat(4, auto); gap: 14px; flex: 1; }
   .tile { position: relative; padding: 12px 16px; display: flex; flex-direction: column; justify-content: center; }
   .tile-icon { position: absolute; top: 10px; right: 12px; width: 34px; height: 34px; border-radius: 10px;
                display: grid; place-items: center; font-size: 19px; background: var(--surface-2); }
@@ -629,6 +640,8 @@ _STYLE = """
   details.cat > summary::-webkit-details-marker { display: none; }
   details.cat[open] > summary .bar-name { color: var(--ink); font-weight: 600; }
   .buys { list-style: none; margin: 2px 0 10px; padding: 0 0 0 26px; }
+  details.meals { margin-top: 6px; }
+  details.meals .buys { padding-left: 0; margin-bottom: 0; }
   .buys li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0;
              border-bottom: 1px solid var(--border); font-size: 13px; }
   .buys li:last-child { border-bottom: 0; }

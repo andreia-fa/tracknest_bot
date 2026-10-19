@@ -198,6 +198,15 @@ def test_fast_food_tile_counts_meals_against_last_month():
     assert "12.50" not in dashboard._tiles(september, august, amounts=False)
 
 
+def test_fast_food_tile_opens_to_what_each_meal_was_in_the_private_view_only():
+    meals = [{"day": "2026-09-03", "store": "Burger King", "items": ["Whopper", "Cola"], "total": 9.98}]
+    september = sample_data(fast_food={"meals": 1, "total": 9.98, "last_day": "2026-09-03", "list": meals})
+    private = dashboard._tiles(september, None, amounts=True)
+    assert "Show the 1 meal" in private and "Whopper, Cola" in private and "3 Sep · Burger King" in private
+    assert "€9.98" in private
+    assert "Whopper" not in dashboard._tiles(september, None, amounts=False)
+
+
 def test_fast_food_tile_without_any_yet():
     html = dashboard._tiles(sample_data(), None, amounts=True)
     assert "0<span class=\"of\"> meals</span>" in html
