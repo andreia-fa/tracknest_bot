@@ -14,6 +14,19 @@ end of the session.
   Do this BEFORE rotating, or the new values leak the same way.
 
 
+## 📦 November 2026 — user moves; stock rule starts then
+User (2026-10-19): moving in November, so the stock/restock rule isn't being
+followed yet — "until then, let's just build some knowledge". Don't judge
+October's restock behaviour; revisit the Shopping list & restock card and
+/shop once settled in the new place.
+
+## 💡 Idea (2026-10-19) — tell promotions apart from real price rises
+User: "Price changes" are mostly store promotions right now. Receipts
+already print the evidence — `Rabatt`, `Preisvorteil`, `Normalpreis` lines,
+which `bot/receipt_lines.py` currently just drops as non-products. Keep
+them as a flag on the line they belong to (`promo`), and compare a new price
+against the last *non-promo* price. Open: typed purchases have no such line.
+
 ## ⏸ Off (2026-10-12) — the bot no longer fills the shopping list itself
 User: estimates don't hold ("when i have visits, they will run out early"),
 and the list drifted out of sync (tofu bought 5 Oct, re-listed 6 Oct). The
