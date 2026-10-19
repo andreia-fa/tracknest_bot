@@ -64,9 +64,8 @@ It helps you manage home inventory and track household expenses through a conver
   App button, at a fixed private Tailscale address — needs the Tailscale app
   on the device, nothing is public) showing the month at a glance: spend + month-end forecast,
   shopping trips and average basket, budget vs. calendar pace, treats share,
-  spend by day, spending mix, categories, stores, price watch, what to buy,
-  what needs your answer, rising prices, and cost per day once it's
-  trustworthy — the detail that `/finance` and `/stock` leave out.
+  spend by day, spending mix, categories, stores, price watch, what to buy
+  and rising prices — the detail that `/finance` and `/stock` leave out.
 
   (data layer in `db/metrics.py` is Telegram-agnostic — `/dashboard` is the
   "future web page" this line used to foreshadow, now real)

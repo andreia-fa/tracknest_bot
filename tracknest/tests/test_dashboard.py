@@ -26,7 +26,6 @@ def sample_data(**overrides) -> dict:
         "running_low": [{"name": "Eggs", "days_left": 2, "run_out_date": "2026-09-25", "shelf_life_days": 14}],
         "shopping_list": [{"name": "Broccoli", "quantity": 1, "category": "Fruits/Veg"}],
         "health": {"checkin_pending": [], "spare_alert_pending": [], "unprofiled": ["Sushi"]},
-        "daily_cost": {"items": [], "ready": 0, "tracked": 3},
     }
     data.update(overrides)
     return data
@@ -34,7 +33,6 @@ def sample_data(**overrides) -> dict:
 
 @patch("bot.dashboard.metrics.get_months_with_spending", return_value=[(2026, 8), (2026, 9)])
 @patch("bot.dashboard.crud.get_item", return_value=None)
-@patch("bot.dashboard.metrics.get_daily_cost", return_value={"items": [], "ready": 0, "tracked": 0})
 @patch("bot.dashboard.metrics.get_inventory_health")
 @patch("bot.dashboard.shopping_list.get_all_items", return_value=[])
 @patch("bot.dashboard.metrics.get_price_trends", return_value=[])
@@ -70,7 +68,6 @@ def test_render_shows_the_headline_numbers():
     assert "REWE" in html and "Typed in by hand" in html
     assert "▲ 12%" in html
     assert "Broccoli" in html and "2d left" in html
-    assert "Sushi" in html
 
 
 def test_render_escapes_names_from_receipts():
@@ -89,12 +86,11 @@ def test_render_empty_month_shows_prompts_not_errors():
         categories=[], trips={"count": 0, "avg_basket": None, "by_store": []},
         daily=[0.0] * 30, rising=[], running_low=[], shopping_list=[],
         health={"checkin_pending": [], "spare_alert_pending": [], "unprofiled": []},
-        daily_cost={"items": [], "ready": 0, "tracked": 0},
     ))
 
     assert "No purchases logged yet" in html
     assert "/set_budget" in html
-    assert "Action items" not in html and "Price changes" not in html  # empty cards are left out, not shown empty
+    assert "Price changes" not in html  # empty cards are left out, not shown empty
 
 
 def test_render_offers_every_month_and_opens_on_the_latest():
@@ -119,7 +115,7 @@ def test_largest_category_bar_never_overflows():
     assert "width:100.0%" in html and "width:155" not in html
 
 
-def test_spare_alerts_are_shopping_and_attention_shows_only_open_questions():
+def test_spare_alerts_are_shopping_and_open_questions_stay_in_telegram():
     html = dashboard.render_dashboard_html(sample_data(
         health={"checkin_pending": [], "spare_alert_pending": ["LEERDAMMER CAR.", "Milram Käse Scheiben"],
                 "unprofiled": ["X01"]},
@@ -127,7 +123,8 @@ def test_spare_alerts_are_shopping_and_attention_shows_only_open_questions():
     ))
     assert html.count("🔁 cheese") == 1  # one spare per product, by its readable name
     assert "LEERDAMMER" not in html
-    assert "Open questions" in html and "<span class=chip>X01</span>" in html
+    assert "Open questions" not in html and "Action items" not in html and "X01" not in html
+    assert "Cost per day" not in html
     assert "Buy a spare" not in html
 
 

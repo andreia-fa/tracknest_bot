@@ -83,7 +83,9 @@ defaults to `data/tracknest.db` (git-ignored) if unset.
 
 **`/dashboard` (2026-09-23, redesigned same day): password-gated web view of
 the month** — hero spend + forecast, trips/avg basket, budget vs. pace, spend
-by day, mix, categories, stores, price watch, what to buy, needs-attention.
+by day, mix, categories, stores, price watch, what to buy.
+Cut 2026-10-19 (user: not adding anything): "Action items" and "Cost per day
+of use".
 Euro amounts are shown (the percentages-only first version was rejected as
 uninformative). All numbers come from `db/metrics.py`; the dashboard only
 renders them, and escapes every name (receipt text is untrusted input).

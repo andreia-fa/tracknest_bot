@@ -28,7 +28,7 @@ Without a date, the purchase is logged today; the confirmation also offers
 "📅 Yes — it was yesterday". A shared total is split evenly in cents (the
 last share takes the rounding, so they add up exactly) and stored with
 `price_kind = 'share'`: it counts towards spending, but price deltas, price
-trends, cost per day and store guessing only use real `'unit'` prices.
+trends and store guessing only use real `'unit'` prices.
 
 ## Rules
 - An item must exist in inventory before an expense can be logged against it.
@@ -133,13 +133,18 @@ When two brands of the same product are both running out, the sooner one
 wins. 🛒 *Add all to list* re-reads the list when tapped and skips anything
 already on the shopping list, so tapping twice never bumps quantities.
 
-**Moved to the dashboard only:** cost per day (`get_daily_cost()`) and rising
-prices (`get_price_trends()`). They need room to be read properly.
+**Moved to the dashboard only:** rising prices (`get_price_trends()`). It
+needs room to be read properly.
 
 **Dropped:** the "needs you" list (`get_inventory_health()`): items waiting
 for a check-in, profiling or a spare alert. The reminders already ask those
 one at a time, and repeating them as a list of brand names was noise. The
-dashboard still shows it.
+dashboard's "Action items" card went too (2026-10-19, user: it added nothing);
+only the spare alerts are still read, for "what to buy".
+
+**Dropped 2026-10-19:** cost per day of use (`get_daily_cost()`, price ÷ shelf
+life). User: "it's basically the price divided by the period" — a quotient
+they could do themselves, so it failed the report's own bar.
 
 **Cut earlier, and why:** a "consumption tracking accuracy" metric (how many
 shelf-life guesses had been corrected), which was an internal calibration
@@ -155,17 +160,9 @@ estimate; a "still good" check-in reply bumps it up). The user made the point
 concretely: sushi was declared a 2-day item but was still being eaten on day
 three.
 
-So the two shelf-life-derived figures are treated differently, on
-purpose:
-
-- **Cost per day is gated** behind `_MIN_PURCHASES_FOR_SHELF_LIFE_TRUST`
-  (currently 2 purchases, i.e. at least one observed interval). A price
-  divided by an untested guess *looks* like a measurement, and because the
-  figure ranks items against each other, one bad estimate reorders the whole
-  list. It is shown on the dashboard only.
-- **Running out soon is not gated.** It's a cheap, self-correcting nudge
-  built on a number the user supplied themselves — if it's wrong, they just
-  don't buy bread. It's what `/stock` shows.
+**Running out soon is not gated.** It's a cheap, self-correcting nudge
+built on a number the user supplied themselves — if it's wrong, they just
+don't buy bread. It's what `/stock` shows.
 
 The check-in and spare-stock alert jobs are deliberately *not* gated either:
 asking early is how the estimate gets corrected in the first place, so

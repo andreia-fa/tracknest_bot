@@ -93,38 +93,6 @@ def test_get_month_pace_no_projection_for_finished_month(mock_summary):
     assert result["days_in_month"] == 31
 
 
-@patch("db.metrics.get_connection")
-def test_get_daily_cost_ranks_by_cost_per_day(mock_conn):
-    conn, _cursor = make_mock_conn(fetchall_side_effect=[[
-        {"name": "Peanut Butter", "product": None, "category": None, "shelf_life_days": 60, "treat_or_need": "need",
-         "unit_price": 6.99, "purchase_count": 3},
-        {"name": "Sushi", "shelf_life_days": 2, "treat_or_need": "treat",
-         "unit_price": 10.99, "purchase_count": 2},
-        {"name": "Never Bought", "product": None, "category": None, "shelf_life_days": 5, "treat_or_need": "need",
-         "unit_price": None, "purchase_count": 0},
-    ]])
-    mock_conn.return_value = conn
-    result = metrics.get_daily_cost()
-    assert [item["name"] for item in result["items"]] == ["Sushi", "Peanut Butter"]
-    assert result["items"][0]["cost_per_day"] == pytest.approx(5.495)
-    assert result["ready"] == 2
-    assert result["tracked"] == 3
-
-
-@patch("db.metrics.get_connection")
-def test_get_daily_cost_withholds_untested_shelf_life(mock_conn):
-    """A single purchase means the shelf life is still just the user's guess."""
-    conn, _cursor = make_mock_conn(fetchall_side_effect=[[
-        {"name": "Sushi", "shelf_life_days": 2, "treat_or_need": "treat",
-         "unit_price": 10.99, "purchase_count": 1},
-    ]])
-    mock_conn.return_value = conn
-    result = metrics.get_daily_cost()
-    assert result["items"] == []
-    assert result["ready"] == 0
-    assert result["tracked"] == 1
-
-
 @patch("db.settings.get_financial_goal")
 def test_get_goal_status_no_goal(mock_goal):
     mock_goal.return_value = None

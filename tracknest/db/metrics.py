@@ -14,15 +14,6 @@ from db.database import get_connection
 # a forecast — get_month_pace returns no projection below this many days in.
 MIN_DAYS_FOR_PROJECTION = 5
 
-# A shelf-life estimate starts as the user's cold guess and only becomes
-# evidence once a real repurchase interval has tested it (log_expense corrects
-# it down when a repurchase beats the estimate). Until then, dividing a price
-# by it produces a figure that looks measured but isn't — so get_daily_cost
-# withholds any item with fewer purchases than this.
-# REVISIT 2026-11-20: raise toward 3 if single intervals still read as noisy,
-# or lower if too few items ever qualify. See docs/expenses.md.
-_MIN_PURCHASES_FOR_SHELF_LIFE_TRUST = 2
-
 
 def _as_utc(value):
     """Parse an ISO date or datetime string from the DB as an aware UTC datetime.
@@ -284,66 +275,6 @@ def get_shop_plan(horizon_days=14):
     conn.close()
     return {"items": items, "unknown": unknown}
 
-
-def get_daily_cost(top_n=3):
-    """Return items ranked by what they cost per day of use, once that's trustworthy.
-
-    Latest unit price divided by the item's shelf-life estimate — the one
-    thing a receipt can never show you, since it separates "expensive to
-    buy" from "expensive to keep around". Treats are included: that's
-    usually where the spread shows up.
-
-    An item only qualifies once it has been purchased at least
-    _MIN_PURCHASES_FOR_SHELF_LIFE_TRUST times, so its shelf life has been
-    tested against a real repurchase interval instead of resting on the
-    original guess. A quotient of a real price and an untested guess reads
-    as a measurement while being nothing of the kind, and this figure is
-    used to rank items against each other, so an error in one estimate
-    reorders the whole list.
-
-    Args:
-        top_n: How many items to return, most expensive per day first.
-
-    Returns:
-        Dict with keys:
-        - items: list of {name, cost_per_day, unit_price, shelf_life_days,
-          treat_or_need}, most expensive per day first (at most top_n). A
-          same-day item counts as lasting 1 day.
-        - ready: how many items currently qualify.
-        - tracked: how many items have a shelf-life estimate at all, so a
-          caller can say what it's still waiting on rather than silently
-          showing nothing.
-    """
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT i.name AS name,
-               CASE i.lasts WHEN 'same_day' THEN 1 ELSE i.shelf_life_days END AS shelf_life_days,
-               i.treat_or_need AS treat_or_need,
-               (SELECT e.unit_price FROM item_expenses e
-                WHERE e.item_id = i.id AND e.price_kind = 'unit' ORDER BY e.id DESC LIMIT 1) AS unit_price,
-               (SELECT COUNT(*) FROM item_expenses e
-                WHERE e.item_id = i.id) AS purchase_count
-        FROM inventory_items i
-        WHERE i.lasts IN ('same_day', 'days')
-    """)
-    rows = cursor.fetchall()
-    cursor.close()
-    conn.close()
-
-    costs = [
-        {
-            "name": row["name"],
-            "cost_per_day": row["unit_price"] / row["shelf_life_days"],
-            "unit_price": row["unit_price"],
-            "shelf_life_days": row["shelf_life_days"],
-            "treat_or_need": row["treat_or_need"],
-        }
-        for row in rows
-        if row["unit_price"] and row["purchase_count"] >= _MIN_PURCHASES_FOR_SHELF_LIFE_TRUST
-    ]
-    costs.sort(key=lambda item: item["cost_per_day"], reverse=True)
-    return {"items": costs[:top_n], "ready": len(costs), "tracked": len(rows)}
 
 
 def get_budget_status(year=None, month=None):

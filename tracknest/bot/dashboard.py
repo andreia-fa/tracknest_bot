@@ -93,13 +93,13 @@ def build_dashboard_data() -> dict:
         The current month's build_month_data() keys at the top level, plus
         months (every month with purchases, oldest first, ending with the
         current one — switched between on the page without reloading),
-        rising, running_low, shopping_list, health, readable (item name ->
-        product, for display) and daily_cost.
+        rising, running_low, shopping_list, health and readable (item name
+        -> product, for display).
     """
     months = [build_month_data(year, month) for year, month in metrics.get_months_with_spending()]
     health = metrics.get_inventory_health()
     running_low = metrics.get_running_low()
-    shown_names = {n for group in health.values() for n in group} | {r["name"] for r in running_low}
+    shown_names = set(health["spare_alert_pending"]) | {r["name"] for r in running_low}
     return {
         **months[-1],
         "months": months,
@@ -108,7 +108,6 @@ def build_dashboard_data() -> dict:
         "shopping_list": shopping_list.get_all_items(),
         "health": health,
         "readable": _readable_names(shown_names),
-        "daily_cost": metrics.get_daily_cost(top_n=5),
     }
 
 
@@ -129,7 +128,7 @@ _PURPOSE_COLORS = {"Food": "var(--p-food)", "Personal & home": "var(--p-home)",
 _CARD_ICONS = {
     "Overview": "🧾", "Spending breakdown": "🍩", "Daily spending &amp; trips": "📅",
     "Spending by category": "🏷️", "Spending by store": "🏪", "Shopping list &amp; restock": "🛒",
-    "Action items": "💬", "Price changes": "📈", "Cost per day of use": "⏳",
+    "Price changes": "📈",
 }
 _CATEGORY_ICONS = {
     "Snacks": "🍫", "Ready Meals": "🍱", "Fruits/Veg": "🥦", "Dairy": "🧀", "Bread/Bakery": "🥨", "Pastries": "🥐",
@@ -499,24 +498,6 @@ def _to_buy(data: dict) -> str:
                  sub="⏳ runs out soon · 🔁 keep-a-spare reminder · 🛒 on your list")
 
 
-def _attention(data: dict) -> str:
-    """What the bot is waiting on you for — shown only when there is something."""
-    health = data["health"]
-    readable = data.get("readable", {})
-    groups = [(label, names) for label, names in (
-        ("Did these run out?", health["checkin_pending"]),
-        ("Open questions", health["unprofiled"]),
-    ) if names]
-    if not groups:
-        return ""
-    body = "".join(
-        f'<div class="attn"><div class="attn-head"><span>{label}</span><strong>{len(names)}</strong></div>'
-        f'<div class="chips">{"".join(f"<span class=chip>{escape(readable.get(n, n))}</span>" for n in names)}</div></div>'
-        for label, names in groups
-    )
-    return _card("Action items", body, sub="Answer these in Telegram")
-
-
 def _prices(data: dict) -> str:
     """Price rises at the same store — shown only when there are any."""
     rising = data["rising"]
@@ -531,22 +512,8 @@ def _prices(data: dict) -> str:
     return _card("Price changes", f'<table class="table">{rows}</table>', sub="Latest price vs. your usual, same store")
 
 
-def _daily_cost(data: dict) -> str:
-    cost = data["daily_cost"]
-    if not cost["items"]:
-        return ""
-    peak = cost["items"][0]["cost_per_day"] or 1.0
-    rows = "".join(
-        f'<div class="bar-row"><span class="bar-name">{escape(i["name"])}</span>'
-        f'<div class="bar-track"><div class="bar-fill" style="width:{i["cost_per_day"] / peak * 100:.1f}%"></div></div>'
-        f'<span class="bar-value">{_eur(i["cost_per_day"])}<span class="bar-amt">per day</span></span></div>'
-        for i in cost["items"]
-    )
-    return _card("Cost per day of use", rows, sub="Price ÷ how long it lasts — what's expensive to keep, not just to buy")
-
-
 def _right_now(data: dict) -> str:
-    cards = [c for c in (_to_buy(data), _attention(data), _prices(data), _daily_cost(data)) if c]
+    cards = [c for c in (_to_buy(data), _prices(data)) if c]
     cells = "".join(f'<div class="span-6">{c}</div>' for c in cards)
     return f'<p class="group-title right-now">Right now</p><div class="grid right-now">{cells}</div>'
 
@@ -683,11 +650,6 @@ _STYLE = """
   .table .strong { color: var(--ink); font-weight: 700; } .table .muted { color: var(--ink-muted); }
   .table .store { max-width: 0; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cell-sub { display: block; font-size: 11px; color: var(--ink-muted); }
-  .attn + .attn { margin-top: 14px; }
-  .attn-head { display: flex; justify-content: space-between; font-size: 13px; color: var(--ink-2); }
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-  .chip { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: var(--surface-2);
-          border: 1px solid var(--border); color: var(--ink-2); }
   .group-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
                  color: var(--ink-muted); margin: 22px 0 10px; }
   .share-note { text-align: center; font-size: 12px; color: var(--ink-muted); margin: 6px 0; }
