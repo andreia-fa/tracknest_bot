@@ -1,5 +1,18 @@
 # TODO
 
+## 🔴 End of session 2026-10-19 — rotate leaked secrets + stop the deploy exposing them
+A `ps aux` on the VM during a stuck deploy printed BOT_TOKEN and
+DASHBOARD_PASSWORD into the Claude session log. User's call: rotate at the
+end of the session.
+- [ ] Bot token: @BotFather `/revoke` → GitHub secret
+  `TRACKNEST_TELEGRAM_BOT_TOKEN` + `~/.config/tracknest-bot.env` (never in chat)
+- [ ] Dashboard password: new, long one in `TRACKNEST_DASHBOARD_PASSWORD`
+- [ ] Root cause: `appleboy/ssh-action`'s `envs:` puts every secret on the
+  remote `bash -c` command line, readable by any process on the VM via `ps`.
+  Pass them on stdin into a root-only env file for `docker run --env-file`
+  instead, and audit the rest of the workflow for the same pattern.
+  Do this BEFORE rotating, or the new values leak the same way.
+
 
 ## ⏸ Off (2026-10-12) — the bot no longer fills the shopping list itself
 User: estimates don't hold ("when i have visits, they will run out early"),
