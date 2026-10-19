@@ -83,7 +83,8 @@ def test_ready_meals():
 
 
 @pytest.mark.parametrize("store, name, expected", [
-    ("Burger King", "Cola", True),
+    ("Burger King", "Cola", False),  # a drink on its own isn't a meal
+    ("Burger King", "Long Chicken", True),
     ("MCDONALD'S", "Pommes", True),
     ("REWE", "Steinofen Pizza Salame", True),
     ("Lidl", "Cheeseburger", True),
@@ -102,9 +103,10 @@ def test_pastries_are_pastries_whatever_the_filling(name):
     assert infer_category(name) == "Pastries"
 
 
-def test_a_pizza_place_is_fast_food_whatever_it_sold():
-    from bot.categorize import is_fast_food
+def test_a_pizza_place_counts_a_meal_but_not_a_croissant():
     assert is_fast_food("Giulia Pizza GmbH", "Margherita")
+    assert not is_fast_food("Giulia Pizza & Airomore", "Croissant Vaniglia", "croissant", "Pastries")
+    assert not is_fast_food("Giulia Pizza & Airomore", "Croissant Vaniglia")
 
 
 def test_a_plant_based_burger_is_a_ready_meal_not_meat():

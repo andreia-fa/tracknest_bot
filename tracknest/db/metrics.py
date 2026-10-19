@@ -511,9 +511,11 @@ def get_shopping_trips(year=None, month=None):
 def get_fast_food(year=None, month=None):
     """Return a month's fast-food meals — counted per trip, so burger, fries and a drink are one meal.
 
-    What counts as fast food is categorize.is_fast_food (the store or the
-    product). Trips group like get_shopping_trips: by trip_key, else one per
-    store per day.
+    What counts as fast food is categorize.is_fast_food (what was eaten,
+    and where). Trips group like get_shopping_trips: by trip_key, else one
+    per store per day. At a fast-food place the whole visit is the meal
+    (the drink with the burger counts); elsewhere only the fast-food items
+    do (a frozen pizza, not the rest of the supermarket shop).
 
     Args:
         year: Calendar year. Defaults to the current month.
@@ -525,7 +527,7 @@ def get_fast_food(year=None, month=None):
         there's never been one) and list (this month's meals, oldest first,
         as {day, store, items (names, as bought), total}).
     """
-    from bot.categorize import is_fast_food
+    from bot.categorize import is_fast_food, is_fast_food_place
 
     now = datetime.now(tz=timezone.utc)
     prefix = f"{year or now.year:04d}-{month or now.month:02d}"
@@ -534,11 +536,18 @@ def get_fast_food(year=None, month=None):
     cursor.execute("""
         SELECT COALESCE(e.trip_key, e.purchase_date || '|' || COALESCE(e.store, '')) AS trip,
                e.purchase_date AS day, e.store AS store, i.name AS name, i.product AS product,
-               e.quantity_purchased * e.unit_price AS total
+               i.category AS category, e.quantity_purchased * e.unit_price AS total
         FROM item_expenses e
         JOIN inventory_items i ON i.id = e.item_id
     """)
-    rows = [r for r in cursor.fetchall() if is_fast_food(r["store"], r["name"], r["product"])]
+    visits: dict[tuple, list] = {}
+    for r in cursor.fetchall():
+        visits.setdefault((r["trip"], r["store"]), []).append(r)
+    rows = []
+    for (_trip, store), bought in visits.items():
+        eaten = [r for r in bought if is_fast_food(r["store"], r["name"], r["product"], r["category"])]
+        if eaten:
+            rows += bought if is_fast_food_place(store) else eaten
     cursor.close()
     conn.close()
     in_month = [r for r in rows if r["day"].startswith(prefix)]

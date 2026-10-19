@@ -280,6 +280,16 @@ def test_fast_food_is_one_meal_per_trip_by_store_or_product(db):
     assert food["list"][0]["total"] == pytest.approx(9.98)
 
 
+def test_a_croissant_from_a_pizzeria_is_not_fast_food(db):
+    _visit([("Croissant Vaniglia", 2.20, "Pastries")], "Giulia Pizza & Airomore", 4, trip_key="receipt:9")
+    _visit([("Iced Matcha", 3.49, "Beverages"), ("Plant-Based Hamburger", 6.99, "Ready Meals")],
+           "BURGER KING®", 4, trip_key="receipt:8")
+    food = metrics.get_fast_food(2026, 9)
+    assert food["meals"] == 1
+    assert food["list"][0]["items"] == ["Iced Matcha", "Plant-Based Hamburger"]  # the drink came with the meal
+    assert food["total"] == pytest.approx(10.48)
+
+
 def test_fast_food_last_day_looks_past_the_month(db):
     _visit([("Big Mac", 5.49, "Other")], "McDonald's", 28, trip_key="typed:a")
     assert metrics.get_fast_food(2026, 10) == {"meals": 0, "total": 0.0, "last_day": "2026-09-28", "list": []}

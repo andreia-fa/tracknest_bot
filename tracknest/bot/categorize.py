@@ -104,7 +104,8 @@ _CATEGORIES: list[tuple[str, list[str]]] = [
         "water", "wasser", "água", "agua", "juice", "saft", "sumo", "coffee",
         "kaffee", "café", "cafe", "tea", "tee", "chá", "cha", "beer", "bier",
         "cerveja", "wine", "wein", "vinho", "drink", "getränk", "getraenk",
-        "bebida",
+        "bebida", "cola", "fanta", "sprite", "limo", "limonade", "lemonade", "soda",
+        "refrigerante", "smoothie", "shake", "milkshake", "eistee", "ice tea", "iced tea",
         # Café drinks too: the visit is what isn't shopping (is_cafe), not the drink.
         "matcha", "latte", "cappuccino", "flat white", "chai",
     ]),
@@ -158,8 +159,10 @@ PURPOSES: dict[str, tuple[str, ...]] = {
 
 # Fast food is meant to stay rare, so it's counted on its own — across
 # categories, since a Burger King receipt says "Whopper", not "Ready Meals".
-# Recognised by the store (any purchase there) or by the product, wherever
-# it was bought. Substring match, so "Cheeseburger" and "Pizzeria" count.
+# What was eaten decides (user, 2026-10-19: "a croissant that came from a
+# pizzeria" isn't fast food): a fast-food product anywhere counts, and at a
+# fast-food place so does any other meal — but never a pastry, bread, snack
+# or drink on its own. Substring match, so "Cheeseburger" and "Pizzeria" count.
 _FAST_FOOD_STORES = (
     "burger king", "mcdonald", "mc donald", "kfc", "subway", "domino",
     "pizza hut", "five guys", "popeyes", "taco bell", "wendy's",
@@ -169,13 +172,29 @@ _FAST_FOOD_PRODUCTS = (
     "pizza", "burger", "whopper", "big mac", "nugget", "pommes", "fries",
     "döner", "doner", "kebab", "hot dog", "hotdog", "currywurst",
 )
+_NOT_A_MEAL = ("Pastries", "Bread/Bakery", "Snacks", "Beverages")
 
 
-def is_fast_food(store: str | None, name: str, product: str | None = None) -> bool:
-    """Whether a purchase is fast food: bought at a fast-food place, or a fast-food product anywhere."""
-    where = (store or "").lower()
+def is_fast_food_place(store: str | None) -> bool:
+    """Whether a store is a fast-food place (a chain, a pizzeria, a döner shop...)."""
+    return any(k in (store or "").lower() for k in _FAST_FOOD_STORES)
+
+
+def is_fast_food(store: str | None, name: str, product: str | None = None, category: str | None = None) -> bool:
+    """Whether a purchase is fast food: a fast-food product anywhere, or a meal at a fast-food place.
+
+    Args:
+        store: Where it was bought.
+        name: The item's name.
+        product: What it generically is, if known.
+        category: The item's category; guessed from name and product if not given.
+    """
     what = f"{name} {product or ''}".lower()
-    return any(k in where for k in _FAST_FOOD_STORES) or any(k in what for k in _FAST_FOOD_PRODUCTS)
+    if any(k in what for k in _FAST_FOOD_PRODUCTS):
+        return True
+    if not is_fast_food_place(store):
+        return False
+    return (category or infer_category(what)) not in _NOT_A_MEAL
 
 
 def purpose_of(category: str | None) -> str:
