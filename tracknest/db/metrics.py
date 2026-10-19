@@ -451,9 +451,10 @@ def get_shopping_trips(year=None, month=None):
 
     Returns:
         Dict with keys count, avg_basket (float, or None with no trips),
-        by_store (list of {store, trips, total}, biggest spend first — all
-        spending at that store, so trips can be 0; store is None for
-        hand-typed purchases), top_ups (trips under
+        by_store (list of {store, trips, visits, total}, biggest spend
+        first — all spending at that store; visits counts every receipt or
+        typed message there, trips only the shopping trips, so it can be 0;
+        store is None for hand-typed purchases), top_ups (trips under
         TOP_UP_TRIP_EUR, as {day, store, total}), per_day (one list per
         day of the month, holding each of that day's trip totals) and
         not_shopping (euros). per_day entries are {store, total} per trip.
@@ -495,10 +496,16 @@ def get_shopping_trips(year=None, month=None):
 
     # Every euro by store, trips or not: Amazon, a café or a treat stop is
     # still money spent there — it just shows 0 trips.
+    # visits counts every receipt or typed message there, shopping or not —
+    # a pretzel at avec is still a visit, just not a shopping trip.
     by_store = {}
+    seen: dict[str | None, set] = {}
     for row in rows:
-        entry = by_store.setdefault(row["store"], {"store": row["store"], "trips": 0, "total": 0.0})
+        entry = by_store.setdefault(row["store"], {"store": row["store"], "trips": 0, "visits": 0, "total": 0.0})
         entry["total"] += float(row["total"])
+        seen.setdefault(row["store"], set()).add(row["trip"])
+    for store, keys in seen.items():
+        by_store[store]["visits"] = len(keys)
     for trip in trips:
         by_store[trip["store"]]["trips"] += 1
     grand_total = sum(float(t["total"]) for t in trips)

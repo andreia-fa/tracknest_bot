@@ -206,7 +206,7 @@ def test_each_receipt_is_a_trip_even_at_the_same_store_on_the_same_day(db):
     _visit([("Eier", 2.99, "Dairy"), ("Cracker", 3.29, "Snacks")], "REWE", 30, trip_key="receipt:17")
     trips = metrics.get_shopping_trips(2026, 9)
     assert trips["count"] == 2
-    assert trips["by_store"] == [{"store": "REWE", "trips": 2, "total": pytest.approx(17.27)}]
+    assert trips["by_store"] == [{"store": "REWE", "trips": 2, "visits": 2, "total": pytest.approx(17.27)}]
     assert [t["total"] for t in trips["per_day"][29]] == [pytest.approx(10.99), pytest.approx(6.28)]
     assert {t["store"] for t in trips["per_day"][29]} == {"REWE"}
 
@@ -235,8 +235,8 @@ def test_a_cafe_visit_is_spending_but_never_a_trip_whatever_was_bought(db):
     _visit([("Cola", 1.29, "Beverages")], "REWE", 18, trip_key="receipt:41")
     trips = metrics.get_shopping_trips(2026, 9)
     assert trips["count"] == 1
-    assert trips["by_store"] == [{"store": "Yormas", "trips": 0, "total": pytest.approx(6.50)},
-                                 {"store": "REWE", "trips": 1, "total": pytest.approx(1.29)}]
+    assert trips["by_store"] == [{"store": "Yormas", "trips": 0, "visits": 1, "total": pytest.approx(6.50)},
+                                 {"store": "REWE", "trips": 1, "visits": 1, "total": pytest.approx(1.29)}]
     assert trips["not_shopping"] == pytest.approx(6.50)
 
 
@@ -255,7 +255,7 @@ def test_an_amazon_order_is_spending_not_a_trip(db):
     _visit([("Kabelbinder", 3.99, "Household")], "Amazon", 15, trip_key="amazon:2026-09-15")
     trips = metrics.get_shopping_trips(2026, 9)
     assert trips["count"] == 0 and trips["not_shopping"] == pytest.approx(3.99)
-    assert trips["by_store"] == [{"store": "Amazon", "trips": 0, "total": pytest.approx(3.99)}]  # still a store
+    assert trips["by_store"] == [{"store": "Amazon", "trips": 0, "visits": 1, "total": pytest.approx(3.99)}]
 
 
 def test_get_shopping_trips_empty_month(db):

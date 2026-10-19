@@ -19,8 +19,8 @@ def sample_data(**overrides) -> dict:
         "mix": {"need": 70.0, "treat": 40.0, "unknown": 10.0},
         "categories": [{"name": "Fruits/Veg", "total": 70.0}, {"name": "Snacks", "total": 50.0}],
         "trips": {"count": 4, "avg_basket": 30.0,
-                  "by_store": [{"store": "REWE", "trips": 3, "total": 100.0},
-                               {"store": None, "trips": 1, "total": 20.0}]},
+                  "by_store": [{"store": "REWE", "trips": 3, "visits": 3, "total": 100.0},
+                               {"store": None, "trips": 1, "visits": 1, "total": 20.0}]},
         "daily": [0.0] * 20 + [50.0, 0.0, 70.0] + [0.0] * 7,
         "rising": [{"name": "Milk", "pct_change": 12.0, "latest_price": 1.12, "avg_price": 1.0}],
         "running_low": [{"name": "Eggs", "days_left": 2, "run_out_date": "2026-09-25", "shelf_life_days": 14}],
@@ -110,10 +110,10 @@ def test_render_offers_every_month_and_opens_on_the_latest():
     assert "€90.00" in html
 
 
-def test_a_store_without_trips_still_shows_its_spending():
-    trips = sample_data()["trips"] | {"by_store": [{"store": "Amazon", "trips": 0, "total": 145.49}]}
+def test_a_store_without_shopping_trips_still_shows_its_visits_and_spending():
+    trips = sample_data()["trips"] | {"by_store": [{"store": "Amazon", "trips": 0, "visits": 2, "total": 145.49}]}
     html = dashboard._stores(sample_data(trips=trips), amounts=True)
-    assert "Amazon" in html and "€145.49" in html and '<td class="num">—</td>' in html
+    assert "Amazon" in html and "€145.49" in html and '<td class="num">2</td>' in html and "—" not in html
 
 
 def test_largest_category_bar_never_overflows():
