@@ -103,6 +103,16 @@ def test_pastries_are_pastries_whatever_the_filling(name):
     assert infer_category(name) == "Pastries"
 
 
+@pytest.mark.parametrize("name, product, category", [
+    ("Iced Matcha Mango Oatly medium Disposable Cup", "drinkware", "Leisure"),  # the real 4 Oct line
+    ("Iced Matcha Mango Oatly medium Disposable Cup", None, None),
+    ("Matcha 0.2l", "matcha", "Beverages"),
+    ("Coca-Cola Zero 0,5", None, None),
+])
+def test_just_a_drink_at_burger_king_is_not_fast_food(name, product, category):
+    assert not is_fast_food("BURGER KING®", name, product, category)
+
+
 def test_a_pizza_place_counts_a_meal_but_not_a_croissant():
     assert is_fast_food("Giulia Pizza GmbH", "Margherita")
     assert not is_fast_food("Giulia Pizza & Airomore", "Croissant Vaniglia", "croissant", "Pastries")

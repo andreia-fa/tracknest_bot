@@ -290,6 +290,11 @@ def test_a_croissant_from_a_pizzeria_is_not_fast_food(db):
     assert food["total"] == pytest.approx(10.48)
 
 
+def test_a_burger_king_visit_for_just_a_matcha_is_not_a_meal(db):
+    _visit([("Iced Matcha Mango Oatly medium Disposable Cup", 3.49, "Leisure")], "BURGER KING®", 5, trip_key="receipt:7")
+    assert metrics.get_fast_food(2026, 9)["meals"] == 0
+
+
 def test_fast_food_last_day_looks_past_the_month(db):
     _visit([("Big Mac", 5.49, "Other")], "McDonald's", 28, trip_key="typed:a")
     assert metrics.get_fast_food(2026, 10) == {"meals": 0, "total": 0.0, "last_day": "2026-09-28", "list": []}

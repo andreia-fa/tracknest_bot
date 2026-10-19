@@ -194,7 +194,18 @@ def is_fast_food(store: str | None, name: str, product: str | None = None, categ
         return True
     if not is_fast_food_place(store):
         return False
-    return (category or infer_category(what)) not in _NOT_A_MEAL
+    # A drink word anywhere settles it ("Iced Matcha Mango" is a drink, not
+    # fruit), and so does a not-a-meal category, stored or guessed.
+    if _is_drink(what):
+        return False
+    return not {category, infer_category(what)} & {*_NOT_A_MEAL, "Leisure"}
+
+
+def _is_drink(text: str) -> bool:
+    """Whether a name mentions a drink as a whole word (matcha, cola, latte...)."""
+    drinks = dict(_CATEGORIES)["Beverages"]
+    normalized = re.sub(r"[^\w\s]", " ", text.lower())
+    return any(re.search(rf"\b{re.escape(k)}s?\b", normalized) for k in drinks)
 
 
 def purpose_of(category: str | None) -> str:
