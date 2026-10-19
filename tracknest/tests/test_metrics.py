@@ -250,6 +250,12 @@ def test_a_visit_for_only_treats_is_spending_not_a_trip(db):
     assert trips["not_shopping"] == pytest.approx(4.30)
 
 
+def test_an_amazon_order_is_spending_not_a_trip(db):
+    _visit([("Kabelbinder", 3.99, "Household")], "Amazon", 15, trip_key="amazon:2026-09-15")
+    trips = metrics.get_shopping_trips(2026, 9)
+    assert trips["count"] == 0 and trips["not_shopping"] == pytest.approx(3.99)
+
+
 def test_get_shopping_trips_empty_month(db):
     assert metrics.get_shopping_trips(2026, 9) == {
         "count": 0, "avg_basket": None, "by_store": [], "top_ups": [], "per_day": [[]] * 30, "not_shopping": 0.0,

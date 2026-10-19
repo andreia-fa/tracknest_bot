@@ -440,7 +440,8 @@ def get_shopping_trips(year=None, month=None):
     without it fall back to one trip per store per day, which undercounts
     two visits to the same store on one day. Spending that isn't shopping
     (categorize.NOT_SHOPPING, e.g. a pool ticket; anything bought at a café,
-    categorize.is_cafe; a visit where only treats were bought) is never a
+    categorize.is_cafe; an online order, categorize.is_online; a visit where
+    only treats were bought) is never a
     trip: it's reported separately as not_shopping, and left out of
     everything else here.
 
@@ -456,7 +457,7 @@ def get_shopping_trips(year=None, month=None):
         day of the month, holding each of that day's trip totals) and
         not_shopping (euros). per_day entries are {store, total} per trip.
     """
-    from bot.categorize import NOT_SHOPPING, is_cafe
+    from bot.categorize import NOT_SHOPPING, is_cafe, is_online
 
     now = datetime.now(tz=timezone.utc)
     year, month = year or now.year, month or now.month
@@ -477,7 +478,7 @@ def get_shopping_trips(year=None, month=None):
     not_shopping = 0.0
     visits: dict[tuple, list] = {}
     for row in rows:
-        if row["category"] in NOT_SHOPPING or is_cafe(row["store"]):
+        if row["category"] in NOT_SHOPPING or is_cafe(row["store"]) or is_online(row["store"]):
             not_shopping += float(row["total"])
             continue
         visits.setdefault((row["trip"], row["store"]), []).append(row)

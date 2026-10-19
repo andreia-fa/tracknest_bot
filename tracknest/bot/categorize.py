@@ -146,6 +146,16 @@ def is_cafe(store: str | None) -> bool:
     return any(k in (store or "").lower() for k in _CAFE_STORES)
 
 
+# Delivered orders: spending, but no store visit, so never a shopping trip
+# (user, 2026-10-19).
+_ONLINE_STORES = ("amazon",)
+
+
+def is_online(store: str | None) -> bool:
+    """Whether a store is an online shop, whose orders never count as shopping trips."""
+    return any(k in (store or "").lower() for k in _ONLINE_STORES)
+
+
 # What the money went to, one level above categories — the headline split
 # on the dashboard. Every category belongs to exactly one purpose.
 PURPOSES: dict[str, tuple[str, ...]] = {
