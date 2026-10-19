@@ -439,9 +439,10 @@ def get_shopping_trips(year=None, month=None):
     Purchases carry a trip_key (see expenses.log_expense); older ones
     without it fall back to one trip per store per day, which undercounts
     two visits to the same store on one day. Spending that isn't shopping
-    (categorize.NOT_SHOPPING, e.g. a pool ticket, or anything bought at a
-    café, categorize.is_cafe) is never a trip: it's reported separately as
-    not_shopping, and left out of everything else here.
+    (categorize.NOT_SHOPPING, e.g. a pool ticket; anything bought at a café,
+    categorize.is_cafe; a visit where only treats were bought) is never a
+    trip: it's reported separately as not_shopping, and left out of
+    everything else here.
 
     Args:
         year: Calendar year. Defaults to the current month.
@@ -464,7 +465,7 @@ def get_shopping_trips(year=None, month=None):
     cursor.execute("""
         SELECT COALESCE(e.trip_key, e.purchase_date || '|' || COALESCE(e.store, '')) AS trip,
                e.purchase_date AS day, e.store AS store, i.category AS category,
-               e.quantity_purchased * e.unit_price AS total
+               i.treat_or_need AS treat_or_need, e.quantity_purchased * e.unit_price AS total
         FROM item_expenses e
         JOIN inventory_items i ON i.id = e.item_id
         WHERE e.purchase_date LIKE ?
@@ -474,15 +475,21 @@ def get_shopping_trips(year=None, month=None):
     conn.close()
 
     not_shopping = 0.0
-    grouped: dict[tuple, dict] = {}
+    visits: dict[tuple, list] = {}
     for row in rows:
         if row["category"] in NOT_SHOPPING or is_cafe(row["store"]):
             not_shopping += float(row["total"])
             continue
-        trip = grouped.setdefault((row["trip"], row["store"]), {"day": row["day"], "store": row["store"], "total": 0.0})
-        trip["day"] = min(trip["day"], row["day"])
-        trip["total"] += float(row["total"])
-    trips = list(grouped.values())
+        visits.setdefault((row["trip"], row["store"]), []).append(row)
+    trips = []
+    for (_trip, store), bought in visits.items():
+        total = sum(float(r["total"]) for r in bought)
+        # Only treats (a pretzel, a cinnamon roll on the way) is spending, not
+        # a shopping trip — user, 2026-10-19.
+        if all(r["treat_or_need"] == "treat" for r in bought):
+            not_shopping += total
+            continue
+        trips.append({"day": min(r["day"] for r in bought), "store": store, "total": total})
 
     by_store = {}
     for trip in trips:

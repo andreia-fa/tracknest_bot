@@ -17,8 +17,10 @@ end of the session.
 ## 📦 November 2026 — user moves; stock rule starts then
 User (2026-10-19): moving in November, so the stock/restock rule isn't being
 followed yet — "until then, let's just build some knowledge". Don't judge
-October's restock behaviour; revisit the Shopping list & restock card and
-/shop once settled in the new place.
+October's restock behaviour. The dashboard's Shopping list & restock card
+is hidden until then (`_to_buy` in `bot/dashboard.py`, user agreed it does
+nothing yet); in November, design restock properly and bring it back, plus
+/shop. Purchases keep being logged meanwhile — that's the knowledge.
 
 ## 💡 Idea (2026-10-19) — tell promotions apart from real price rises
 User: "Price changes" are mostly store promotions right now. Receipts

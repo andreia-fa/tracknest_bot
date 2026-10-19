@@ -524,7 +524,9 @@ def _prices(data: dict) -> str:
 
 
 def _right_now(data: dict) -> str:
-    cards = [c for c in (_to_buy(data), _prices(data)) if c]
+    # The restock card (_to_buy) is off until the user's November move, when
+    # the stock rule starts being followed — see TODO.md.
+    cards = [c for c in (_prices(data),) if c]
     cells = "".join(f'<div class="span-6">{c}</div>' for c in cards)
     return f'<p class="group-title right-now">Right now</p><div class="grid right-now">{cells}</div>'
 

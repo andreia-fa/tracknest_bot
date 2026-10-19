@@ -67,12 +67,14 @@ def test_render_shows_the_headline_numbers():
     assert "Trips per week" in html and '<span class="of"> of 4</span>' in html
     assert "REWE" in html and "Typed in by hand" in html
     assert "▲ 12%" in html
-    assert "Broccoli" in html and "2d left" in html
+    assert "Shopping list &amp; restock" not in html  # off until the November move
+    restock = dashboard._to_buy(sample_data())
+    assert "Broccoli" in restock and "2d left" in restock
 
 
 def test_render_escapes_names_from_receipts():
     html = dashboard.render_dashboard_html(sample_data(
-        shopping_list=[{"name": "<script>alert(1)</script>", "quantity": 1, "category": None}],
+        rising=[{"name": "<script>alert(1)</script>", "pct_change": 12.0, "latest_price": 1.12, "avg_price": 1.0}],
     ))
 
     assert "<script>alert(1)" not in html
@@ -116,13 +118,15 @@ def test_largest_category_bar_never_overflows():
 
 
 def test_spare_alerts_are_shopping_and_open_questions_stay_in_telegram():
-    html = dashboard.render_dashboard_html(sample_data(
+    data = sample_data(
         health={"checkin_pending": [], "spare_alert_pending": ["LEERDAMMER CAR.", "Milram Käse Scheiben"],
                 "unprofiled": ["X01"]},
         readable={"LEERDAMMER CAR.": "cheese", "Milram Käse Scheiben": "cheese", "X01": "X01"},
-    ))
-    assert html.count("🔁 cheese") == 1  # one spare per product, by its readable name
-    assert "LEERDAMMER" not in html
+    )
+    restock = dashboard._to_buy(data)
+    assert restock.count("🔁 cheese") == 1  # one spare per product, by its readable name
+    assert "LEERDAMMER" not in restock
+    html = dashboard.render_dashboard_html(data)
     assert "Open questions" not in html and "Action items" not in html and "X01" not in html
     assert "Cost per day" not in html
     assert "Buy a spare" not in html

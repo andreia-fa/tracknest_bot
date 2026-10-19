@@ -239,6 +239,17 @@ def test_a_cafe_visit_is_spending_but_never_a_trip_whatever_was_bought(db):
     assert trips["not_shopping"] == pytest.approx(6.50)
 
 
+def test_a_visit_for_only_treats_is_spending_not_a_trip(db):
+    _visit([("Pretzel", 1.80, "Bread/Bakery"), ("Cinnamon Roll", 2.50, "Pastries")], "REWE", 28, trip_key="receipt:5")
+    _visit([("Yogurt", 1.59, "Dairy"), ("Pudding", 1.59, "Snacks")], "REWE", 25, trip_key="receipt:4")
+    for name in ("Pretzel", "Cinnamon Roll", "Pudding"):
+        crud.set_treat_or_need(name, "treat")
+    crud.set_treat_or_need("Yogurt", "need")
+    trips = metrics.get_shopping_trips(2026, 9)
+    assert trips["count"] == 1  # yogurt + pudding is still a trip: a need was bought
+    assert trips["not_shopping"] == pytest.approx(4.30)
+
+
 def test_get_shopping_trips_empty_month(db):
     assert metrics.get_shopping_trips(2026, 9) == {
         "count": 0, "avg_basket": None, "by_store": [], "top_ups": [], "per_day": [[]] * 30, "not_shopping": 0.0,
