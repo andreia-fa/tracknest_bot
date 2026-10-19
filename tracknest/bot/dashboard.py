@@ -241,11 +241,13 @@ def _breakdown(month: dict, amounts: bool) -> str:
         )
         offset += length
     lead = purposes[0]
+    # One scale for every slice, so a 1% Leisure bar looks like 1%, not full.
+    peak = max(c["total"] for p in purposes for c in p["categories"])
     slices = "".join(
         f'<div class="slice"><h4><span class="swatch" style="background:{_PURPOSE_COLORS[p["name"]]}"></span>'
         f'<span class="slice-name">{p["name"]}</span><strong>{_share(p["total"], total):.0f}%</strong>'
         + (f'<span class="slice-amt">{_eur(p["total"])}</span>' if amounts else "") + "</h4>"
-        + _category_rows(sorted(p["categories"], key=lambda c: c["total"], reverse=True), month, amounts)
+        + _category_rows(sorted(p["categories"], key=lambda c: c["total"], reverse=True), month, amounts, peak)
         + "</div>"
         for p in purposes
     )
@@ -406,10 +408,10 @@ def _timeline(month: dict, amounts: bool) -> str:
     return _card("Daily spending &amp; trips", body, sub=sub)
 
 
-def _category_rows(categories: list[dict], month: dict, amounts: bool) -> str:
-    """One labelled bar per category, scaled to the largest; privately, each opens to its purchases."""
+def _category_rows(categories: list[dict], month: dict, amounts: bool, peak: float | None = None) -> str:
+    """One labelled bar per category, scaled to peak (default: the largest here); privately, each opens to its purchases."""
     total = month["spent"]
-    peak = max(c["total"] for c in categories) or 1.0
+    peak = peak or max(c["total"] for c in categories) or 1.0
     purchases = month.get("category_purchases") or {}
 
     def bar(c: dict) -> str:
@@ -590,8 +592,9 @@ _STYLE = """
   .slice h4 { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; font-size: 14px; font-weight: 600; }
   .slice h4 .slice-name { flex: 1; }
   .slice-amt { font-weight: 500; color: var(--ink-muted); font-size: 13px; }
+  .breakdown .bar-row { grid-template-columns: minmax(0, 220px) 1fr 84px; }
   .donut-value { font-size: 24px; font-weight: 700; fill: var(--ink); }
-  .donut-label { font-size: 11px; fill: var(--ink-muted); }
+  .donut-label { font-size: 8px; fill: var(--ink-muted); }
   .swatch { width: 10px; height: 10px; border-radius: 2px; }
   .tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; flex: 1; }
   .tile { position: relative; padding: 12px 16px; display: flex; flex-direction: column; justify-content: center; }
@@ -670,6 +673,7 @@ _STYLE = """
     .tile-value { font-size: 22px; }
     .hero-value { font-size: 40px; }
     .bar-row { grid-template-columns: minmax(0, 104px) 1fr 70px; }
+    .breakdown .bar-row { grid-template-columns: minmax(0, 120px) 1fr 70px; }
   }
   @media (max-width: 359px) {
     .tiles { grid-template-columns: minmax(0, 1fr); }
