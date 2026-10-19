@@ -121,3 +121,14 @@ def test_a_pizza_place_counts_a_meal_but_not_a_croissant():
 
 def test_a_plant_based_burger_is_a_ready_meal_not_meat():
     assert infer_category("Plant-Based Hamburger Remove Mustard Extra Plant-Based Patty") == "Ready Meals"
+
+
+@pytest.mark.parametrize("name, category", [
+    ("WRAP THUNFISCH", "Ready Meals"),
+    ("Wrap 190g", "Ready Meals"),
+    ("Chicken Wrap", "Ready Meals"),
+    ("VOLLKORNTORTILLA", "Bread/Bakery"),
+    ("Tortilla Wraps Weizen", "Bread/Bakery"),
+])
+def test_a_filled_wrap_is_a_ready_meal_but_tortillas_are_bread(name, category):
+    assert infer_category(name) == category

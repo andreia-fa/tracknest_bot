@@ -38,6 +38,9 @@ _CATEGORIES: list[tuple[str, list[str]]] = [
         "prato pronto", "sushi", "maki", "nigiri", "california", "calif",
         "pizza", "lasagne", "lasagna", "sandwich", "burger", "whopper", "patty",
         "nuggets", "döner", "doner", "kebab",
+        # A filled wrap is eaten as it is, like a sandwich — "WRAP THUNFISCH"
+        # isn't fish to cook (user, 2026-10-19). Plain tortillas stay bread.
+        "wrap",
     ]),
     ("Fruits/Veg", [
         "banana", "banane", "apple", "apfel", "maçã", "maca", "tomato", "tomate",
@@ -238,6 +241,9 @@ def infer_category(name: str) -> str:
         A category label, or "Other" if nothing matched.
     """
     normalized = re.sub(r"[^\w\s]", " ", name.lower())
+    # Tortillas are bought to fill at home, even when sold as "wraps".
+    if "tortilla" in normalized:
+        return "Bread/Bakery"
     for category, keywords in _CATEGORIES:
         for keyword in keywords:
             # Trailing "s?" so an English plural (bananas, apples) matches
