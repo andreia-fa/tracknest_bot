@@ -117,9 +117,8 @@ def test_a_store_without_trips_still_shows_its_spending():
 
 
 def test_largest_category_bar_never_overflows():
-    html = dashboard.render_dashboard_html(sample_data(
-        categories=[{"name": "Clothing", "total": 35.9}, {"name": "Other", "total": 55.82}],
-    ))
+    html = dashboard._category_rows([{"name": "Clothing", "total": 35.9}, {"name": "Other", "total": 55.82}],
+                                    sample_data(), amounts=True)
     assert "width:100.0%" in html and "width:155" not in html
 
 
@@ -169,11 +168,21 @@ def test_where_the_money_went_leads_both_views():
                 {"name": "Personal & home", "total": 25.0, "categories": [{"name": "Clothing", "total": 25.0}]},
                 {"name": "Leisure", "total": 5.0, "categories": [{"name": "Leisure", "total": 5.0}]}]
     html = dashboard.render_dashboard_html(sample_data(purposes=purposes))
-    assert '<span class="lg-name">Food</span><strong>75%</strong><span class="lg-amt">€90.00 · Dairy</span>' in html
-    assert "<title>Personal &amp; home" in html or "<title>Personal & home 21% — Clothing €25.00</title>" in html
+    assert ('<span class="slice-name">Food</span><strong>75%</strong><span class="slice-amt">€90.00</span>' in html)
+    assert "<title>Personal & home 21%</title>" in html
     shared = re.findall(r'<div class="shared">(.*?)</div></section>', html, re.S)[0]
     assert "Spending breakdown" in shared and ">food</text>" in shared
-    assert '<span class="lg-name">Leisure</span><strong>4%</strong>' in shared and "€" not in shared
+    assert '<span class="slice-name">Leisure</span><strong>4%</strong></h4>' in shared and "€" not in shared
+
+
+def test_every_slice_lists_its_categories():
+    purposes = [{"name": "Food", "total": 90.0, "categories": [{"name": "Snacks", "total": 30.0},
+                                                               {"name": "Dairy", "total": 60.0}]},
+                {"name": "Personal & home", "total": 25.0, "categories": [{"name": "Clothing", "total": 25.0}]}]
+    html = dashboard._breakdown(sample_data(purposes=purposes, spent=115.0), amounts=True)
+    food = html[html.index('slice-name">Food'):html.index('slice-name">Personal')]
+    assert food.index("Dairy") < food.index("Snacks")  # biggest first, inside its own slice
+    assert "Clothing" not in food
 
 
 def test_a_closed_month_is_never_measured_against_todays_budget():
@@ -226,10 +235,12 @@ def test_fast_food_tile_without_any_yet():
 def test_each_category_opens_to_its_purchases_in_the_private_view_only():
     import re
     bought = {"Hygiene/Personal Care": [{"day": "2026-09-02", "name": "Balea Duschgel", "store": "dm", "total": 3.99}]}
-    data = sample_data(categories=[{"name": "Hygiene/Personal Care", "total": 3.99}], category_purchases=bought)
+    purposes = [{"name": "Personal & home", "total": 3.99,
+                 "categories": [{"name": "Hygiene/Personal Care", "total": 3.99}]}]
+    data = sample_data(purposes=purposes, category_purchases=bought)
     html = dashboard.render_dashboard_html(data)
-    private = dashboard._categories(data, amounts=True)
+    private = dashboard._breakdown(data, amounts=True)
     assert "<details" in private and "Balea Duschgel" in private and "2 Sep" in private and "dm" in private
-    assert "Balea Duschgel" not in dashboard._categories(data, amounts=False)
+    assert "Balea Duschgel" not in dashboard._breakdown(data, amounts=False)
     for part in re.findall(r'<div class="shared">(.*?)</div></section>', html, re.S):
         assert "Balea Duschgel" not in part

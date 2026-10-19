@@ -220,18 +220,12 @@ def _overview(month: dict, amounts: bool) -> str:
     </section>"""
 
 
-def _donut(month: dict, amounts: bool) -> str:
-    """Spending breakdown by purpose as a donut — a few parts of one whole, read at a glance."""
+def _breakdown(month: dict, amounts: bool) -> str:
+    """Spending by purpose as a donut, and beside it what every slice is made of — categories, then purchases."""
     total = month["spent"]
     purposes = month.get("purposes", [])
     if not total or not purposes:
         return _card("Spending breakdown", '<p class="note">Appears once something is logged this month.</p>', cls="empty")
-    holds = {p["name"]: p.get("categories", []) for p in purposes}
-
-    def inside(name: str) -> str:
-        return ", ".join(
-            f'{escape(c["name"])} {_eur(c["total"]) if amounts else f"{_share(c["total"], total):.0f}%"}'
-            for c in holds[name])
 
     radius, width = 52, 20
     circumference = 2 * 3.141592653589793 * radius
@@ -243,28 +237,30 @@ def _donut(month: dict, amounts: bool) -> str:
             f'<circle r="{radius}" cx="70" cy="70" fill="none" stroke="{_PURPOSE_COLORS[p["name"]]}" '
             f'stroke-width="{width}" stroke-dasharray="{max(length - gap, 0.5):.2f} {circumference:.2f}" '
             f'stroke-dashoffset="{-offset:.2f}" transform="rotate(-90 70 70)">'
-            f'<title>{p["name"]} {_share(p["total"], total):.0f}% — {inside(p["name"])}</title></circle>'
+            f'<title>{p["name"]} {_share(p["total"], total):.0f}%</title></circle>'
         )
         offset += length
     lead = purposes[0]
-    legend = "".join(
-        f'<li title="{p["name"]}: {inside(p["name"])}"><span class="swatch" style="background:{_PURPOSE_COLORS[p["name"]]}"></span>'
-        f'<span class="lg-name">{p["name"]}</span><strong>{_share(p["total"], total):.0f}%</strong>'
-        + (f'<span class="lg-amt">{_eur(p["total"])} · ' if amounts else '<span class="lg-amt">')
-        + ", ".join(escape(c["name"]) for c in holds[p["name"]]) + "</span></li>"
+    slices = "".join(
+        f'<div class="slice"><h4><span class="swatch" style="background:{_PURPOSE_COLORS[p["name"]]}"></span>'
+        f'<span class="slice-name">{p["name"]}</span><strong>{_share(p["total"], total):.0f}%</strong>'
+        + (f'<span class="slice-amt">{_eur(p["total"])}</span>' if amounts else "") + "</h4>"
+        + _category_rows(sorted(p["categories"], key=lambda c: c["total"], reverse=True), month, amounts)
+        + "</div>"
         for p in purposes
     )
     body = f"""
-      <div class="donut-wrap">
+      <div class="breakdown">
         <svg class="donut" viewBox="0 0 140 140" role="img" aria-label="Spending breakdown">
           <circle r="{radius}" cx="70" cy="70" fill="none" stroke="var(--track)" stroke-width="{width}"/>
           {"".join(arcs)}
           <text x="70" y="68" text-anchor="middle" class="donut-value">{_share(lead["total"], total):.0f}%</text>
           <text x="70" y="86" text-anchor="middle" class="donut-label">{lead["name"].lower()}</text>
         </svg>
-        <ul class="legend-list">{legend}</ul>
+        <div class="slices-list">{slices}</div>
       </div>"""
-    return _card("Spending breakdown", body)
+    sub = "Every slice, category by category — tap one to see what's in it" if amounts else ""
+    return _card("Spending breakdown", body, sub=sub)
 
 
 def _tile(label: str, value: str, note: str = "", extra: str = "", icon: str = "") -> str:
@@ -410,12 +406,9 @@ def _timeline(month: dict, amounts: bool) -> str:
     return _card("Daily spending &amp; trips", body, sub=sub)
 
 
-def _categories(month: dict, amounts: bool) -> str:
-    """One labelled bar per category, scaled to the largest — the names carry identity, so one colour."""
-    categories = month["categories"]
+def _category_rows(categories: list[dict], month: dict, amounts: bool) -> str:
+    """One labelled bar per category, scaled to the largest; privately, each opens to its purchases."""
     total = month["spent"]
-    if not categories:
-        return ""
     peak = max(c["total"] for c in categories) or 1.0
     purchases = month.get("category_purchases") or {}
 
@@ -439,9 +432,7 @@ def _categories(month: dict, amounts: bool) -> str:
         )
         return f'<details class="cat"><summary>{bar(c)}</summary><ul class="buys">{lines}</ul></details>'
 
-    rows = "".join(row(c) for c in categories)
-    sub = "Tap a category to see what's in it" if amounts and purchases else ""
-    return _card("Spending by category", rows, sub=sub)
+    return "".join(row(c) for c in categories)
 
 
 def _stores(month: dict, amounts: bool) -> str:
@@ -464,7 +455,7 @@ def _stores(month: dict, amounts: bool) -> str:
 
 
 def _month_view(month: dict, previous: dict | None, amounts: bool) -> str:
-    """One month on a 12-column grid: headline row, timeline, then categories beside stores."""
+    """One month on a 12-column grid: headline row, the breakdown, the timeline, then stores."""
     if month.get("is_current", True):
         period = f'{month["month_label"]} · day {month["day"]} of {month["days_in_month"]}'
     else:
@@ -472,12 +463,11 @@ def _month_view(month: dict, previous: dict | None, amounts: bool) -> str:
     return f"""
     <p class="period">{period}</p>
     <div class="grid">
-      <div class="span-4">{_overview(month, amounts)}</div>
-      <div class="span-4">{_donut(month, amounts)}</div>
-      <div class="span-4">{_tiles(month, previous, amounts)}</div>
+      <div class="span-6">{_overview(month, amounts)}</div>
+      <div class="span-6">{_tiles(month, previous, amounts)}</div>
+      <div class="span-12">{_breakdown(month, amounts)}</div>
       <div class="span-12">{_timeline(month, amounts)}</div>
-      <div class="span-6">{_categories(month, amounts)}</div>
-      <div class="span-6">{_stores(month, amounts)}</div>
+      <div class="span-12">{_stores(month, amounts)}</div>
     </div>"""
 
 
@@ -594,16 +584,16 @@ _STYLE = """
   .meter { position: relative; height: 8px; border-radius: 4px; background: var(--track); }
   .meter-fill { height: 100%; border-radius: 4px; background: var(--accent); }
   .meter-tick { position: absolute; top: -3px; width: 2px; height: 14px; background: var(--ink); }
-  .donut-wrap { display: flex; align-items: center; gap: 18px; }
-  .donut { width: 156px; height: 156px; flex: none; }
+  .breakdown { display: flex; align-items: flex-start; gap: 28px; }
+  .donut { width: 200px; height: 200px; flex: none; position: sticky; top: 12px; }
+  .slices-list { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+  .slice h4 { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; font-size: 14px; font-weight: 600; }
+  .slice h4 .slice-name { flex: 1; }
+  .slice-amt { font-weight: 500; color: var(--ink-muted); font-size: 13px; }
   .donut-value { font-size: 24px; font-weight: 700; fill: var(--ink); }
   .donut-label { font-size: 11px; fill: var(--ink-muted); }
-  .legend-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 0; }
-  .legend-list li { display: grid; grid-template-columns: 10px 1fr auto; column-gap: 8px; align-items: center; font-size: 13px; }
-  .legend-list .lg-name { color: var(--ink-2); }
-  .legend-list .lg-amt { grid-column: 2 / 4; font-size: 11px; color: var(--ink-muted); }
   .swatch { width: 10px; height: 10px; border-radius: 2px; }
-  .tiles { display: grid; grid-template-rows: repeat(4, auto); gap: 14px; flex: 1; }
+  .tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; flex: 1; }
   .tile { position: relative; padding: 12px 16px; display: flex; flex-direction: column; justify-content: center; }
   .tile-icon { position: absolute; top: 10px; right: 12px; width: 34px; height: 34px; border-radius: 10px;
                display: grid; place-items: center; font-size: 19px; background: var(--surface-2); }
@@ -629,7 +619,6 @@ _STYLE = """
   .tl-dot { cursor: help; outline: 4px solid transparent; }  /* bigger hover target than the dot */
   .tl-dot:hover { transform: scale(1.5); }
   .tl-more { font-size: 9px; color: var(--ink-muted); }
-  .legend-list li { cursor: help; }
   .axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--ink-muted); margin-top: 2px; }
   .legend-inline { font-size: 12px; color: var(--ink-muted); margin: 8px 0 0; display: flex; align-items: center; gap: 6px; }
   .dot-key { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-2); display: inline-block; margin-left: 8px; }
@@ -686,8 +675,8 @@ _STYLE = """
     .tiles { grid-template-columns: minmax(0, 1fr); }
   }
   @media (max-width: 420px) {
-    .donut-wrap { flex-direction: column; align-items: stretch; }
-    .donut { align-self: center; }
+    .breakdown { flex-direction: column; align-items: stretch; }
+    .donut { align-self: center; position: static; width: 170px; height: 170px; }
   }
 """
 
