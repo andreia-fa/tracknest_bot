@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import re
 import signal
 from types import SimpleNamespace
@@ -17,7 +18,6 @@ from bot.name_match import clean_name, match_known, name_key
 from bot.parser import TypedPurchase, parse_line, parse_purchase
 from bot.profile_guess import guess_profile
 from bot.receipt_lines import is_code_only
-from bot.tunnel import CloudflareTunnel
 from config import BOT_TOKEN
 from db import crud, expenses, metrics, receipt_queue, settings, shopping_list
 from db.database import init_db
@@ -2580,14 +2580,13 @@ async def handle_stock_add_all(update: Update, context: ContextTypes.DEFAULT_TYP
 async def dashboard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /dashboard — send a button that opens the web dashboard inside Telegram.
 
-    The URL comes from bot_data["tunnel"] (see main()) — it's whatever
-    Cloudflare Tunnel is currently up, fetched fresh each time rather than
-    cached anywhere, since it changes on every restart.
+    The URL is DASHBOARD_URL, a fixed private address set by the deploy
+    (Tailscale, see DEPLOY_STRATEGY.md) — only devices signed in to the
+    household's tailnet can open it.
     """
-    tunnel: CloudflareTunnel | None = context.bot_data.get("tunnel")
-    url = await tunnel.get_url() if tunnel else None
+    url = os.environ.get("DASHBOARD_URL", "").rstrip("/")
     if not url:
-        await update.message.reply_text("Dashboard is still starting up — try again in a few seconds.")
+        await update.message.reply_text("The dashboard isn't set up on this server.")
         return
     # Telegram Desktop opens mini apps in a small fixed popup; the browser
     # button gives the same (password-protected) page a full-size window.
@@ -2673,13 +2672,12 @@ async def handle_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def main():
-    """Initialise the database schema and run the bot, dashboard, and tunnel together.
+    """Initialise the database schema and run the bot and the dashboard together.
 
-    Long polling, the /dashboard aiohttp server, and the Cloudflare Tunnel
-    subprocess all share this one process/event loop — run_polling()'s usual
-    blocking convenience method can't be combined with a second server, so
-    this manages the bot's start/stop lifecycle manually instead (same thing
-    run_polling() does internally, just alongside the other two).
+    Long polling and the /dashboard aiohttp server share this one event
+    loop — run_polling()'s usual blocking convenience method can't be
+    combined with a second server, so this manages the bot's start/stop
+    lifecycle manually instead (same thing run_polling() does internally).
     """
     init_db()
     app = (
@@ -2748,20 +2746,17 @@ async def main():
     else:
         logger.warning("JobQueue unavailable (missing job-queue extra) — proactive alerts disabled.")
 
-    tunnel = CloudflareTunnel(local_port=_DASHBOARD_PORT)
-    app.bot_data["tunnel"] = tunnel
-
     web_runner = web.AppRunner(dashboard.build_app())
     await web_runner.setup()
-    # Bound to localhost only — cloudflared (same container, same network
-    # namespace) is the only thing ever allowed to reach this directly.
-    site = web.TCPSite(web_runner, "127.0.0.1", _DASHBOARD_PORT)
+    # Localhost unless DASHBOARD_HOST says otherwise: in production the
+    # container listens on 0.0.0.0, but Docker publishes the port on the
+    # VM's 127.0.0.1 only, where `tailscale serve` picks it up.
+    site = web.TCPSite(web_runner, os.environ.get("DASHBOARD_HOST", "127.0.0.1"), _DASHBOARD_PORT)
 
     async with app:
         await app.start()
         await app.updater.start_polling(timeout=30)
         await site.start()
-        await tunnel.start()
         logger.info("TrackNest bot starting.")
 
         stop_event = asyncio.Event()
@@ -2771,7 +2766,6 @@ async def main():
         try:
             await stop_event.wait()
         finally:
-            await tunnel.stop()
             await web_runner.cleanup()
             await app.updater.stop()
             await app.stop()

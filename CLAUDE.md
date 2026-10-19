@@ -21,11 +21,9 @@ tracknest/
   bot/receipt.py       — receipt photo parsing via local Ollama vision model
                          (only ever called by receipt_worker.py now)
   bot/dashboard.py     — password-gated aiohttp web app (month-at-a-glance
-                         dashboard), served over a Cloudflare Tunnel — see
-                         bot/tunnel.py and the /dashboard command
+                         dashboard), served privately over Tailscale — see
+                         DEPLOY_STRATEGY.md and the /dashboard command
   bot/auth.py          — dashboard password check + signed session cookie
-  bot/tunnel.py        — manages the cloudflared subprocess, exposes the
-                         current https://*.trycloudflare.com URL
   config/__init__.py   — reads env vars (BOT_TOKEN, DB_PATH); DASHBOARD_PASSWORD
                          is read in bot/auth.py instead, so the local worker
                          never needs it
@@ -53,6 +51,8 @@ requirements.txt             — python-telegram-bot, pytest, ruff
 | BOT_TOKEN          | yes      | —                  |
 | DB_PATH            | no       | data/tracknest.db  |
 | DASHBOARD_PASSWORD | yes      | —                  |
+| DASHBOARD_URL      | no       | — (/dashboard says it isn't set up) |
+| DASHBOARD_HOST     | no       | 127.0.0.1          |
 
 No `.env` file, in local dev or production. Export these as real shell
 environment variables (e.g. in `~/.bashrc`) for local dev; in production it's
@@ -87,13 +87,12 @@ by day, mix, categories, stores, price watch, what to buy, needs-attention.
 Euro amounts are shown (the percentages-only first version was rejected as
 uninformative). All numbers come from `db/metrics.py`; the dashboard only
 renders them, and escapes every name (receipt text is untrusted input).
-`bot/main.py`'s entrypoint runs three things in one asyncio event loop: PTB's
-long-poller, an aiohttp server (`bot/dashboard.py`, bound to `127.0.0.1` only)
-and a `cloudflared` subprocess (`bot/tunnel.py`) that tunnels it out to a
-`https://*.trycloudflare.com` URL — no domain, no inbound port opened on the
-VM. That URL changes on every restart; the `/dashboard` command always fetches
-the current one fresh (`context.bot_data["tunnel"]`) rather than caching a
-stale link. Auth is `bot/auth.py`'s signed session cookie (HMAC, stdlib only,
+`bot/main.py`'s entrypoint runs PTB's long-poller and an aiohttp server
+(`bot/dashboard.py`, on `DASHBOARD_HOST`, default `127.0.0.1`) in one asyncio
+event loop. In production `tailscale serve` on the VM host gives it a fixed
+private HTTPS address (tailnet devices only, no public port), which the
+deploy passes in as `DASHBOARD_URL` for `/dashboard` to hand out — see
+`DEPLOY_STRATEGY.md`. Auth is `bot/auth.py`'s signed session cookie (HMAC, stdlib only,
 no session store) checked against `DASHBOARD_PASSWORD` — not real user
 accounts, one shared household password.
 

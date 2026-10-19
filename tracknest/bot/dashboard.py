@@ -1,8 +1,8 @@
 """Password-gated web dashboard: the month at a glance, live from the DB.
 
 Runs as an aiohttp app inside the same process as the Telegram bot (see
-bot/main.py's run loop), reachable only via the Cloudflare Tunnel URL
-bot/tunnel.py hands out — never a port published on the host. Session auth
+bot/main.py's run loop), reachable only over Tailscale (`tailscale serve`
+on the VM, HTTPS, tailnet devices only) — never a public port. Session auth
 is bot.auth's signed cookie, not a server-side session store.
 
 Every number comes from db.metrics — this module only arranges it — so a
@@ -833,7 +833,7 @@ async def handle_login_post(request: web.Request) -> web.Response:
     response = web.Response(text=render_dashboard_html(build_dashboard_data()), content_type="text/html")
     response.set_cookie(
         _SESSION_COOKIE, auth.create_session_token(),
-        max_age=auth.SESSION_TTL_SECONDS, httponly=True, samesite="Lax",
+        max_age=auth.SESSION_TTL_SECONDS, httponly=True, secure=True, samesite="Lax",
     )
     return response
 

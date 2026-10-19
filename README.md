@@ -61,8 +61,8 @@ It helps you manage home inventory and track household expenses through a conver
   purchase, or by hand), each with a ↩️ Put back button. Receipt replies carry
   the same buttons for whatever that receipt cleared.
 - ✅ `/dashboard` – Password-gated web view (opens inside Telegram via a Web
-  App button, reached over a Cloudflare Tunnel — no domain, no inbound port
-  on the server) showing the month at a glance: spend + month-end forecast,
+  App button, at a fixed private Tailscale address — needs the Tailscale app
+  on the device, nothing is public) showing the month at a glance: spend + month-end forecast,
   shopping trips and average basket, budget vs. calendar pace, treats share,
   spend by day, spending mix, categories, stores, price watch, what to buy,
   what needs your answer, rising prices, and cost per day once it's
@@ -158,7 +158,6 @@ tracknest/
 │   ├── receipt.py            # receipt photo parsing via local Ollama vision model
 │   ├── dashboard.py          # password-gated web dashboard (aiohttp app)
 │   ├── auth.py                # dashboard password check + signed session cookie
-│   └── tunnel.py              # cloudflared subprocess management for /dashboard
 ├── config/
 │   └── __init__.py          # loads environment variables
 ├── db/

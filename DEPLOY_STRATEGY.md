@@ -2,32 +2,36 @@
 
 Decided 2026-08-09. This is a living doc — update it as decisions firm up or change.
 
-## ✅ RESOLVED (2026-09-23) — /dashboard reachable over HTTPS with no domain, no open port
+## ✅ RESOLVED (2026-10-19) — /dashboard on a fixed private Tailscale address
 
-The Web App button needed for `/dashboard` to open inside Telegram requires a
-real HTTPS URL. Two blockers ruled out the obvious paths: this project owns no
-domain (Let's Encrypt needs one), and the VM's firewall situation was still an
-open item from 2026-08-09 — Oracle's cloud-level security list (separate from
-the VM's own OS, only changeable via their console, not SSH) almost certainly
-blocks inbound traffic beyond SSH by default, and was never resolved either
-way.
+The 2026-09-23 Cloudflare Quick Tunnel (below, superseded) broke in practice:
+its `*.trycloudflare.com` name changed on every deploy, and the home router's
+DNS answered "doesn't exist" for a fresh one ("server IP address could not be
+found"). Quick Tunnels are meant for testing, with no uptime guarantee.
 
-**Chose Cloudflare Tunnel (Quick Tunnel mode, no account) over both.**
-`cloudflared` runs as a subprocess inside the same container (`bot/tunnel.py`)
-and connects *outward* to Cloudflare, which terminates the public HTTPS side —
-so neither blocker applies: no domain needed, no inbound port ever opened.
-The tradeoff is the assigned `https://*.trycloudflare.com` URL changes on
-every container restart. Accepted deliberately — nobody bookmarks this URL,
-the `/dashboard` command always hands out today's live one via a fresh button,
-so a changing URL costs nothing here. A domain (~€10/year) would buy a stable
-link instead, if that ever matters — explicitly declined for now (no budget
-for it, see `[[feedback_avoid_local_lockin]]`-adjacent "no paid APIs" rule
-elsewhere in this project).
+**Now: Tailscale (free personal plan), installed on the VM host.** The
+container publishes the dashboard on the VM's `127.0.0.1:8080` only
+(`-p 127.0.0.1:8080:8080`, `DASHBOARD_HOST=0.0.0.0` inside the container), and
+`tailscale serve --bg http://127.0.0.1:8080` gives it HTTPS at the VM's fixed
+`https://tracknest.<tailnet>.ts.net` name. Only devices signed in to the
+household's tailnet can reach it — nothing public, no inbound port, no domain.
+The password gate stays on as a second layer. The CD job reads the name from
+`tailscale status --json` into `DASHBOARD_URL`, which `/dashboard` hands out.
 
-No `docker run` change was needed for this — `cloudflared` and the aiohttp
-server (`bot/dashboard.py`, bound to `127.0.0.1` only) share the container's
-network namespace, so the tunnel reaches the dashboard over localhost without
-any port being published to the host at all.
+Trade-off (user's choice, 2026-10-19): every device that opens the dashboard
+needs the Tailscale app, signed in. Sharing a dashboard link with someone
+outside the tailnet isn't possible; a domain (~€1–10/year) on a named
+Cloudflare Tunnel would be the route if that's ever needed.
+
+One-time VM setup: `curl -fsSL https://tailscale.com/install.sh | sh`, then
+`sudo tailscale up --hostname=tracknest` and approve the printed login link.
+
+## Superseded (2026-09-23 → 2026-10-19) — Cloudflare Quick Tunnel
+
+Chose a Cloudflare Quick Tunnel (`cloudflared` subprocess in the container,
+random `*.trycloudflare.com` URL per restart) because the project has no
+domain and the Oracle firewall blocks inbound traffic. Replaced by Tailscale,
+see above.
 
 ## ✅ RESOLVED (2026-09-15) — no `.env` anywhere, local or production
 
